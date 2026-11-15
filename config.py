@@ -223,7 +223,13 @@ config = {
         'launch_arguments': get_game_launch_arguments,
         'exe': 'Client-Win64-Shipping.exe',
         'hwnd_class': 'UnrealWindow',
-        'interaction': 'PostMessage',
+        # The framework renders this list as the "Choose Interaction" selector and
+        # persists the user's choice across restarts. Keep PostMessage first so the
+        # default stays the background mode. Pynput / PyDirect are foreground modes
+        # that send real OS-level input (mouse/keyboard events) instead of posting
+        # window messages, which Unreal Engine games usually honour more reliably.
+        # Foreground modes require the game window to stay in front and admin rights.
+        'interaction': ['PostMessage', 'Pynput', 'PyDirect'],
         'capture_method': ['WGC', 'WGC_HDR','BitBlt_RenderFull'],  # Windows版本支持的话, 优先使用WGC, 否则使用BitBlt_Full
         'check_hdr': False,
         'force_no_hdr': False,
