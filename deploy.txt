@@ -2,7 +2,7 @@ src
 Mon
 config.py
 main.py
-Monster.exe
+Monster-ww.exe
 readme
 README.md
 assets

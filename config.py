@@ -181,7 +181,7 @@ config = {
     'global_configs': [basic_config_option, key_config_option, char_config_option, monthly_card_config_option],
     # Team / character-code editor. Upstream unregistered this page (commits
     # 8979325e / aa543c43) but still ships its implementation, tests and i18n,
-    # so re-enable it here for the Monster build.
+    # so re-enable it here for the Monster-ww build.
     'custom_tabs': [
         ["src.gui.CharacterCodeTab", "CharacterCodeTab"],
     ],
@@ -250,12 +250,12 @@ config = {
     },
     'links': {
         'default': {
-            'github': 'https://github.com/ok-oldking/ok-wuthering-waves',
+            'github': 'https://github.com/3055909481/Monster-ww',
             'discord': 'https://discord.gg/vVyCatEBgA',
             'faq': 'https://ok-script.com/ok-ww/'
         },
         'zh_CN': {
-            'github': 'https://github.com/ok-oldking/ok-wuthering-waves',
+            'github': 'https://github.com/3055909481/Monster-ww',
             'discord': 'https://discord.gg/vVyCatEBgA',
             'faq': 'https://ok-script.com/ok-ww',
         },
@@ -272,11 +272,11 @@ config = {
     </p>
 """,
     'screenshots_folder': "screenshots",
-    'gui_title': 'Monster',  # Optional
+    'gui_title': 'Monster-ww',  # Optional
     'game_name': 'Wuthering Waves',
     # 'coco_feature_folder': get_path(__file__, 'assets/coco_feature'),  # required if using feature detection
-    'log_file': 'logs/Monster.log',  # Optional, auto rotating every day
-    'error_log_file': 'logs/Monster_error.log',
+    'log_file': 'logs/Monster-ww.log',  # Optional, auto rotating every day
+    'error_log_file': 'logs/Monster-ww_error.log',
     'launcher_log_file': 'logs/launcher.log',
     'launcher_error_log_file': 'logs/launcher_error.log',
     'version': version,

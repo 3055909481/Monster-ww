@@ -1,4 +1,4 @@
-# Manually triggered, portable-archive-only release for Monster.
+# Manually triggered, portable-archive-only release for Monster-ww.
 #
 # Compared with build.yml this workflow deliberately drops:
 #   * repository synchronisation (CNB / upstream update repos),
@@ -11,9 +11,9 @@
 #   pyappify-action always emits a launcher-only "<App>-win32.zip" next to the
 #   portable archive. That zip contains PyAppify's real Tauri launcher. In
 #   "updater" mode this workflow extracts it and puts it back into the archive
-#   as Monster/Monster.exe. The launcher reads data/apps/Monster/app.json,
+#   as Monster-ww/Monster-ww.exe. The launcher reads data/apps/Monster-ww/app.json,
 #   fetches only NEW release tags from pyappify.yml's git_url (our own fork),
-#   and checks them out into data/apps/Monster/working. Python, pip packages,
+#   and checks them out into data/apps/Monster-ww/working. Python, pip packages,
 #   bundled templates and configs/ are NOT tracked by that repository, so they
 #   survive every update. Only changed source files are transferred.
 #   In "cmd-only" mode a tiny icon-only exe wrapper is shipped instead, with no
@@ -21,14 +21,14 @@
 #
 #   BOTH entry points must run elevated. PyAppify v1.2.7 builds the Tauri
 #   launcher with UAC disabled (src-tauri/build.rs: "const UAC: bool = false"),
-#   so an unpatched Monster.exe runs pythonw at MEDIUM integrity while Wuthering
+#   so an unpatched Monster-ww.exe runs pythonw at MEDIUM integrity while Wuthering
 #   Waves runs at HIGH. UIPI then blocks PostMessage with Win32 error 5
-#   ("Access is denied") and the script cannot click or press keys. Monster.cmd
+#   ("Access is denied") and the script cannot click or press keys. Monster-ww.cmd
 #   already self-elevates via fltmc + RunAs; the "Require administrator for the
 #   updater launcher" step patches the extracted exe's RT_MANIFEST the same way.
 
-name: Monster Portable Release
-run-name: Monster portable · ${{ inputs.version || format('auto run {0}', github.run_number) }}
+name: Monster-ww Portable Release
+run-name: Monster-ww portable · ${{ inputs.version || format('auto run {0}', github.run_number) }}
 
 on:
   workflow_dispatch:
@@ -47,7 +47,7 @@ on:
           - 7z
           - zip
       launcher:
-        description: 'updater = ship PyAppify''s real launcher (incremental updates, configs/ preserved, needs network for updates). cmd-only = ship the offline icon-only wrapper around Monster.cmd, no update logic.'
+        description: 'updater = ship PyAppify''s real launcher (incremental updates, configs/ preserved, needs network for updates). cmd-only = ship the offline icon-only wrapper around Monster-ww.cmd, no update logic.'
         required: true
         default: 'updater'
         type: choice
@@ -99,8 +99,8 @@ jobs:
         run: |
           # PyAppify checks out the application repository with libgit2. Several
           # ok_templates/*.jpg names are ~170 characters; combined with the deep
-          # runner path (D:\a\<repo>\<repo>\pyappify_dist\Monster\data\apps\
-          # Monster\working\...) they exceed MAX_PATH (260) and libgit2 aborts
+          # runner path (D:\a\<repo>\<repo>\pyappify_dist\Monster-ww\data\apps\
+          # Monster-ww\working\...) they exceed MAX_PATH (260) and libgit2 aborts
           # the checkout with "path too long: ...; class=Filesystem (30)".
           # libgit2 honours core.longpaths; the registry flag helps Win32 APIs
           # that do not use the \\?\ prefix.
@@ -208,7 +208,7 @@ jobs:
             }
             Write-Host "Reusing existing tag $env:TAG on HEAD."
           } else {
-            & git tag -a "$env:TAG" -m "Monster portable release $env:TAG"
+            & git tag -a "$env:TAG" -m "Monster-ww portable release $env:TAG"
             if ($LASTEXITCODE -ne 0) { throw "git tag failed." }
             & git push origin "refs/tags/$env:TAG"
             if ($LASTEXITCODE -ne 0) { throw "git push tag failed." }
@@ -257,7 +257,7 @@ jobs:
           # tag gets pruned and setup dies with "Setup version ... is no longer
           # available". That is why upstream's update repos were replaced here.
           $lines = @(
-            'name: "Monster"'
+            'name: "Monster-ww"'
             'icon: "icons/icon.png"'
             # Only the build tag's history is bundled. Without this the archive
             # carried 1000+ inherited tags (~2.6 GB) and exceeded GitHub's
@@ -277,13 +277,13 @@ jobs:
           [System.IO.File]::WriteAllLines($target, $lines, (New-Object System.Text.UTF8Encoding($false)))
           Get-Content $target
 
-      # cmd-only mode: package_zip ships Monster.cmd instead of PyAppify's
+      # cmd-only mode: package_zip ships Monster-ww.cmd instead of PyAppify's
       # Tauri launcher. A .cmd has no icon and cannot be pinned nicely, so
-      # compile a tiny Win32 GUI wrapper that only invokes Monster.cmd. It has
+      # compile a tiny Win32 GUI wrapper that only invokes Monster-ww.cmd. It has
       # no update/network logic. Compile before packaging: it only needs tracked
       # assets, so a compiler problem fails fast instead of after a 20 min build.
       # updater mode skips this and uses the real launcher extracted later.
-      - name: Build offline icon-only Monster.exe wrapper
+      - name: Build offline icon-only Monster-ww.exe wrapper
         if: ${{ inputs.launcher == 'cmd-only' }}
         run: |
           $compiler = @(
@@ -299,10 +299,10 @@ jobs:
           }
           $outDir = Join-Path (Get-Location) 'launcher'
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-          $out = Join-Path $outDir 'Monster.exe'
+          $out = Join-Path $outDir 'Monster-ww.exe'
           & $compiler /nologo /target:winexe /optimize+ "/out:$out" "/win32icon:$icon" "/win32manifest:$manifest" $source
-          if ($LASTEXITCODE -ne 0) { throw "Compiling Monster.exe failed (exit $LASTEXITCODE)." }
-          if (-not (Test-Path $out)) { throw 'Compiler reported success but Monster.exe is missing.' }
+          if ($LASTEXITCODE -ne 0) { throw "Compiling Monster-ww.exe failed (exit $LASTEXITCODE)." }
+          if (-not (Test-Path $out)) { throw 'Compiler reported success but Monster-ww.exe is missing.' }
           Write-Host ("Built {0} ({1} bytes)" -f $out, (Get-Item -LiteralPath $out).Length)
 
       - name: Build portable archive (no installers, no online setup)
@@ -327,8 +327,8 @@ jobs:
               Write-Host "--- $($_.FullName) ---"
               Get-Content -LiteralPath $_.FullName -Tail 60 -ErrorAction SilentlyContinue
             }
-          $py = Join-Path (Get-Location) 'pyappify_dist/Monster/data/apps/Monster/python/python.exe'
-          $req = Join-Path (Get-Location) 'pyappify_dist/Monster/data/apps/Monster/working/requirements.txt'
+          $py = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/python/python.exe'
+          $req = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/working/requirements.txt'
           Write-Host "bundled python exists: $(Test-Path $py)"
           Write-Host "bundled requirements exists: $(Test-Path $req)"
           if ((Test-Path $py) -and (Test-Path $req)) {
@@ -342,12 +342,12 @@ jobs:
       # the package. Extract the REAL Tauri launcher and stage it at the same
       # path the wrapper uses, so the embed step below is mode-agnostic. This
       # exe is the "startup + update program" from the original project: it
-      # reads data/apps/Monster/app.json, fetches new tags from git_url and
+      # reads data/apps/Monster-ww/app.json, fetches new tags from git_url and
       # checks them out into working/, keeping configs/ and the Python env.
       - name: Extract PyAppify updater launcher
         if: ${{ inputs.launcher == 'updater' }}
         run: |
-          $zip = Join-Path (Get-Location) 'pyappify_dist/Monster-win32.zip'
+          $zip = Join-Path (Get-Location) 'pyappify_dist/Monster-ww-win32.zip'
           if (-not (Test-Path $zip)) {
             Write-Host 'pyappify_dist contents:'
             Get-ChildItem -Path pyappify_dist -File | ForEach-Object { Write-Host $_.Name }
@@ -356,18 +356,18 @@ jobs:
           $extract = Join-Path (Get-Location) 'launcher_extract'
           New-Item -ItemType Directory -Path $extract -Force | Out-Null
           Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
-          $exe = Join-Path $extract 'Monster/Monster.exe'
-          if (-not (Test-Path $exe)) { throw "Monster/Monster.exe not found inside $zip." }
+          $exe = Join-Path $extract 'Monster-ww/Monster-ww.exe'
+          if (-not (Test-Path $exe)) { throw "Monster-ww/Monster-ww.exe not found inside $zip." }
           $size = (Get-Item -LiteralPath $exe).Length
           # The offline icon-only wrapper is ~100 KB; the Tauri launcher is MBs.
           if ($size -lt 1MB) { throw "Extracted launcher is only $size bytes; expected PyAppify's Tauri binary." }
           $outDir = Join-Path (Get-Location) 'launcher'
           New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-          Copy-Item -LiteralPath $exe -Destination (Join-Path $outDir 'Monster.exe') -Force
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $outDir 'Monster-ww.exe') -Force
           Write-Host ("Using PyAppify updater launcher ({0} bytes)" -f $size)
 
       # PyAppify's embedded manifest has no trustInfo, i.e. asInvoker. Launching
-      # Monster.exe directly then leaves pythonw at MEDIUM integrity and every
+      # Monster-ww.exe directly then leaves pythonw at MEDIUM integrity and every
       # PostMessage to the elevated game window fails with Win32 error 5 (UIPI).
       # Patch RT_MANIFEST/1 so double-clicking the launcher requests elevation
       # once, and the whole process tree (launcher -> pythonw) is HIGH.
@@ -379,23 +379,23 @@ jobs:
           foreach ($asset in @($script, $manifest)) {
             if (-not (Test-Path $asset)) { throw "Launcher asset missing: $asset" }
           }
-          $exe = Join-Path (Get-Location) 'launcher/Monster.exe'
+          $exe = Join-Path (Get-Location) 'launcher/Monster-ww.exe'
           if (-not (Test-Path $exe)) { throw 'Extracted updater launcher is missing.' }
           # ctypes calls the Win32 resource-update APIs directly; no compiler
           # is needed. The runner has python on PATH, and the Python that
           # pyappify-action just bundled is a guaranteed fallback.
           $py = (Get-Command python -ErrorAction SilentlyContinue).Source
           if (-not $py) {
-            $py = Join-Path (Get-Location) 'pyappify_dist/Monster/data/apps/Monster/python/python.exe'
+            $py = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/python/python.exe'
           }
           if (-not $py -or -not (Test-Path $py)) { throw 'No Python interpreter is available to patch the launcher manifest.' }
           & $py $script $exe $manifest
           if ($LASTEXITCODE -ne 0) { throw "Patching the launcher manifest failed (exit $LASTEXITCODE)." }
           Write-Host ("Patched launcher requires administrator ({0} bytes)" -f (Get-Item -LiteralPath $exe).Length)
 
-      # Whichever mode was selected, launcher/Monster.exe now holds the binary
-      # to place next to Monster.cmd inside Monster/.
-      - name: Embed Monster.exe in the portable archive
+      # Whichever mode was selected, launcher/Monster-ww.exe now holds the binary
+      # to place next to Monster-ww.cmd inside Monster-ww/.
+      - name: Embed Monster-ww.exe in the portable archive
         env:
           PACKAGE_FORMAT: ${{ inputs.package_format }}
         run: |
@@ -405,28 +405,28 @@ jobs:
             if (Test-Path $fallback) { $seven = $fallback }
           }
           if (-not $seven) { throw '7-Zip is not available on this runner.' }
-          $archive = @(Get-ChildItem -Path pyappify_dist -Filter "Monster-win32-Portable-*.$env:PACKAGE_FORMAT" -File)
+          $archive = @(Get-ChildItem -Path pyappify_dist -Filter "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT" -File)
           if ($archive.Count -ne 1) { throw "Expected one portable archive, found $($archive.Count)." }
-          $exe = Join-Path (Get-Location) 'launcher/Monster.exe'
-          if (-not (Test-Path $exe)) { throw 'Compiled Monster.exe is missing.' }
+          $exe = Join-Path (Get-Location) 'launcher/Monster-ww.exe'
+          if (-not (Test-Path $exe)) { throw 'Compiled Monster-ww.exe is missing.' }
 
           # 7z stores whatever relative path it is given, so stage the exe at
-          # Monster/Monster.exe to match Monster/Monster.cmd inside the archive.
-          $stage = Join-Path (Get-Location) 'launcher_stage/Monster'
+          # Monster-ww/Monster-ww.exe to match Monster-ww/Monster-ww.cmd inside the archive.
+          $stage = Join-Path (Get-Location) 'launcher_stage/Monster-ww'
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'Monster.exe') -Force
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'Monster-ww.exe') -Force
           $root = Join-Path (Get-Location) 'launcher_stage'
           $target = $archive[0].FullName
           Push-Location $root
           try {
-            & $seven a "-t$env:PACKAGE_FORMAT" -y $target 'Monster/Monster.exe'
-            if ($LASTEXITCODE -ne 0) { throw "Adding Monster.exe to the archive failed (exit $LASTEXITCODE)." }
+            & $seven a "-t$env:PACKAGE_FORMAT" -y $target 'Monster-ww/Monster-ww.exe'
+            if ($LASTEXITCODE -ne 0) { throw "Adding Monster-ww.exe to the archive failed (exit $LASTEXITCODE)." }
           } finally { Pop-Location }
           $listing = (& $seven l $target | Out-String)
-          if ($listing -notmatch 'Monster\\Monster\.exe' -or $listing -notmatch 'Monster\\Monster\.cmd') {
-            throw 'The archive must contain both Monster.exe and Monster.cmd.'
+          if ($listing -notmatch 'Monster-ww\\Monster-ww\.exe' -or $listing -notmatch 'Monster-ww\\Monster-ww\.cmd') {
+            throw 'The archive must contain both Monster-ww.exe and Monster-ww.cmd.'
           }
-          Write-Host "Embedded Monster.exe next to Monster.cmd in $($archive[0].Name)."
+          Write-Host "Embedded Monster-ww.exe next to Monster-ww.cmd in $($archive[0].Name)."
 
       # Cheap post-mortem helper: shows which tags libgit2 kept in the bare
       # repository it cloned, useful when PyAppify rejects a setup version.
@@ -435,7 +435,7 @@ jobs:
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          $repo = Join-Path (Get-Location) 'pyappify_dist/Monster/data/apps/Monster/repo'
+          $repo = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/repo'
           if (Test-Path $repo) {
             try {
               $remoteUrl = (& git "--git-dir=$repo" remote get-url origin 2>$null | Out-String).Trim()
@@ -462,7 +462,7 @@ jobs:
           CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
         run: |
           New-Item -ItemType Directory -Path release_assets -Force | Out-Null
-          $pattern = "Monster-win32-Portable-*.$env:PACKAGE_FORMAT"
+          $pattern = "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT"
           $files = @(Get-ChildItem -Path pyappify_dist -Filter $pattern -File)
           if ($files.Count -eq 0) {
             Write-Host 'pyappify_dist contents:'
@@ -507,22 +507,22 @@ jobs:
           if ($env:LAUNCHER_MODE -eq 'updater') {
             $launcherSummary = @(
               ''
-              'Launcher: PyAppify Tauri updater (Monster/Monster.exe).'
+              'Launcher: PyAppify Tauri updater (Monster-ww/Monster-ww.exe).'
               "Update source (pyappify.yml git_url): $repoUrl"
-              'Updates fetch only the new tag''s changed git objects into data/apps/Monster/working; the Python env, pip packages, templates and configs/ are not tracked there and survive intact.'
+              'Updates fetch only the new tag''s changed git objects into data/apps/Monster-ww/working; the Python env, pip packages, templates and configs/ are not tracked there and survive intact.'
               'The first download is the full archive; later updates transfer only changed source files.'
-              'Monster/Monster.cmd remains available for command-line or fully offline starts (it sets PYAPPIFY_UPGRADEABLE=0).'
+              'Monster-ww/Monster-ww.cmd remains available for command-line or fully offline starts (it sets PYAPPIFY_UPGRADEABLE=0).'
             )
           } else {
             $launcherSummary = @(
               ''
-              'Launcher: offline icon-only wrapper around Monster.cmd, no update or network logic.'
+              'Launcher: offline icon-only wrapper around Monster-ww.cmd, no update or network logic.'
               'Re-run this workflow with launcher=updater to get incremental updates.'
             )
           }
 
           $summary = @(
-            "## Monster portable package ($env:LAUNCHER_MODE)"
+            "## Monster-ww portable package ($env:LAUNCHER_MODE)"
             ''
             "- Archive: $($files[0].Name) ($sizeMB MB)"
             "- SHA256: $hash"
@@ -530,15 +530,15 @@ jobs:
             "- Update source: $repoUrl"
             ''
             'Only the portable archive is published; PyAppify''s launcher-only zip, hash file and any installer are discarded.'
-            'Extract (7z needs 7-Zip or Windows 11 23H2+) and double-click Monster/Monster.exe; Monster/Monster.cmd remains available for command-line arguments.'
+            'Extract (7z needs 7-Zip or Windows 11 23H2+) and double-click Monster-ww/Monster-ww.exe; Monster-ww/Monster-ww.cmd remains available for command-line arguments.'
             'Both entry points request administrator rights. The game runs elevated, so a non-elevated script gets Win32 error 5 (Access is denied) on every PostMessage and cannot click or press keys.'
-            'The app ships ok_templates/ images with long file names; extract with 7-Zip / WinRAR into a short folder (e.g. C:\Monster) if Windows Explorer reports a long-path error.'
+            'The app ships ok_templates/ images with long file names; extract with 7-Zip / WinRAR into a short folder (e.g. C:\Monster-ww) if Windows Explorer reports a long-path error.'
           ) + $launcherSummary
           if ($releaseReady -eq 'false') {
             $summary += @(
               ''
               "The archive is $([math]::Round($largest / 1GB, 2)) GiB, above GitHub's 2 GiB per-asset limit; the Release will use split 7z volumes instead."
-              'The complete single-file archive is always downloadable from this run''s Actions artifact (Monster-portable-<version>).'
+              'The complete single-file archive is always downloadable from this run''s Actions artifact (Monster-ww-portable-<version>).'
             )
           }
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
@@ -546,7 +546,7 @@ jobs:
       - name: Upload portable archive
         uses: actions/upload-artifact@v4
         with:
-          name: Monster-portable-${{ steps.version.outputs.number }}
+          name: Monster-ww-portable-${{ steps.version.outputs.number }}
           path: release_assets/*
           if-no-files-found: error
           retention-days: 30
@@ -554,7 +554,7 @@ jobs:
       # GitHub caps a single Release asset at 2 GiB, but the portable 7z is
       # ~2.2 GiB. A 7z volume set is simply the archive split by bytes: 7-Zip
       # reads .001/.002/... as one continuous stream, so users still extract
-      # the complete Monster folder in a single step. Verified locally with
+      # the complete Monster-ww folder in a single step. Verified locally with
       # 7z l / t / x against a multi-volume set with the original removed.
       - name: Split oversized 7z into release parts
         id: split
@@ -567,7 +567,7 @@ jobs:
           $source = @(Get-ChildItem -Path release_assets -Filter '*.7z' -File)
           if ($source.Count -ne 1) { throw "Expected exactly one 7z archive in release_assets, found $($source.Count)." }
           New-Item -ItemType Directory -Path release_parts -Force | Out-Null
-          $base = "Monster-win32-Portable-$env:VERSION_NUMBER.7z"
+          $base = "Monster-ww-win32-Portable-$env:VERSION_NUMBER.7z"
           $total = $source[0].Length
           $inStream = [System.IO.File]::OpenRead($source[0].FullName)
           $buffer = New-Object byte[] 4194304
@@ -609,7 +609,7 @@ jobs:
             '## GitHub Release split volumes'
             ''
             "The archive is $([math]::Round($total / 1GB, 2)) GiB, above GitHub's 2 GiB per-asset limit, so the Release uses $($parts.Count) split parts."
-            'Download every .7z.001 / .7z.002 / ... part into one folder and open the .001 part with 7-Zip; it extracts the full Monster folder in one step.'
+            'Download every .7z.001 / .7z.002 / ... part into one folder and open the .001 part with 7-Zip; it extracts the full Monster-ww folder in one step.'
             'The complete single-file archive is also available as this run''s Actions artifact.'
           )
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $notes
@@ -643,7 +643,7 @@ jobs:
           VERSION_NUMBER: ${{ steps.version.outputs.number }}
         run: |
           Write-Host "::warning::No Release-safe asset was produced; only the Actions artifact was published."
-          Write-Host "Download the full archive from this run's artifact: Monster-portable-$env:VERSION_NUMBER (retention: 30 days)."
+          Write-Host "Download the full archive from this run's artifact: Monster-ww-portable-$env:VERSION_NUMBER (retention: 30 days)."
           Write-Host 'Use the default 7z format so an oversized archive can be split into sub-2-GiB Release parts.'
 
       - name: Publish GitHub release
@@ -651,28 +651,28 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Monster ${{ steps.version.outputs.number }} (portable)
+          name: Monster-ww ${{ steps.version.outputs.number }} (portable)
           draft: false
           prerelease: false
           # Chinese text stays in YAML (GitHub handles UTF-8 here); the two
           # expressions keep the notes in sync with the selected mode / source.
           body: |
-            ### Monster 便携版
+            ### Monster-ww 便携版
 
-            解压后双击 `Monster/Monster.exe` 启动；需要命令行参数或完全离线启动时可运行 `Monster/Monster.cmd`。
+            解压后双击 `Monster-ww/Monster-ww.exe` 启动；需要命令行参数或完全离线启动时可运行 `Monster-ww/Monster-ww.cmd`。
 
-            - **必须以管理员权限运行**：`Monster.exe` 已内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权；`Monster.cmd` 通过 `fltmc` 自提权。鸣潮客户端本身是管理员权限，脚本若以普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应
+            - **必须以管理员权限运行**：`Monster-ww.exe` 已内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权；`Monster-ww.cmd` 通过 `fltmc` 自提权。鸣潮客户端本身是管理员权限，脚本若以普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应
             - 本次启动器模式：`${{ inputs.launcher }}`
             - 更新源（`pyappify.yml` 的 `git_url`）：`${{ inputs.update_repo || format('{0}/{1}.git', github.server_url, github.repository) }}`
-            - `updater` 模式：`Monster.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster/working`；Python 环境、pip 依赖、模板资源和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
-            - `cmd-only` 模式：`Monster.exe` 只是带图标和管理员权限清单的轻量包装器，不含更新或联网逻辑
-            - `Monster.cmd` 设置了 `PYAPPIFY_UPGRADEABLE=0`，适合命令行参数或完全离线启动
+            - `updater` 模式：`Monster-ww.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster-ww/working`；Python 环境、pip 依赖、模板资源和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
+            - `cmd-only` 模式：`Monster-ww.exe` 只是带图标和管理员权限清单的轻量包装器，不含更新或联网逻辑
+            - `Monster-ww.cmd` 设置了 `PYAPPIFY_UPGRADEABLE=0`，适合命令行参数或完全离线启动
             - 仅提供便携压缩包，不含安装程序，也不含在线安装包
             - 默认 7z 格式，请用 7-Zip 或 Windows 11 23H2+ 解压
             - 若资产为 `.7z.001`、`.7z.002` 等分卷：把全部分卷下载到同一目录，用 7-Zip 打开第一个（`.001`）解压即可，无需手动合并
             - Python 环境与依赖已随包提供，首次运行无需联网下载
-            - 包内 `ok_templates/` 含长文件名，建议用 7-Zip / WinRAR 解压到较短目录（如 `C:\Monster`）
-            - 由手动触发的 `Monster Portable Release` 工作流构建
+            - 包内 `ok_templates/` 含长文件名，建议用 7-Zip / WinRAR 解压到较短目录（如 `C:\Monster-ww`）
+            - 由手动触发的 `Monster-ww Portable Release` 工作流构建
           files: ${{ steps.release.outputs.pattern }}
         env:
           GITHUB_TOKEN: ${{ github.token }}

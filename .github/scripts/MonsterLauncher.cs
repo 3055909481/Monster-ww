@@ -1,14 +1,14 @@
-// Thin Win32 launcher for the Monster portable package.
+// Thin Win32 launcher for the Monster-ww portable package.
 //
 // It intentionally contains NO update, git, profile or Python-environment
-// logic. All of that belongs to PyAppify's generated Monster.cmd, which this
+// logic. All of that belongs to PyAppify's generated Monster-ww.cmd, which this
 // exe simply invokes with a hidden console. The exe exists only to give the
 // portable build an icon, a taskbar identity and a UAC manifest; it never
 // contacts the network and needs no runtime beyond the .NET Framework 4.x
 // that ships with Windows.
 //
 // Built by portable-release.yml with:
-//   csc.exe /nologo /target:winexe /optimize+ /out:Monster.exe
+//   csc.exe /nologo /target:winexe /optimize+ /out:Monster-ww.exe
 //           /win32icon:icons/launcher.ico
 //           /win32manifest:.github/scripts/MonsterLauncher.manifest.xml
 //           .github/scripts/MonsterLauncher.cs
@@ -19,10 +19,10 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("Monster")]
-[assembly: AssemblyDescription("Monster portable launcher")]
-[assembly: AssemblyCompany("Monster")]
-[assembly: AssemblyProduct("Monster")]
+[assembly: AssemblyTitle("Monster-ww")]
+[assembly: AssemblyDescription("Monster-ww portable launcher")]
+[assembly: AssemblyCompany("Monster-ww")]
+[assembly: AssemblyProduct("Monster-ww")]
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyFileVersion("1.0.0.0")]
 
@@ -35,11 +35,11 @@ internal static class MonsterLauncher
     private static int Main(string[] args)
     {
         string folder = AppDomain.CurrentDomain.BaseDirectory;
-        string entry = Path.Combine(folder, "Monster.cmd");
+        string entry = Path.Combine(folder, "Monster-ww.cmd");
 
         if (!File.Exists(entry))
         {
-            ShowError("Monster.cmd was not found next to Monster.exe." + Environment.NewLine + folder);
+            ShowError("Monster-ww.cmd was not found next to Monster-ww.exe." + Environment.NewLine + folder);
             return 1;
         }
 
@@ -60,7 +60,7 @@ internal static class MonsterLauncher
         start.Arguments = "/d /c \"" + command + "\"";
         start.WorkingDirectory = folder;
         start.UseShellExecute = false;
-        start.CreateNoWindow = true;   // no console flash; Monster.cmd detaches pythonw.exe
+        start.CreateNoWindow = true;   // no console flash; Monster-ww.cmd detaches pythonw.exe
         start.WindowStyle = ProcessWindowStyle.Hidden;
 
         try
@@ -74,7 +74,7 @@ internal static class MonsterLauncher
         }
         catch (Exception error)
         {
-            ShowError("Failed to start Monster.cmd:" + Environment.NewLine + error.Message);
+            ShowError("Failed to start Monster-ww.cmd:" + Environment.NewLine + error.Message);
             return 1;
         }
     }
@@ -83,6 +83,6 @@ internal static class MonsterLauncher
     {
         // MB_ICONERROR; avoids a System.Windows.Forms reference so the build
         // only needs the framework assemblies csc references by default.
-        MessageBoxW(IntPtr.Zero, message, "Monster", 0x00000010u);
+        MessageBoxW(IntPtr.Zero, message, "Monster-ww", 0x00000010u);
     }
 }

@@ -3,13 +3,13 @@
 PyAppify v1.2.7 builds its Tauri launcher with UAC disabled
 (src-tauri/build.rs: "const UAC: bool = false"). Its embedded manifest only
 declares the Common-Controls dependency, i.e. asInvoker. Double-clicking that
-Monster.exe runs the launcher AND the pythonw.exe it spawns at MEDIUM integrity,
+Monster-ww.exe runs the launcher AND the pythonw.exe it spawns at MEDIUM integrity,
 while Wuthering Waves runs at HIGH integrity (anti-cheat). Windows UIPI then
 blocks win32gui.PostMessage with Win32 error 5 "Access is denied":
 
     PostMessage error <hwnd>: (5, 'PostMessage', 'Access is denied.')
 
-Monster.cmd self-elevates via fltmc + RunAs, which is why cmd-only packages
+Monster-ww.cmd self-elevates via fltmc + RunAs, which is why cmd-only packages
 never hit this. This script replaces the RT_MANIFEST / ID 1 / lang 1033 resource
 in-place with the Win32 resource-update APIs (no compiler needed) and verifies
 the result by parsing the PE resource directory.

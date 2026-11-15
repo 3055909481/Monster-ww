@@ -30,7 +30,7 @@ cryptography==50.0.2
     # via pyjwt
 dulwich==1.2.21
     # via
-    #   Monster (pyproject.toml)
+    #   Monster-ww (pyproject.toml)
     #   pyappify
 h11==0.16.0
     # via
@@ -52,7 +52,7 @@ jsonschema-specifications==2025.9.1
 mcp==2.3.0
     # via
     #   Mon-script
-    #   Monster (pyproject.toml)
+    #   Monster-ww (pyproject.toml)
 mcp-types==2.3.0
     # via mcp
 mouse==0.7.1
@@ -65,19 +65,19 @@ numpy==2.5.2
 ok-pyside-minimal==6.12.0.post2
     # via
     #   Mon-script
-    #   Monster (pyproject.toml)
+    #   Monster-ww (pyproject.toml)
 Mon-script[ocr,qt] @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.5b7-mon1.tar.gz
-    # via Monster (pyproject.toml)
+    # via Monster-ww (pyproject.toml)
 onnxocr-ppocrv5==0.0.23
     # via
     #   Mon-script
-    #   Monster (pyproject.toml)
+    #   Monster-ww (pyproject.toml)
 opencv-python==5.0.0.93
-    # via Monster (pyproject.toml)
+    # via Monster-ww (pyproject.toml)
 opentelemetry-api==1.45.2
     # via mcp
 openvino==2026.3.0
-    # via Monster (pyproject.toml)
+    # via Monster-ww (pyproject.toml)
 openvino-telemetry==2025.2.0
     # via openvino
 pillow==12.3.0
@@ -89,7 +89,7 @@ psutil==7.2.2
 pyappify[standalone]==1.0.20
     # via
     #   Mon-script
-    #   Monster (pyproject.toml)
+    #   Monster-ww (pyproject.toml)
 pycaw==20240210
     # via Mon-script
 pyclipper==1.4.0
