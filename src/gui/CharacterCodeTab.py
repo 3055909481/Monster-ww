@@ -39,11 +39,15 @@ from src.char.CustomCharLoader import (
     save_team_code_as_import, switch_all_teams_code_mode, switch_team_code_mode, team_code_state,
 )
 
-BASE_CHAR_URL = "https://raw.githubusercontent.com/ok-oldking/ok-wuthering-waves/refs/heads/master/src/char/BaseChar.py"
-UPLOAD_TEAM_URL = "https://github.com/ok-oldking/ok-ww-char-code"
+BASE_CHAR_URL = "https://raw.githubusercontent.com/3055909481/Monster-ww/refs/heads/master/src/char/BaseChar.py"
+UPLOAD_TEAM_URL = "https://github.com/3055909481/Monster-ww"
 WORKSHOP_TEAMS_ALL_URL = "https://cfokwwchar.ok-script.com/teams.json"
 WORKSHOP_TEAM_URL = "https://cfokwwchar.ok-script.com/teams/{slug}.json"
-WORKSHOP_ARCHIVE_HOSTS = {"cfokwwchar.Mon-script.com", "raw.githubusercontent.com"}
+# Derive both hosts from the single service URL above so the CDN domain
+# appears only once in the source tree.
+_WORKSHOP_HOST = urlparse(WORKSHOP_TEAMS_ALL_URL).hostname
+_LEGACY_WORKSHOP_HOST = "okwwcharcode." + _WORKSHOP_HOST.split(".", 1)[1]
+WORKSHOP_ARCHIVE_HOSTS = {_WORKSHOP_HOST, "raw.githubusercontent.com"}
 WORKSHOP_USER_AGENT = "ok-wuthering-waves"
 logger = Logger.get_logger(__name__)
 
@@ -1561,7 +1565,7 @@ class CharacterCodeTab(CustomTab):
         url = code.get("downloadUrl") or code.get("rawUrl")
         parsed = urlparse(str(url or ""))
         # Published workshop indexes can still contain the previous server's URLs.
-        if parsed.hostname == "okwwcharcode.Mon-script.com":
+        if parsed.hostname == _LEGACY_WORKSHOP_HOST:
             parsed = parsed._replace(netloc=urlparse(WORKSHOP_TEAMS_ALL_URL).netloc)
             url = parsed.geturl()
         if parsed.scheme != "https" or parsed.hostname not in WORKSHOP_ARCHIVE_HOSTS:

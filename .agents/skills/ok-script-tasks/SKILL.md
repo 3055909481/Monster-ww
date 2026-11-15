@@ -35,7 +35,7 @@ When more detail is needed, read:
 4. Implement `run()` with small, observable steps.
    Use `self.log_info`, `self.log_warning`, `self.info_set`, `self.wait_until`, `self.next_frame`, `self.sleep`, `self.click_relative`, `self.find_one`, `self.wait_click_feature`, `self.ocr`, and `self.wait_ocr` instead of ad hoc polling or direct device calls.
 5. Register the task according to the project style:
-   built-in config list, `ok_tasks` custom task folder, or imported script package.
+   built-in config list, `Monster-ww_scripts` custom task folder, or imported script package.
 6. If the project uses gettext catalogs, sync task translations with `$ok-script-i18n`.
 7. Validate using the library's development/reload workflow through MCP and the
    project's relevant offline checks. For registered tasks, wait for a successful

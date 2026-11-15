@@ -252,12 +252,12 @@ config = {
         'default': {
             'github': 'https://github.com/3055909481/Monster-ww',
             'discord': 'https://discord.gg/vVyCatEBgA',
-            'faq': 'https://ok-script.com/ok-ww/'
+            'faq': 'https://github.com/3055909481/Monster-ww'
         },
         'zh_CN': {
             'github': 'https://github.com/3055909481/Monster-ww',
             'discord': 'https://discord.gg/vVyCatEBgA',
-            'faq': 'https://ok-script.com/ok-ww',
+            'faq': 'https://github.com/3055909481/Monster-ww',
         },
     },
     'about': """
@@ -305,7 +305,7 @@ config = {
     ], 'scene': ["src.scene.WWScene", "WWScene"],
     'update_pyappify': {
         'to_version': '1.2.3',
-        'zip_url': 'https://github.com/ok-oldking/ok-wuthering-waves/releases/download/v3.5.30/ok-ww-win32.zip',
+        'zip_url': 'https://github.com/3055909481/Monster-ww/releases/latest',
         'sha256': '447207edbfb6944beb994347048e155df99775eb18c87dcae54dda125071c94a',
     }
 

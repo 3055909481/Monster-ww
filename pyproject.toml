@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "dulwich==1.2.21",
     "mcp==2.3.0",
-    # Own fork of upstream ok-script: distribution Mon-script, Python package Mon.
+    # Forked framework: distribution Mon-script, Python package Mon.
     # Use the GitHub TAG ARCHIVE, not git+https: PyAppify strips Git from the
     # pip child process PATH (clear_python_envs), so a git URL cannot be cloned
     # during portable packaging. An https tarball needs no git executable.

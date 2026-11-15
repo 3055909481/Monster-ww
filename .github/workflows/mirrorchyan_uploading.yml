@@ -19,5 +19,5 @@ jobs:
 
           github_token: ${{ secrets.GITHUB_TOKEN }}
           owner: ok-oldking
-          repo: ok-wuthering-waves
+          repo: Monster-ww
           upload_token: ${{ secrets.MirrorChyanUploadToken }}

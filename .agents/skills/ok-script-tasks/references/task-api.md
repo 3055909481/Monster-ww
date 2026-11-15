@@ -112,7 +112,7 @@ For custom task scripts, enable custom tasks if the app supports it:
 config["custom_tasks"] = True
 ```
 
-Then place a `.py` file in `ok_tasks/`. The loader parses top-level classes and instantiates the first subclass of `BaseTask` or `TriggerTask`.
+Then place a `.py` file in `Monster-ww_scripts/`. The loader parses top-level classes and instantiates the first subclass of `BaseTask` or `TriggerTask`.
 
 Headless helpers can run by index, name, class, or instance:
 

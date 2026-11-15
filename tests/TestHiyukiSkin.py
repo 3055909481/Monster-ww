@@ -19,7 +19,7 @@ class TestHiyukiSkin(TaskTestCase):
     def test_both_portraits_resolve_to_canonical_hiyuki(self):
         for image in ('hiyuki1.png', 'hiyuki3.png', 'hiyuki-skin.png', 'hiyuki-skin-inactive.png'):
             with self.subTest(image=image):
-                self.set_image(str(ROOT / 'ok_templates' / image))
+                self.set_image(str(ROOT / 'templates_src' / image))
                 char = get_char_by_pos(self.task, self.task.get_box_by_name('box_char_1'), 0, None)
                 self.assertIsInstance(char, Hiyuki)
                 self.assertEqual(char.char_name, Labels.char_hiyuki)
@@ -27,7 +27,7 @@ class TestHiyukiSkin(TaskTestCase):
                 self.assertEqual(char.ring_index, Elements.ICE)
 
     def test_cached_hiyuki_recognizes_new_skin(self):
-        self.set_image(str(ROOT / 'ok_templates/hiyuki-skin.png'))
+        self.set_image(str(ROOT / 'templates_src/hiyuki-skin.png'))
         old = Hiyuki(self.task, 0, char_name=Labels.char_hiyuki, confidence=0.99,
                      ring_index=Elements.ICE)
         char = get_char_by_pos(self.task, self.task.get_box_by_name('box_char_1'), 0, old)
@@ -38,7 +38,7 @@ class TestHiyukiSkin(TaskTestCase):
 
     def test_new_portrait_does_not_match_other_occupied_slots(self):
         for image in ('hiyuki-skin.png', 'hiyuki-skin-inactive.png'):
-            self.set_image(str(ROOT / 'ok_templates' / image))
+            self.set_image(str(ROOT / 'templates_src' / image))
             for slot in (2, 3):
                 with self.subTest(image=image, slot=slot):
                     self.assertIsNone(self.task.find_one(

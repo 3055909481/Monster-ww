@@ -85,17 +85,17 @@ You can also run a specific test directly:
 
 ## 添加识别素材 / Adding Recognition Assets
 
-`ok_templates/` 中的源图片和标注直接保存在本仓库中。
+`templates_src/` 中的源图片和标注直接保存在本仓库中。
 
-Source images and annotations in `ok_templates/` are tracked directly in this repository.
+Source images and annotations in `templates_src/` are tracked directly in this repository.
 
 1. 如需添加识别素材，在 Monster-ww 的「模板」标签页中添加图片并完成标注。
 2. 点击「保存」，保存标注并生成识别素材。
-3. 检查生成的修改，将相关的 `ok_templates/` 源图片、标注和 `assets/` 识别素材一起提交。
+3. 检查生成的修改，将相关的 `templates_src/` 源图片、标注和 `assets/` 识别素材一起提交。
 
 1. To add recognition assets, add the images and markup in Monster-ww's Template tab.
 2. Click Save to save the annotations and generate the recognition assets.
-3. Review the generated changes and include the relevant `ok_templates/` source images, annotations, and `assets/` recognition assets in the same PR.
+3. Review the generated changes and include the relevant `templates_src/` source images, annotations, and `assets/` recognition assets in the same PR.
 
 ## 提交流程 / Submission Flow
 

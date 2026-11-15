@@ -519,7 +519,7 @@ class HsinEnhancedTemplateTest(unittest.TestCase):
                 frame_processor=lambda image: binarize_for_matching(image, 220)))
 
     def test_existing_prompt_controls_readiness_without_marking_cast_success(self):
-        frame = cv2.imread('ok_templates/xigelika.png')
+        frame = cv2.imread('templates_src/xigelika.png')
         self.assertIsNotNone(frame)
         task = self.detector_task(frame)
         self.assertTrue(task.find_e_forte())

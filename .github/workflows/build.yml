@@ -19,7 +19,7 @@ env:
   PYTHONIOENCODING: 'UTF-8'
   PYTHONLEGACYWINDOWSSTDIO: 'UTF-8'
   BUILD_EXE: 'true'
-#  USE_RELEASE: 'https://api.github.com/repos/ok-oldking/ok-wuthering-waves/releases/tags/v3.5.15'
+#  USE_RELEASE: 'https://api.github.com/repos/3055909481/Monster-ww/releases/tags/v18.0.17'
 
 jobs:
   validate:
@@ -158,9 +158,9 @@ jobs:
         uses: ok-oldking/partial-sync-repo@master
         with:
           repos: |
-            https://cnb:${{ secrets.CNB_TOKEN }}@cnb.cool/ok-oldking/ok-wuthering-waves.git
-            https://cnb:${{ secrets.CNB_TOKEN }}@cnb.cool/ok-oldking/ok-ww-update2.git
-            https://ok-oldking:${{ secrets.OK_GH }}@github.com/ok-oldking/ok-ww-update
+            https://cnb:${{ secrets.CNB_TOKEN }}@cnb.cool/3055909481/Monster-ww.git
+            https://cnb:${{ secrets.CNB_TOKEN }}@cnb.cool/3055909481/Monster-ww-update2.git
+            https://3055909481:${{ secrets.OK_GH }}@github.com/3055909481/Monster-ww-update
           sync_list: 'deploy.txt'
           tag: ${{ github.ref_name }}
           gitignore_file: '.update_repo_gitignore'
@@ -250,7 +250,7 @@ jobs:
         with:
           api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
           organization-id: '639bc6dd-9623-43cd-ac75-50a445898012'
-          project-slug: 'ok-wuthering-waves'
+          project-slug: 'Monster-ww'
           signing-policy-slug: 'release-signing'
           artifact-configuration-slug: 'single-exe'
           github-artifact-id: '${{ steps.upload_executable.outputs.artifact-id }}'
@@ -334,7 +334,7 @@ jobs:
         with:
           api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
           organization-id: '639bc6dd-9623-43cd-ac75-50a445898012'
-          project-slug: 'ok-wuthering-waves'
+          project-slug: 'Monster-ww'
           signing-policy-slug: 'release-signing'
           artifact-configuration-slug: 'setupexe'
           github-artifact-id: '${{ steps.upload_china_installer.outputs.artifact-id }}'
@@ -424,7 +424,7 @@ jobs:
             ### 更新日志 ${{ needs.synchronize.outputs.start_tag }} -> ${{ needs.synchronize.outputs.end_tag }}:
               ${{ needs.synchronize.outputs.changes }}
             ### Install from source
-              See the [source installation guide](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/docs/development/contributing.md).
+              See the [source installation guide](https://github.com/3055909481/Monster-ww/blob/master/docs/development/contributing.md).
           draft: false
           prerelease: ${{ needs.synchronize.outputs.is_release != 'true' }}
           files: pyappify_dist/*

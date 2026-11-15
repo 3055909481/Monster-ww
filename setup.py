@@ -36,10 +36,10 @@ extensions = find_pyx_packages(base_dir)
 setuptools.setup(
     name="Monster-ww",
     version="0.0.1",
-    author="ok-oldking",
-    author_email="firedcto@gmail.com",
-    description="Automation with Computer Vision for Python",
-    url="https://github.com/3055909481/Mon-script",
+    author="Monster-ww maintainers",
+    author_email="",
+    description="Monster-ww automation runtime",
+    url="https://github.com/3055909481/Monster-ww",
     packages=setuptools.find_packages(),
     include_package_data=True,
     classifiers=[

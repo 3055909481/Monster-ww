@@ -45,7 +45,7 @@ class TestKey(TaskTestCase):
             self.task.key_config[key] = 't'
 
         self.task.set_key = set_key
-        self.set_image('ok_templates/25.png')
+        self.set_image('templates_src/25.png')
         self.task.load_hotkey(force=True)
 
         self.assertEqual(set_key_calls, [])

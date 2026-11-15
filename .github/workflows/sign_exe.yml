@@ -44,7 +44,7 @@ jobs:
         with:
           api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
           organization-id: '639bc6dd-9623-43cd-ac75-50a445898012'
-          project-slug: 'ok-wuthering-waves'
+          project-slug: 'Monster-ww'
           signing-policy-slug: 'release-signing'
           artifact-configuration-slug: "single-exe"
           github-artifact-id: '${{ steps.upload-unsigned-artifact.outputs.artifact-id }}'

@@ -16,15 +16,15 @@ SPEC.loader.exec_module(extract_issue_log)
 
 class ExtractIssueLogTest(unittest.TestCase):
     def test_accepts_expected_github_attachment_url(self):
-        url = "https://github.com/user-attachments/files/30814966/OK-WW-log.zip"
+        url = "https://github.com/user-attachments/files/30814966/Monster-ww-log.zip"
         self.assertEqual(url, extract_issue_log.validate_attachment_url(url))
 
     def test_rejects_non_github_and_lookalike_urls(self):
         invalid_urls = [
-            "http://github.com/user-attachments/files/30814966/OK-WW-log.zip",
-            "https://example.com/user-attachments/files/30814966/OK-WW-log.zip",
-            "https://github.com.evil.test/user-attachments/files/30814966/OK-WW-log.zip",
-            "https://github.com/user-attachments/files/not-an-id/OK-WW-log.zip",
+            "http://github.com/user-attachments/files/30814966/Monster-ww-log.zip",
+            "https://example.com/user-attachments/files/30814966/Monster-ww-log.zip",
+            "https://github.com.evil.test/user-attachments/files/30814966/Monster-ww-log.zip",
+            "https://github.com/user-attachments/files/not-an-id/Monster-ww-log.zip",
             "https://github.com/user-attachments/files/30814966/other.zip",
         ]
         for url in invalid_urls:
@@ -37,20 +37,20 @@ class ExtractIssueLogTest(unittest.TestCase):
             archive_path = root / "archive.zip"
             output_root = root / "output"
             with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr("OK-WW-log/logs/ok-script.log", "diagnostic log\n")
+                archive.writestr("Monster-ww-log/logs/Monster-ww-runtime.log", "diagnostic log\n")
                 archive.writestr(
-                    "OK-WW-log/screenshots/task/first.png",
+                    "Monster-ww-log/screenshots/task/first.png",
                     b"\x89PNG\r\n\x1a\nimage data",
                 )
                 archive.writestr(
-                    "OK-WW-log/screenshots/second.jpg", b"\xff\xd8\xffimage data"
+                    "Monster-ww-log/screenshots/second.jpg", b"\xff\xd8\xffimage data"
                 )
-                archive.writestr("OK-WW-log/screenshots/ignored.txt", "not an image")
-                archive.writestr("OK-WW-log/notes.txt", "must not be extracted")
+                archive.writestr("Monster-ww-log/screenshots/ignored.txt", "not an image")
+                archive.writestr("Monster-ww-log/notes.txt", "must not be extracted")
 
             log, screenshots = extract_issue_log.extract_archive(archive_path, output_root)
 
-            self.assertEqual(output_root / "logs" / "ok-script.log", log)
+            self.assertEqual(output_root / "logs" / "Monster-ww-runtime.log", log)
             self.assertEqual("diagnostic log\n", log.read_text())
             self.assertEqual(
                 {
@@ -80,7 +80,7 @@ class ExtractIssueLogTest(unittest.TestCase):
 
     def test_parses_last_version_profile_pyappify_and_resolution(self):
         with tempfile.TemporaryDirectory() as directory:
-            log_path = Path(directory) / "ok-script.log"
+            log_path = Path(directory) / "Monster-ww-runtime.log"
             log_path.write_text(
                 "\n".join(
                     [
@@ -91,7 +91,7 @@ class ExtractIssueLogTest(unittest.TestCase):
                         "{'width': 1280, 'height': 720, 'full_path': 'private'}",
                         "pyappify app_version:*v3.5.27*, app_profile:China, "
                         "pyappify_version:*1*.*1*.*9* pyappify_upgradeable:True, "
-                        "pyappify_executable:D:\\ok-ww\\ok-ww.exe",
+                        "pyappify_executable:D:\\Monster-ww\\Monster-ww.exe",
                         "DeviceManager:update_pc_device pc_device: "
                         "{'width': *1920*, 'height': *1080*, "
                         "'full_path': 'E:\\\\Games\\\\private.exe'}",
@@ -116,7 +116,7 @@ class ExtractIssueLogTest(unittest.TestCase):
 
     def test_normalizes_unavailable_metadata_to_null(self):
         with tempfile.TemporaryDirectory() as directory:
-            log_path = Path(directory) / "ok-script.log"
+            log_path = Path(directory) / "Monster-ww-runtime.log"
             log_path.write_text(
                 "pyappify app_version:None, app_profile:null, "
                 "pyappify_version:*None* pyappify_upgradeable:False\n",
@@ -136,7 +136,7 @@ class ExtractIssueLogTest(unittest.TestCase):
             archive_path = root / "archive.zip"
             output_root = root / "output"
             with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr("logs/ok-script.log", "log")
+                archive.writestr("logs/Monster-ww-runtime.log", "log")
                 for index in range(10):
                     info = zipfile.ZipInfo(f"screenshots/{index:02}.png")
                     info.date_time = (2026, 1, index + 1, 0, 0, 0)
@@ -161,10 +161,10 @@ class ExtractIssueLogTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "archive.zip"
             with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("ok-script.log", "wrong location")
+                archive.writestr("Monster-ww-runtime.log", "wrong location")
 
             with self.assertRaisesRegex(
-                extract_issue_log.UnsafeArchiveError, "logs/ok-script.log"
+                extract_issue_log.UnsafeArchiveError, "logs/Monster-ww-runtime.log"
             ):
                 extract_issue_log.extract_archive(
                     archive_path, Path(directory) / "output"
@@ -174,11 +174,11 @@ class ExtractIssueLogTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "archive.zip"
             with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("a/logs/ok-script.log", "first")
-                archive.writestr("b/logs/OK-SCRIPT.LOG", "second")
+                archive.writestr("a/logs/Monster-ww-runtime.log", "first")
+                archive.writestr("b/logs/MONSTER-WW-RUNTIME.LOG", "second")
 
             with self.assertRaisesRegex(
-                extract_issue_log.UnsafeArchiveError, "multiple logs/ok-script.log"
+                extract_issue_log.UnsafeArchiveError, "multiple logs/Monster-ww-runtime.log"
             ):
                 extract_issue_log.extract_archive(
                     archive_path, Path(directory) / "output"
@@ -188,7 +188,7 @@ class ExtractIssueLogTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "archive.zip"
             with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("logs/ok-script.log", "log")
+                archive.writestr("logs/Monster-ww-runtime.log", "log")
                 archive.writestr("screenshots/../escape.png", b"\x89PNG\r\n\x1a\n")
 
             with self.assertRaisesRegex(
@@ -202,7 +202,7 @@ class ExtractIssueLogTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             archive_path = Path(directory) / "archive.zip"
             with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("logs/ok-script.log", "log")
+                archive.writestr("logs/Monster-ww-runtime.log", "log")
                 archive.writestr("screenshots/not-really.png", "plain text")
 
             with self.assertRaisesRegex(
@@ -224,7 +224,7 @@ class ExtractIssueLogTest(unittest.TestCase):
             ):
                 with self.assertRaises(extract_issue_log.UnsafeArchiveError):
                     extract_issue_log.download_and_extract(
-                        "https://github.com/user-attachments/files/30814966/OK-WW-log.zip",
+                        "https://github.com/user-attachments/files/30814966/Monster-ww-log.zip",
                         output_root,
                     )
             self.assertFalse(output_root.exists())

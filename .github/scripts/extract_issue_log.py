@@ -25,7 +25,7 @@ MAX_SCREENSHOTS_TO_ANALYZE = 8
 MAX_COMPRESSION_RATIO = 250
 DOWNLOAD_TIMEOUT_SECONDS = 300
 OUTPUT_ROOT = Path(".gh-aw/issue-logs")
-LOG_OUTPUT_PATH = OUTPUT_ROOT / "logs" / "ok-script.log"
+LOG_OUTPUT_PATH = OUTPUT_ROOT / "logs" / "Monster-ww-runtime.log"
 SCREENSHOTS_OUTPUT_PATH = OUTPUT_ROOT / "screenshots"
 DIAGNOSTICS_OUTPUT_PATH = OUTPUT_ROOT / "diagnostics.json"
 SCREENSHOTS_MANIFEST_OUTPUT_PATH = OUTPUT_ROOT / "screenshots-manifest.json"
@@ -64,7 +64,7 @@ def validate_attachment_url(url: str) -> str:
         or len(parts) != 5
         or parts[:3] != ("/", "user-attachments", "files")
         or not parts[3].isdigit()
-        or path.name.casefold() != "ok-ww-log.zip"
+        or path.name.casefold() != "monster-ww-log.zip"
         or parsed.query
         or parsed.fragment
         or parsed.username
@@ -72,7 +72,7 @@ def validate_attachment_url(url: str) -> str:
         or parsed.port is not None
     ):
         raise UnsafeArchiveError(
-            "expected an https://github.com/user-attachments/files/<id>/OK-WW-log.zip URL"
+            "expected an https://github.com/user-attachments/files/<id>/Monster-ww-log.zip URL"
         )
     return url
 
@@ -80,7 +80,7 @@ def validate_attachment_url(url: str) -> str:
 def download_archive(url: str, destination: Path) -> None:
     request = urllib.request.Request(
         validate_attachment_url(url),
-        headers={"User-Agent": "OK-WW-issue-triage/1.0"},
+        headers={"User-Agent": "Monster-ww-issue-triage/1.0"},
     )
     deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
     with urllib.request.urlopen(request, timeout=10) as response, destination.open("wb") as output:
@@ -130,15 +130,15 @@ def select_log(archive: zipfile.ZipFile) -> tuple[zipfile.ZipInfo, tuple[str, ..
         for info in archive.infolist()
         if not info.is_dir()
         and tuple(part.casefold() for part in normalized_parts(info)[-2:])
-        == ("logs", "ok-script.log")
+        == ("logs", "monster-ww-runtime.log")
     ]
     if not matches:
-        raise UnsafeArchiveError("archive does not contain logs/ok-script.log")
+        raise UnsafeArchiveError("archive does not contain logs/Monster-ww-runtime.log")
     if len(matches) > 1:
-        raise UnsafeArchiveError("archive contains multiple logs/ok-script.log files")
+        raise UnsafeArchiveError("archive contains multiple logs/Monster-ww-runtime.log files")
 
     log, parts = matches[0]
-    validate_member(log, "logs/ok-script.log", MAX_LOG_BYTES)
+    validate_member(log, "logs/Monster-ww-runtime.log", MAX_LOG_BYTES)
     return log, parts[:-2]
 
 
@@ -248,15 +248,15 @@ def extract_archive(
         screenshots = select_screenshots(archive, archive_prefix)
         output_root.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
-            prefix="ok-ww-extracted-", dir=output_root.parent
+            prefix="monster-ww-extracted-", dir=output_root.parent
         ) as staging_directory:
             staging_root = Path(staging_directory)
-            staged_log = staging_root / "logs" / "ok-script.log"
+            staged_log = staging_root / "logs" / "Monster-ww-runtime.log"
             staged_log.parent.mkdir(parents=True)
             with archive.open(log) as source, staged_log.open("wb") as output:
                 shutil.copyfileobj(source, output, length=1024 * 1024)
             if staged_log.stat().st_size != log.file_size:
-                raise UnsafeArchiveError("logs/ok-script.log size does not match ZIP metadata")
+                raise UnsafeArchiveError("logs/Monster-ww-runtime.log size does not match ZIP metadata")
             diagnostics = parse_log_diagnostics(staged_log)
             (staging_root / "diagnostics.json").write_text(
                 json.dumps(diagnostics, ensure_ascii=False, indent=2) + "\n",
@@ -301,7 +301,7 @@ def extract_archive(
                 shutil.rmtree(output_root)
             staging_root.replace(output_root)
 
-    log_output = output_root / "logs" / "ok-script.log"
+    log_output = output_root / "logs" / "Monster-ww-runtime.log"
     screenshot_outputs = [
         output_root / "screenshots" / Path(*relative_parts)
         for _, relative_parts in screenshots
@@ -315,15 +315,15 @@ def download_and_extract(
     # Never leave a previous issue's evidence available to a later triage run.
     if output_root.exists():
         shutil.rmtree(output_root)
-    with tempfile.TemporaryDirectory(prefix="ok-ww-issue-log-") as directory:
-        archive_path = Path(directory) / "OK-WW-log.zip"
+    with tempfile.TemporaryDirectory(prefix="monster-ww-issue-log-") as directory:
+        archive_path = Path(directory) / "Monster-ww-log.zip"
         download_archive(url, archive_path)
         return extract_archive(archive_path, output_root)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("url", help="GitHub OK-WW-log.zip issue attachment URL")
+    parser.add_argument("url", help="GitHub Monster-ww-log.zip issue attachment URL")
     args = parser.parse_args()
 
     try:

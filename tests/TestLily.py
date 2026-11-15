@@ -29,7 +29,7 @@ class TestLily(TaskTestCase):
     def test_portrait_registration_and_other_slot_negative(self):
         for image in ('lily-start.png', 'lily-heavy.png', 'lily-slumberland.png', 'lily-validation.png'):
             with self.subTest(image=image):
-                self.set_image(str(ROOT / 'ok_templates' / image))
+                self.set_image(str(ROOT / 'templates_src' / image))
                 char = get_char_by_pos(self.task, self.task.get_box_by_name('box_char_1'), 0, None)
                 self.assertIsInstance(char, Lily)
                 self.assertEqual(char.char_type, CharType.HEALER)
@@ -48,7 +48,7 @@ class TestLily(TaskTestCase):
             ('lily-slumberland.png', False, False, True, False),
         ):
             with self.subTest(image=image):
-                self.set_image(str(ROOT / 'ok_templates' / image))
+                self.set_image(str(ROOT / 'templates_src' / image))
                 self.assertEqual(bool(char.is_mouse_forte_full()), full)
                 self.assertEqual(char.heavy_in_progress(), channel)
                 self.assertEqual(char.in_slumberland(), slumberland)
@@ -56,7 +56,7 @@ class TestLily(TaskTestCase):
                 self.assertEqual(bool(char.liberation_available()), liberation)
 
     def test_slumberland_hands_off_without_cancelling_it(self):
-        self.set_image(str(ROOT / 'ok_templates/lily-slumberland.png'))
+        self.set_image(str(ROOT / 'templates_src/lily-slumberland.png'))
         char = self.lily()
         with (
             patch.object(char, 'click_echo') as echo,
@@ -71,12 +71,12 @@ class TestLily(TaskTestCase):
         switch.assert_called_once()
 
     def test_optional_abyss_character_info_from_screenshot(self):
-        self.set_image(str(ROOT / 'ok_templates/lily-help.png'))
+        self.set_image(str(ROOT / 'templates_src/lily-help.png'))
         with patch.object(self.task, 'click') as click, patch.object(self.task, 'next_frame'):
             self.assertTrue(self.task.dismiss_abyss_character_info())
         click.assert_called_once_with(0.942, 0.058, after_sleep=0.5)
 
-        self.set_image(str(ROOT / 'ok_templates/lily-start.png'))
+        self.set_image(str(ROOT / 'templates_src/lily-start.png'))
         with patch.object(self.task, 'click') as click:
             self.assertFalse(self.task.dismiss_abyss_character_info())
         click.assert_not_called()

@@ -20,7 +20,7 @@ class TestWorld(TaskTestCase):
         self.assertIsNotNone(in_world)
 
     def test_monthly_card(self):
-        self.set_image('ok_templates/monthly_card.png')
+        self.set_image('templates_src/monthly_card.png')
         self.assertTrue(bool(self.task.find_monthly_card()))
 
         in_world = self.task.in_world()

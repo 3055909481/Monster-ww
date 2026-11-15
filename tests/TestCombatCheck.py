@@ -30,7 +30,7 @@ class TestCombatCheck(TaskTestCase):
     def test_4k_combat_check(self):
         self.task.ensure_levitator = return_true
         self.task.do_reset_to_false()
-        self.set_image("ok_templates/57d8d801-BitBlt_True_3840x2160_1759986393607.1733_original.png")
+        self.set_image("templates_src/57d8d801-BitBlt_True_3840x2160_1759986393607.1733_original.png")
         in_combat = self.task.in_combat()
         # self.task.screenshot('in_combat4k.png', show_box=True)
         # time.sleep(1)
@@ -44,7 +44,7 @@ class TestCombatCheck(TaskTestCase):
         self.assertFalse(in_combat)
 
     def test_target_box_short(self):
-        self.set_image('ok_templates/25.png')
+        self.set_image('templates_src/25.png')
         self.task.chars = [BaseChar(self.task, 0)]
         self.task.chars[0].is_current_char = True
         self.assertFalse(self.task.has_target())

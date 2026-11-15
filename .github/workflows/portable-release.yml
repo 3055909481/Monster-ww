@@ -98,7 +98,7 @@ jobs:
       - name: Enable Windows long paths for the packaging checkout
         run: |
           # PyAppify checks out the application repository with libgit2. Several
-          # ok_templates/*.jpg names are ~170 characters; combined with the deep
+          # templates_src/*.jpg names are ~170 characters; combined with the deep
           # runner path (D:\a\<repo>\<repo>\pyappify_dist\Monster-ww\data\apps\
           # Monster-ww\working\...) they exceed MAX_PATH (260) and libgit2 aborts
           # the checkout with "path too long: ...; class=Filesystem (30)".
@@ -241,7 +241,7 @@ jobs:
         run: |
           # git_url is the UPDATE SOURCE. By default it is this fork: every tag
           # created above is one of OUR OWN published releases, so the launcher
-          # never talks to ok-oldking's update repositories. keep_releases: 1
+          # never talks to upstream update repositories. keep_releases: 1
           # makes both the bundled clone and later fetches shallow, so an update
           # transfers only the new tag's changed objects, not the Python env.
           $repoUrl = $env:APP_REPO_URL
@@ -531,8 +531,9 @@ jobs:
             ''
             'Only the portable archive is published; PyAppify''s launcher-only zip, hash file and any installer are discarded.'
             'Extract (7z needs 7-Zip or Windows 11 23H2+) and double-click Monster-ww/Monster-ww.exe; Monster-ww/Monster-ww.cmd remains available for command-line arguments.'
+            'Custom scripts use Monster-ww_scripts/ and Monster-ww_drop/; runtime logs use Monster-ww-runtime.log.'
             'Both entry points request administrator rights. The game runs elevated, so a non-elevated script gets Win32 error 5 (Access is denied) on every PostMessage and cannot click or press keys.'
-            'The app ships ok_templates/ images with long file names; extract with 7-Zip / WinRAR into a short folder (e.g. C:\Monster-ww) if Windows Explorer reports a long-path error.'
+            'The app ships templates_src/ images with long file names; extract with 7-Zip / WinRAR into a short folder (e.g. C:\Monster-ww) if Windows Explorer reports a long-path error.'
           ) + $launcherSummary
           if ($releaseReady -eq 'false') {
             $summary += @(
@@ -671,7 +672,7 @@ jobs:
             - 默认 7z 格式，请用 7-Zip 或 Windows 11 23H2+ 解压
             - 若资产为 `.7z.001`、`.7z.002` 等分卷：把全部分卷下载到同一目录，用 7-Zip 打开第一个（`.001`）解压即可，无需手动合并
             - Python 环境与依赖已随包提供，首次运行无需联网下载
-            - 包内 `ok_templates/` 含长文件名，建议用 7-Zip / WinRAR 解压到较短目录（如 `C:\Monster-ww`）
+            - 包内 `templates_src/` 含长文件名，建议用 7-Zip / WinRAR 解压到较短目录（如 `C:\Monster-ww`）
             - 由手动触发的 `Monster-ww Portable Release` 工作流构建
           files: ${{ steps.release.outputs.pattern }}
         env:

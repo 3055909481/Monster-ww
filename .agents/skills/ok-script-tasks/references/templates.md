@@ -130,9 +130,9 @@ config = {
 }
 ```
 
-## Custom ok_tasks Script
+## Custom Monster-ww_scripts Script
 
-For an app with `custom_tasks` enabled, create one top-level task class in `ok_tasks/my_task.py`:
+For an app with `custom_tasks` enabled, create one top-level task class in `Monster-ww_scripts/my_task.py`:
 
 ```python
 from Mon import BaseTask

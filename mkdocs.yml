@@ -1,8 +1,8 @@
 site_name: Monster-ww
 site_description: Documentation for the Monster-ww Wuthering Waves automation tool
-site_url: https://ok-script.com/ok-ww/
-repo_url: https://github.com/ok-oldking/ok-wuthering-waves
-repo_name: ok-oldking/ok-wuthering-waves
+site_url: https://github.com/3055909481/Monster-ww/
+repo_url: https://github.com/3055909481/Monster-ww
+repo_name: 3055909481/Monster-ww
 edit_uri: edit/master/docs/
 
 theme:

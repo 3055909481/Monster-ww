@@ -29,7 +29,7 @@ def make_task(frame):
 
 class TestAutoPickTask(unittest.TestCase):
     def source_frame(self):
-        frame = cv2.imread('ok_templates/62.png')
+        frame = cv2.imread('templates_src/62.png')
         self.assertIsNotNone(frame)
         return frame
 

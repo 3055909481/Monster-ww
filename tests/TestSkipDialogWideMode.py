@@ -19,8 +19,8 @@ class TestSkipDialogWideMode(TaskTestCase):
 
     def test_finds_skip_dialog_icons_with_frame_processor(self):
         cases = (
-            ('ok_templates/47.png', 'skip_dialog_new'),
-            ('ok_templates/53.png', 'skip_dialog'),
+            ('templates_src/47.png', 'skip_dialog_new'),
+            ('templates_src/53.png', 'skip_dialog'),
         )
 
         for image, expected_feature in cases:
@@ -70,7 +70,7 @@ class TestSkipDialogWideMode(TaskTestCase):
                     self.assertIsNone(self.task.find_skip())
 
     def test_finds_and_clicks_wide_mode_confirm_dialog(self):
-        self.set_image('ok_templates/19.png')
+        self.set_image('templates_src/19.png')
         self.task.click = Mock()
         self.task.sleep = Mock()
 
@@ -97,8 +97,8 @@ class TestSkipDialogWideMode(TaskTestCase):
 
     def test_finds_story_summary_buttons_in_both_ui_sizes(self):
         for image, feature in (
-                ('ok_templates/10.png', 'skip_quest_confirm'),
-                ('ok_templates/9.png', 'skip_quest_confirm_new')):
+                ('templates_src/10.png', 'skip_quest_confirm'),
+                ('templates_src/9.png', 'skip_quest_confirm_new')):
             with self.subTest(image=image):
                 self.set_image(image)
                 with patch.object(self.task, 'click') as click, patch.object(self.task, 'sleep'):
