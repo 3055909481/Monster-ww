@@ -18,7 +18,7 @@ profiles:
     # fetches new versions from here. Change this URL to point updates at another
     # repository you publish; that repo must carry the same version tags with
     # the same runtime-only files (main.py, config.py, src/, assets/, icons/,
-    # i18n/, requirements.txt, pyappify.yml, ...).
+    # i18n/, workshop_bundle/, requirements.txt, pyappify.yml, ...).
     # It must NOT point at upstream update repositories.
     git_url: "https://github.com/3055909481/Monster-ww.git"
     admin: true

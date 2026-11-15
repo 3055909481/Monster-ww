@@ -22,6 +22,11 @@
 #   and every release extends that slim history, so the launcher's depth-100
 #   shallow fetch can never pull the big screenshots back in through history.
 #
+# OFFLINE WORKSHOP:
+#   workshop_bundle/ carries the team index and every team ZIP, so the
+#   character-code tab reads local files instead of any external CDN.
+#   It is runtime data and therefore stays in the slim release tree.
+#
 # Updating WITHOUT re-downloading the whole archive:
 #   pyappify-action always emits a launcher-only "<App>-win32.zip" next to the
 #   portable archive. That zip contains PyAppify's real Tauri launcher. In
@@ -250,7 +255,7 @@ jobs:
 
               # Development-only trees. deploy.txt lists the runtime paths;
               # src/ and config.py only ever load assets/, icons/, i18n/,
-              # readme/ and the root python files.
+              # workshop_bundle/, readme/ and the root python files.
               $drop = @('templates_src', 'tests', 'docs', '.github', '.agents', '.codex')
               foreach ($dir in $drop) {
                 & git rm -r --cached -q --ignore-unmatch -- $dir
@@ -263,7 +268,8 @@ jobs:
                 'main.py', 'config.py', 'requirements.txt', 'pyappify.yml', 'deploy.txt',
                 'src/identity.py', 'src/gui/CharacterCodeTab.py',
                 'assets/echo_model/echo.onnx', 'assets/coco_annotations.json',
-                'icons/icon.png', 'i18n/zh_CN/LC_MESSAGES/ok.mo'
+                'icons/icon.png', 'i18n/zh_CN/LC_MESSAGES/ok.mo',
+                'workshop_bundle/teams.json'
               )
               foreach ($path in $mustHave) {
                 & git cat-file -e "${tree}:$path"
@@ -568,7 +574,8 @@ jobs:
           }
           $required = @(
             'main.py', 'config.py', 'requirements.txt', 'pyappify.yml',
-            'assets\echo_model\echo.onnx', 'icons\icon.png', 'src\identity.py'
+            'assets\echo_model\echo.onnx', 'icons\icon.png', 'src\identity.py',
+            'workshop_bundle\teams.json'
           )
           $missing = @($required | Where-Object {
             $listing -notmatch [regex]::Escape($prefix + $_)
@@ -691,7 +698,9 @@ jobs:
             ''
             'Only the portable archive is published; PyAppify''s launcher-only zip, hash file and any installer are discarded.'
             'Extract (7z needs 7-Zip or Windows 11 23H2+) and double-click Monster-ww/Monster-ww.exe; Monster-ww/Monster-ww.cmd remains available for command-line arguments.'
-            'Custom scripts use Monster-ww_scripts/ and Monster-ww_drop/; runtime logs use Monster-ww-runtime.log.'
+            'The team workshop is fully offline: 49 teams / 69 configurations ship in workshop_bundle/, so no CDN access is needed.'
+            'Custom scripts use the canonical ok_tasks/ and ok_import/ folders; legacy Monster-ww_scripts/ and Monster-ww_drop/ are migrated on first start (a conflicting file aborts startup instead of being overwritten). Runtime logs use Monster-ww-runtime.log.'
+            'The bundled framework is Mon-script 3.0.5b8-mon1 (upstream v3.8.1: CLI -t/-e tasks and smoother dropdowns / task filtering).'
             'Both entry points request administrator rights. The game runs elevated, so a non-elevated script gets Win32 error 5 (Access is denied) on every PostMessage and cannot click or press keys.'
             'Slim release tag: templates_src/, tests/, docs/ and build tooling are excluded, so the archive is ~205 MB (measured 205.6 MB) instead of 2.2 GiB while still supporting incremental updates.'
           ) + $launcherSummary
@@ -827,6 +836,9 @@ jobs:
             - 更新源（`pyappify.yml` 的 `git_url`）：`${{ inputs.update_repo || format('{0}/{1}.git', github.server_url, github.repository) }}`
             - `updater` 模式：`Monster-ww.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster-ww/working`；Python 环境、pip 依赖和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
             - **本版使用精简发布 tag**：发布 tag 只包含运行时文件，不含 `templates_src/`（894 MB 测试截图）、`tests/`、`docs/` 和构建脚本。PyAppify 会把 tag 同时打包成 git 对象库和 `working/` 检出目录，两份一起缩小，因此压缩包从原来的 2.2 GiB 降到约 205 MB（v22.0.22 实测 205.6 MB），且**增量更新能力完全保留**。运行时只读 `assets/`、`icons/`、`i18n/`、`src/` 和根目录的 Python 文件，功能不受影响
+            - **队伍创意工坊已完全离线**：`workshop_bundle/` 内置 49 个队伍、69 个共享配置（约 3 MB），浏览和导入工坊配置不再访问外部 CDN；也可继续用「导入队伍」导入本地 ZIP
+            - **自定义脚本目录改用框架规范名**：`ok_tasks/` 与 `ok_import/`。旧版 `Monster-ww_scripts/`、`Monster-ww_drop/` 会在首次启动时自动迁移；若同名文件内容不同，启动会中止并提示手动处理，绝不覆盖用户文件
+            - 内置框架升级到 Mon-script 3.0.5b8-mon1（对应上游 v3.8.1：修复 `-t`/`-e` 命令行任务不执行、下拉菜单与任务筛选更流畅）；`requirements.txt` 变化会触发 PyAppify 重装依赖，增量更新同样生效
             - 从旧版（`templates_src/` 尚在包内）通过 updater 升级时，切换 tag 会自动移除 `working/` 里的开发素材，`configs/`、日志和自定义脚本目录不受影响；但旧包已有的 git 对象库不会自动回收，想彻底减小磁盘占用建议下载本包全新解压
             - `cmd-only` 模式：`Monster-ww.exe` 只是带图标和管理员权限清单的轻量包装器，不含更新或联网逻辑
             - `Monster-ww.cmd` 设置了 `PYAPPIFY_UPGRADEABLE=0`，适合命令行参数或完全离线启动

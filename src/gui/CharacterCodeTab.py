@@ -1,20 +1,16 @@
 import difflib
 import json
 import re
-import tempfile
 from datetime import datetime
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QPointF, Qt, QSize, QUrl, Signal
 from PySide6.QtGui import (
     QColor, QDesktopServices, QFontMetricsF, QPainter, QPixmap, QTextCursor, QTextFormat, QTextLayout,
 )
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QAbstractItemView, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QSplitter, QStyle,
+    QApplication, QFileDialog, QAbstractItemView, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QSizePolicy, QSplitter, QStyle,
     QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QTextEdit,
     QVBoxLayout, QWidget,
 )
@@ -41,14 +37,10 @@ from src.char.CustomCharLoader import (
 
 BASE_CHAR_URL = "https://raw.githubusercontent.com/3055909481/Monster-ww/refs/heads/master/src/char/BaseChar.py"
 UPLOAD_TEAM_URL = "https://github.com/3055909481/Monster-ww"
-WORKSHOP_TEAMS_ALL_URL = "https://cfokwwchar.ok-script.com/teams.json"
-WORKSHOP_TEAM_URL = "https://cfokwwchar.ok-script.com/teams/{slug}.json"
-# Derive both hosts from the single service URL above so the CDN domain
-# appears only once in the source tree.
-_WORKSHOP_HOST = urlparse(WORKSHOP_TEAMS_ALL_URL).hostname
-_LEGACY_WORKSHOP_HOST = "okwwcharcode." + _WORKSHOP_HOST.split(".", 1)[1]
-WORKSHOP_ARCHIVE_HOSTS = {_WORKSHOP_HOST, "raw.githubusercontent.com"}
-WORKSHOP_USER_AGENT = "ok-wuthering-waves"
+WORKSHOP_BUNDLE_DIR = Path(__file__).resolve().parent.parent.parent / "workshop_bundle"
+WORKSHOP_INDEX = WORKSHOP_BUNDLE_DIR / "teams.json"
+WORKSHOP_CODES_DIR = WORKSHOP_BUNDLE_DIR / "codes"
+WORKSHOP_USER_AGENT = "Monster-ww"
 logger = Logger.get_logger(__name__)
 
 # The team list marks each team with a haloed dot, and both switch buttons wear the
@@ -161,6 +153,9 @@ def translate_ui(message):
             "Character:": "角色:",
             "{count} configurations": "{count} 个配置",
             "No shared code matches the search criteria.": "未找到符合搜索条件的配置。",
+            "The workshop bundle is unavailable.": "工坊数据不可用，请使用「导入队伍」导入本地 ZIP 文件。",
+            "The workshop bundle is invalid.": "工坊数据格式无效。",
+            "The workshop archive is missing from this build.": "此配置的内置压缩包缺失，请使用「导入队伍」导入本地 ZIP 文件。",
             "Team Workshop": "队伍创意工坊",
             "{team_name} - Team Workshop": "{team_name} - 队伍工坊",
             "Configuration Details": "配置详情",
@@ -213,6 +208,9 @@ def translate_ui(message):
             "Character:": "角色:",
             "{count} configurations": "{count} 個設定",
             "No shared code matches the search criteria.": "未找到符合搜尋條件的設定。",
+            "The workshop bundle is unavailable.": "工坊資料無法使用，請使用「匯入隊伍」匯入本機 ZIP 檔案。",
+            "The workshop bundle is invalid.": "工坊資料格式無效。",
+            "The workshop archive is missing from this build.": "此設定的內建壓縮檔缺失，請使用「匯入隊伍」匯入本機 ZIP 檔案。",
             "Team Workshop": "隊伍工作坊",
             "{team_name} - Team Workshop": "{team_name} - 隊伍工作坊",
             "Configuration Details": "設定詳情",
@@ -265,6 +263,9 @@ def translate_ui(message):
             "Character:": "キャラクター:",
             "{count} configurations": "{count} 件の構成",
             "No shared code matches the search criteria.": "検索条件に一致する共有コードが見つかりません。",
+            "The workshop bundle is unavailable.": "工坊データを読み込めません。ローカルのチーム ZIP をインポートしてください。",
+            "The workshop bundle is invalid.": "工坊データの形式が無効です。",
+            "The workshop archive is missing from this build.": "この構成の同梱 ZIP が見つかりません。ローカルのチーム ZIP をインポートしてください。",
             "Team Workshop": "チームワークショップ",
             "{team_name} - Team Workshop": "{team_name} - チームワークショップ",
             "Configuration Details": "構成の詳細",
@@ -317,6 +318,9 @@ def translate_ui(message):
             "Character:": "캐릭터:",
             "{count} configurations": "{count}개 구성",
             "No shared code matches the search criteria.": "검색 조건과 일치하는 공유 코드가 없습니다.",
+            "The workshop bundle is unavailable.": "워크숍 데이터를 불러올 수 없습니다. 로컬 팀 ZIP을 가져오세요.",
+            "The workshop bundle is invalid.": "워크숍 데이터 형식이 잘못되었습니다.",
+            "The workshop archive is missing from this build.": "이 구성의 번들 ZIP을 찾을 수 없습니다. 로컬 팀 ZIP을 가져오세요.",
             "Team Workshop": "파티 창작마당",
             "{team_name} - Team Workshop": "{team_name} - 파티 창작마당",
             "Configuration Details": "구성 상세 정보",
@@ -369,6 +373,9 @@ def translate_ui(message):
             "Character:": "Personaje:",
             "{count} configurations": "{count} configuraciones",
             "No shared code matches the search criteria.": "No se encontraron códigos compartidos que coincidan.",
+            "The workshop bundle is unavailable.": "Los datos del taller no están disponibles. Importa un ZIP de equipo local.",
+            "The workshop bundle is invalid.": "Los datos del taller no son válidos.",
+            "The workshop archive is missing from this build.": "Falta el ZIP incluido para esta configuración. Importa un ZIP de equipo local.",
             "Team Workshop": "Taller de equipos",
             "{team_name} - Team Workshop": "{team_name} - Taller de equipos",
             "Configuration Details": "Detalles de configuración",
@@ -464,36 +471,46 @@ def workshop_team_slug(team):
 
 
 def workshop_team_url(team):
-    return WORKSHOP_TEAM_URL.format(slug=quote(workshop_team_slug(team), safe="_-"))
+    return WORKSHOP_CODES_DIR / f"{workshop_team_slug(team)}.zip"
+
+
+def _workshop_archive_for(code):
+    """Locate the embedded archive for a workshop entry."""
+    filename = Path(str(code.get("filename") or "")).name
+    candidate = WORKSHOP_CODES_DIR / filename
+    if filename and candidate.is_file():
+        return candidate
+    try:
+        slug = workshop_team_slug(str(code.get("team") or ""))
+    except ValueError:
+        return None
+    fallback = WORKSHOP_CODES_DIR / f"{slug}.zip"
+    if fallback.is_file():
+        return fallback
+    return None
+
+
+def _load_workshop_index():
+    """Read the workshop snapshot embedded in this build."""
+    try:
+        payload = json.loads(WORKSHOP_INDEX.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(translate_ui("The workshop bundle is unavailable.")) from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("teams"), list):
+        raise ValueError(translate_ui("The workshop bundle is invalid."))
+    return payload
 
 
 def fetch_all_workshop_teams():
-    url = WORKSHOP_TEAMS_ALL_URL
-    logger.info(f"char code workshop all teams request: {url}")
-    try:
-        with urlopen(Request(url, headers={"User-Agent": WORKSHOP_USER_AGENT}), timeout=15) as response:
-            content = response.read(5_000_001)
-    except HTTPError as error:
-        if error.code == 404:
-            return []
-        raise
-    if len(content) > 5_000_000:
-        raise ValueError(translate_ui("Workshop response is too large."))
-    try:
-        payload = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(translate_ui("Workshop returned invalid JSON.")) from error
-    if not isinstance(payload, dict) or not isinstance(payload.get("teams"), list):
-        raise ValueError(translate_ui("Workshop response is invalid."))
-
+    """Offline: enumerate the teams embedded in workshop_bundle/."""
+    payload = _load_workshop_index()
     all_codes = []
     for team_entry in payload["teams"]:
         if not isinstance(team_entry, dict):
             continue
         team_str = team_entry.get("team", "")
         members = team_entry.get("members", [])
-        codes = team_entry.get("codes", [])
-        for code in codes:
+        for code in team_entry.get("codes", []):
             if not isinstance(code, dict):
                 continue
             item = dict(code)
@@ -502,34 +519,28 @@ def fetch_all_workshop_teams():
             if "members" not in item or not item["members"]:
                 item["members"] = members
             all_codes.append(item)
-
     return sorted(all_codes, key=lambda code: int(code.get("timestamp") or 0), reverse=True)
 
 
 def fetch_workshop_codes(team):
-    expected_members = sorted((get_english_char_name(name) for name in normalize_team(team)), key=str.casefold)
-    url = workshop_team_url(team)
-    logger.info(f"char code workshop request: {url}")
+    """Offline: list embedded codes for one team."""
+    if isinstance(team, str):
+        team = [name.strip() for name in team.split(',') if name.strip()]
     try:
-        with urlopen(Request(url, headers={"User-Agent": WORKSHOP_USER_AGENT}), timeout=15) as response:
-            content = response.read(2_000_001)
-    except HTTPError as error:
-        if error.code == 404:
-            return []
-        raise
-    if len(content) > 2_000_000:
-        raise ValueError(translate_ui("Workshop response is too large."))
-    try:
-        payload = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(translate_ui("Workshop returned invalid JSON.")) from error
-    if not isinstance(payload, dict) or not isinstance(payload.get("codes"), list):
-        raise ValueError(translate_ui("Workshop response is invalid."))
-    members = payload.get("members")
-    if members is not None and sorted(members, key=str.casefold) != expected_members:
-        raise ValueError(translate_ui("Workshop returned a different team."))
-    codes = [code for code in payload["codes"] if isinstance(code, dict)]
-    return sorted(codes, key=lambda code: int(code.get("timestamp") or 0), reverse=True)
+        expected_members = sorted((get_english_char_name(name) for name in normalize_team(team)),
+                                  key=str.casefold)
+    except ValueError:
+        return []
+
+    def entry_members(code):
+        raw = str(code.get("team") or "")
+        names = [name.strip() for name in raw.split(',') if name.strip()]
+        try:
+            return sorted((get_english_char_name(name) for name in normalize_team(names)), key=str.casefold)
+        except ValueError:
+            return None
+
+    return [code for code in fetch_all_workshop_teams() if entry_members(code) == expected_members]
 
 
 def format_workshop_local_time(code, date_only=False):
@@ -870,7 +881,6 @@ class CharacterCodeTab(CustomTab):
         self.char_by_name = {char_cls.__name__: char_cls for char_cls in self.characters}
         self.current_team = None
         self.current_char_cls = None
-        self.current_team_row = -1
         self.current_member_index = -1
         self.clean_code = ""
         self.loading_editor = False
@@ -899,38 +909,38 @@ class CharacterCodeTab(CustomTab):
             translate_ui("Switch every team between imported and built in code"))
         self.switch_all_button.clicked.connect(self._switch_all_code_mode)
         left_layout.addWidget(self.switch_all_button)
-        team_buttons = QVBoxLayout()
-        first_team_button_row = QHBoxLayout()
+        team_buttons = QGridLayout()
+        team_buttons.setColumnStretch(0, 1)
+        team_buttons.setColumnStretch(1, 1)
         self.create_team_button = Button(self.tr("Create Team"), icon="plus", variant="primary")
         self.create_team_button.clicked.connect(self._create_team)
         self.delete_team_button = Button(self.tr("Delete Team"), icon="trash")
         self.delete_team_button.clicked.connect(self._delete_team)
         self.workshop_button = Button(self.tr("Workshop"), icon="layers")
         self.workshop_button.clicked.connect(self._open_workshop)
-        first_team_button_row.addWidget(self.create_team_button)
-        first_team_button_row.addWidget(self.delete_team_button)
-        second_team_button_row = QHBoxLayout()
         self.import_team_button = Button(self.tr("Import Team"), icon="download")
         self.import_team_button.clicked.connect(self._import_team)
         self.export_team_button = Button(self.tr("Export Selected"), icon="export")
         self.export_team_button.clicked.connect(self._export_team)
-        second_team_button_row.addWidget(self.workshop_button)
-        second_team_button_row.addWidget(self.import_team_button)
-        third_team_button_row = QHBoxLayout()
         self.upload_team_button = Button(self.tr("Upload Team"), icon="github")
         self.upload_team_button.clicked.connect(self._open_upload_team)
-        third_team_button_row.addWidget(self.export_team_button)
-        third_team_button_row.addWidget(self.upload_team_button)
         self.export_current_button = None
         if (getattr(og, "app", None) and getattr(og.app, "config", {}).get("debug", False)
                 and (Path.cwd() / ".git").is_dir()):
             self.export_current_button = Button(self.tr("Export Current"), icon="export")
             self.export_current_button.clicked.connect(self._export_current_team)
-            team_buttons.addWidget(self.export_current_button)
-        team_buttons.addLayout(first_team_button_row)
-        team_buttons.addLayout(second_team_button_row)
-        team_buttons.addLayout(third_team_button_row)
+            left_layout.addWidget(self.export_current_button)
         left_layout.addLayout(team_buttons)
+        button_width = 0
+        for index, button in enumerate((self.create_team_button, self.delete_team_button,
+                                        self.workshop_button, self.import_team_button,
+                                        self.export_team_button, self.upload_team_button)):
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            team_buttons.addWidget(button, index // 2, index % 2)
+            button.ensurePolished()
+            button_width = max(button_width, button.sizeHint().width())
+        team_buttons.setColumnMinimumWidth(0, button_width)
+        team_buttons.setColumnMinimumWidth(1, button_width)
 
         right = QWidget(splitter)
         right_layout = QVBoxLayout(right)
@@ -1011,6 +1021,8 @@ class CharacterCodeTab(CustomTab):
         return result
 
     def _refresh_team_list(self, selected_team=None):
+        if not self._guard_unsaved_changes():
+            return
         selected_team = normalize_team(selected_team) if selected_team else self.current_team
         teams = list_custom_teams()
         states = {team: team_code_state(team) for team in teams}
@@ -1066,7 +1078,10 @@ class CharacterCodeTab(CustomTab):
             return
         if not self._guard_unsaved_changes():
             self.suppress_selection_guard = True
-            self.team_list.setCurrentRow(self.current_team_row)
+            previous_row = next((index for index in range(self.team_list.count())
+                                 if normalize_team(self.team_list.item(index).data(Qt.UserRole))
+                                 == self.current_team), -1)
+            self.team_list.setCurrentRow(previous_row)
             self.suppress_selection_guard = False
             return
         item = self.team_list.item(row)
@@ -1076,7 +1091,6 @@ class CharacterCodeTab(CustomTab):
         # A list rebuild re-selects the same team, which must not jump back to the first member.
         member_index = max(self.current_member_index, 0) if team == self.current_team else 0
         self.current_team = team
-        self.current_team_row = row
         self.member_combo.blockSignals(True)
         self.member_combo.clear()
         for class_name in self.current_team:
@@ -1174,6 +1188,8 @@ class CharacterCodeTab(CustomTab):
         dialog = TeamSelectionDialog(self.characters, defaults, self.window())
         if not dialog.exec():
             return
+        if not self._guard_unsaved_changes():
+            return
         team = normalize_team(dialog.selected_names())
         try:
             create_custom_team(team)
@@ -1194,6 +1210,8 @@ class CharacterCodeTab(CustomTab):
             self.window(),
         )
         if not box.exec():
+            return
+        if not self._guard_unsaved_changes():
             return
         try:
             delete_custom_team(team)
@@ -1562,24 +1580,13 @@ class CharacterCodeTab(CustomTab):
         dialog.exec()
 
     def _import_workshop_code(self, code, parent):
-        url = code.get("downloadUrl") or code.get("rawUrl")
-        parsed = urlparse(str(url or ""))
-        # Published workshop indexes can still contain the previous server's URLs.
-        if parsed.hostname == _LEGACY_WORKSHOP_HOST:
-            parsed = parsed._replace(netloc=urlparse(WORKSHOP_TEAMS_ALL_URL).netloc)
-            url = parsed.geturl()
-        if parsed.scheme != "https" or parsed.hostname not in WORKSHOP_ARCHIVE_HOSTS:
-            show_info_bar(parent, self.tr("Workshop download URL is invalid."), title=self.tr("Error"), error=True)
+        archive = _workshop_archive_for(code)
+        if archive is None:
+            show_info_bar(parent, translate_ui("The workshop archive is missing from this build."),
+                          title=self.tr("Error"), error=True)
             return
         try:
-            with urlopen(Request(url, headers={"User-Agent": WORKSHOP_USER_AGENT}), timeout=30) as response:
-                content = response.read(20_000_001)
-            if len(content) > 20_000_000:
-                raise ValueError(self.tr("Workshop archive is too large."))
-            with tempfile.TemporaryDirectory() as temp_dir:
-                archive_path = Path(temp_dir) / Path(str(code.get("filename") or "team.zip")).name
-                archive_path.write_bytes(content)
-                self._preview_and_import_archive(archive_path, expected_team=None)
+            self._preview_and_import_archive(archive, expected_team=None)
         except Exception as e:
             show_info_bar(parent, str(e), title=self.tr("Workshop Error"), error=True)
 
@@ -1599,6 +1606,8 @@ class CharacterCodeTab(CustomTab):
         )
         dialog = ImportTeamDialog(info["manifest"], translated_team, self.window())
         if not dialog.exec():
+            return False
+        if not self._guard_unsaved_changes():
             return False
         try:
             import_custom_team(info)

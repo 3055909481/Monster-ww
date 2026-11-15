@@ -7,7 +7,7 @@ Mon-script framework writes or registers:
 * the framework log basename (``logs/<name>.log``),
 * every log record, including exception text and formatted arguments,
 * the Log page's default file and placeholder text,
-* the custom-script folders created next to the executable,
+* legacy custom-script folders (migrated to the framework's canonical names),
 * Win32 overlay window classes and the notification AppUserModelID.
 
 It patches the *installed* Mon-script package at runtime instead of forking the
@@ -23,14 +23,18 @@ from __future__ import annotations
 import logging
 import os
 import re
-import sys
 from pathlib import Path
 
 APP_SLUG = "monster-ww"
 APP_TITLE = "Monster-ww"
 LOG_BASENAME = "Monster-ww-runtime"
-SCRIPTS_FOLDER = "Monster-ww_scripts"
-IMPORT_FOLDER = "Monster-ww_drop"
+# These are canonical framework folder names, not upstream project branding,
+# so no runtime patch is needed: discovery, editing and packaging all agree.
+SCRIPTS_FOLDER = "ok_tasks"
+IMPORT_FOLDER = "ok_import"
+# Folders written by Monster-ww v19-v22. Migrated once at startup.
+LEGACY_SCRIPTS_FOLDER = "Monster-ww_scripts"
+LEGACY_IMPORT_FOLDER = "Monster-ww_drop"
 OVERLAY_WINDOW_CLASS = "Monster-ww.Overlay"
 NOTIFIER_APP_USER_MODEL_ID = "Monster-ww.Shell"
 
@@ -104,39 +108,63 @@ def _patch_logger_file():
     return config_logger
 
 
-def _patch_script_folders():
-    """Replace the ok_tasks / ok_import folders created beside the exe."""
-    from Mon.core import script_packager
+def _migrate_script_folders():
+    """Move legacy custom-script folders to the canonical framework names.
 
-    def tasks_folder():
-        return os.path.join(os.getcwd(), SCRIPTS_FOLDER)
+    Both trees are preflighted before anything is moved. A conflict aborts
+    startup with a descriptive error instead of silently overwriting a file
+    the user edited.
+    """
+    pairs = (
+        (Path(LEGACY_SCRIPTS_FOLDER), Path(SCRIPTS_FOLDER)),
+        (Path(LEGACY_IMPORT_FOLDER), Path(IMPORT_FOLDER)),
+    )
+    for old, new in pairs:
+        if old.exists():
+            _check_folder_merge(old, new)
+    for old, new in pairs:
+        if old.exists():
+            _merge_script_folder(old, new)
 
-    def import_folder():
-        return os.path.join(os.getcwd(), IMPORT_FOLDER)
 
-    script_packager.OK_TASKS_FOLDER = SCRIPTS_FOLDER
-    script_packager.OK_IMPORT_FOLDER = IMPORT_FOLDER
-    script_packager.get_ok_tasks_folder = tasks_folder
-    script_packager.get_ok_import_folder = import_folder
+def _check_folder_merge(source, destination):
+    import filecmp
 
-    # Several framework modules use ``from ... import get_ok_import_folder``.
-    # Those module-level bindings were created before this patch, so refresh
-    # any already-imported module that still points at the original callable.
-    for module in list(sys.modules.values()):
-        if module is None or not isinstance(getattr(module, "__dict__", None), dict):
-            continue
-        for attr, replacement in (
-            ("get_ok_tasks_folder", tasks_folder),
-            ("get_ok_import_folder", import_folder),
-        ):
-            current = module.__dict__.get(attr)
-            if current is replacement or current is None:
-                continue
-            if getattr(current, "__module__", "") == "Mon.core.script_packager":
-                try:
-                    module.__dict__[attr] = replacement
-                except Exception:
-                    pass
+    if not destination.exists() and not destination.is_symlink():
+        return
+    if source.is_symlink() or destination.is_symlink():
+        same = (
+            source.is_symlink()
+            and destination.is_symlink()
+            and os.readlink(source) == os.readlink(destination)
+        )
+    elif source.is_dir() and destination.is_dir():
+        for child in source.iterdir():
+            _check_folder_merge(child, destination / child.name)
+        return
+    else:
+        same = (
+            source.is_file()
+            and destination.is_file()
+            and filecmp.cmp(source, destination, shallow=False)
+        )
+    if not same:
+        raise FileExistsError(
+            f"Cannot migrate scripts: {source} conflicts with {destination}. "
+            "Resolve the difference manually; no file will be overwritten."
+        )
+
+
+def _merge_script_folder(source, destination):
+    if not destination.exists() and not destination.is_symlink():
+        source.rename(destination)
+    elif source.is_dir() and not source.is_symlink():
+        for child in source.iterdir():
+            _merge_script_folder(child, destination / child.name)
+        source.rmdir()
+    else:
+        # The preflight proved this entry is identical to the destination.
+        source.unlink()
 
 
 def _patch_window_classes():
@@ -189,7 +217,10 @@ def _patch_log_page():
 
 
 def apply():
-    """Apply every runtime identity patch. Idempotent; safe to call twice."""
+    """Migrate legacy folders and apply runtime identity patches. Idempotent."""
+    # Run before importing Mon: the framework creates ok_tasks/ok_import on
+    # import, which would make a later migration look like a conflict.
+    _migrate_script_folders()
     _patch_logging()
 
     import Mon as mon_package
@@ -201,7 +232,6 @@ def apply():
     patched_config_logger = None
     for patch in (
         _patch_logger_file,
-        _patch_script_folders,
         _patch_window_classes,
         _patch_notifications,
         _patch_log_page,

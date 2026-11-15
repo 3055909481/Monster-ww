@@ -7,7 +7,6 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from urllib.error import HTTPError
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -40,9 +39,10 @@ from src.char.Verina import Verina
 from src.char.YangYangSp import YangYangSp
 from src.gui.CharacterCodeTab import (
     STATE_DOT_SIZE, CharacterCodeTab, ExportTeamDialog, ImportTeamDialog, TeamInfoDialog,
-    TeamSelectionDialog, WorkshopDialog, fetch_all_workshop_teams, fetch_workshop_codes,
-    team_state_color, workshop_team_url,
+    TeamSelectionDialog, WorkshopDialog, _workshop_archive_for, fetch_all_workshop_teams,
+    fetch_workshop_codes, team_state_color, workshop_team_url,
 )
+from src.char.CustomCharLoader import normalize_team
 
 
 class TestCharacterCodeTab(unittest.TestCase):
@@ -71,6 +71,77 @@ class TestCharacterCodeTab(unittest.TestCase):
             self.assertEqual(tab.member_combo.count(), 3)
             self.assertIsNotNone(tab.current_char_cls)
             self.assertEqual(tab.editor.toPlainText(), read_team_char_code(team, tab.current_char_cls))
+        finally:
+            tab.deleteLater()
+
+    def test_workshop_tab_is_registered(self):
+        from config import config
+
+        self.assertIn(["src.gui.CharacterCodeTab", "CharacterCodeTab"], config['custom_tabs'])
+
+    def test_cancel_unsaved_creation_does_not_create_or_reselect_team(self):
+        team = (Mortefi, Chixia, Verina)
+        new_team = (Baizhi, Chixia, Verina)
+        create_custom_team(team)
+        tab = CharacterCodeTab()
+        try:
+            tab.member_combo.setCurrentIndex(1)
+            member = tab.current_char_cls
+            edited = tab.editor.toPlainText() + "\n# unsaved creation\n"
+            tab.editor.setPlainText(edited)
+            with (patch.object(TeamSelectionDialog, "exec", return_value=True),
+                  patch.object(TeamSelectionDialog, "selected_names", return_value=new_team),
+                  patch.object(tab, "_confirm_discard_changes", return_value=False)):
+                tab._create_team()
+            self.assertFalse(get_custom_team_folder(new_team).exists())
+            self.assertEqual(tab.team_list.count(), 1)
+            self.assertEqual(tab.current_team, normalize_team(team))
+            self.assertEqual(tuple(tab.team_list.currentItem().data(Qt.UserRole)), normalize_team(team))
+            self.assertIs(tab.current_char_cls, member)
+            self.assertEqual(tab.editor.toPlainText(), edited)
+        finally:
+            tab.deleteLater()
+
+    def test_cancel_selection_restores_team_key_after_row_order_changes(self):
+        team = (Mortefi, Chixia, Verina)
+        other = (Baizhi, Chixia, Verina)
+        create_custom_team(team)
+        create_custom_team(other)
+        tab = CharacterCodeTab()
+        try:
+            row, _item = self._row(tab, team)
+            tab.team_list.setCurrentRow(row)
+            edited = tab.editor.toPlainText() + "\n# unsaved selection\n"
+            tab.editor.setPlainText(edited)
+            tab.team_list.blockSignals(True)
+            item = tab.team_list.takeItem(row)
+            new_row = 1 - row
+            tab.team_list.insertItem(new_row, item)
+            tab.team_list.setCurrentRow(new_row)
+            tab.team_list.blockSignals(False)
+            with patch.object(tab, "_confirm_discard_changes", return_value=False):
+                tab.team_list.setCurrentRow(row)
+            self.assertEqual(tab.current_team, normalize_team(team))
+            self.assertEqual(tuple(tab.team_list.currentItem().data(Qt.UserRole)), normalize_team(team))
+            self.assertEqual(tab.editor.toPlainText(), edited)
+        finally:
+            tab.deleteLater()
+
+    def test_cancel_list_refresh_preserves_unsaved_editor_and_selection(self):
+        team = (Mortefi, Chixia, Verina)
+        create_custom_team(team)
+        tab = CharacterCodeTab()
+        try:
+            edited = tab.editor.toPlainText() + "\n# unsaved refresh\n"
+            tab.editor.setPlainText(edited)
+            other = (Baizhi, Chixia, Verina)
+            create_custom_team(other)
+            with patch.object(tab, "_confirm_discard_changes", return_value=False):
+                tab._refresh_team_list(other)
+            self.assertEqual(tab.team_list.count(), 1)
+            self.assertEqual(tab.current_team, normalize_team(team))
+            self.assertEqual(tuple(tab.team_list.currentItem().data(Qt.UserRole)), normalize_team(team))
+            self.assertEqual(tab.editor.toPlainText(), edited)
         finally:
             tab.deleteLater()
 
@@ -213,92 +284,85 @@ class TestCharacterCodeTab(unittest.TestCase):
 
     def test_workshop_url_uses_sorted_team_slug(self):
         self.assertEqual(
-            workshop_team_url((Baizhi, Augusta, Aemeath)),
-            "https://cfokwwchar.ok-script.com/teams/Aemeath_Augusta_Baizhi.json",
+            workshop_team_url((Baizhi, Augusta, Aemeath)).name,
+            "Aemeath_Augusta_Baizhi.zip",
         )
 
     def test_workshop_url_sanitizes_character_name_punctuation(self):
         self.assertEqual(
-            workshop_team_url((YangYangSp, Chisa, Suisui)),
-            "https://cfokwwchar.ok-script.com/teams/Chisa_Suisui_Yangyang_Xuanling.json",
+            workshop_team_url((YangYangSp, Chisa, Suisui)).name,
+            "Chisa_Suisui_Yangyang_Xuanling.zip",
         )
 
-    def test_workshop_codes_are_sorted_by_timestamp_descending(self):
-        payload = {
-            "members": ["Aemeath", "Augusta", "Baizhi"],
-            "codes": [{"name": "older", "timestamp": 10}, {"name": "newer", "timestamp": 20}],
-        }
+    def test_offline_index_lists_embedded_teams(self):
+        codes = fetch_all_workshop_teams()
+        self.assertTrue(codes)
+        timestamps = [int(code.get("timestamp") or 0) for code in codes]
+        self.assertEqual(timestamps, sorted(timestamps, reverse=True))
+        for code in codes:
+            self.assertTrue(code.get("team"))
+            self.assertEqual(len(normalize_team(code["team"].split(", "))), 3)
 
-        class Response:
-            def __enter__(self):
-                return self
+    def test_offline_every_entry_resolves_an_embedded_archive(self):
+        for code in fetch_all_workshop_teams():
+            with self.subTest(code=code.get("filename")):
+                archive = _workshop_archive_for(code)
+                self.assertIsNotNone(archive)
+                self.assertTrue(archive.is_file())
+                self.assertLess(archive.stat().st_size, 20_000_000)
 
-            def __exit__(self, *args):
-                pass
+    def test_offline_fetch_workshop_codes_matches_team(self):
+        codes = fetch_all_workshop_teams()
+        sample = next(code for code in codes if len(code.get("members", [])) == 3)
+        team_names = tuple(sample["team"].split(", "))
+        as_tuple = fetch_workshop_codes(team_names)
+        as_string = fetch_workshop_codes(sample["team"])
+        self.assertEqual(as_tuple, as_string)
+        self.assertIn(sample, as_tuple)
 
-            def read(self, _size):
-                return json.dumps(payload).encode("utf-8")
+    def test_offline_fetch_workshop_codes_rejects_invalid_teams(self):
+        self.assertEqual(fetch_workshop_codes(("OnlyOne",)), [])
+        self.assertEqual(fetch_workshop_codes("not a team"), [])
 
-        with (
-            patch("src.gui.CharacterCodeTab.urlopen", return_value=Response()) as open_url,
-            patch("src.gui.CharacterCodeTab.logger.info") as log_info,
-        ):
-            codes = fetch_workshop_codes((Aemeath, Augusta, Baizhi))
-        self.assertEqual([code["name"] for code in codes], ["newer", "older"])
-        request = open_url.call_args.args[0]
-        self.assertEqual(request.full_url, workshop_team_url((Aemeath, Augusta, Baizhi)))
-        self.assertEqual(request.get_header("User-agent"), "ok-wuthering-waves")
-        self.assertEqual(open_url.call_args.kwargs, {"timeout": 15})
-        log_info.assert_called_once_with(
-            "char code workshop request: "
-            "https://cfokwwchar.ok-script.com/teams/Aemeath_Augusta_Baizhi.json"
-        )
-
-    def test_workshop_404_is_an_empty_list(self):
-        error = HTTPError("https://example.invalid", 404, "Not Found", {}, None)
-        with patch("src.gui.CharacterCodeTab.urlopen", side_effect=error):
-            self.assertEqual(fetch_workshop_codes((Aemeath, Augusta, Baizhi)), [])
-
-    def test_workshop_index_sends_app_user_agent(self):
-        payload = {"teams": [{"team": "Test team", "members": ["Aemeath"],
-                              "codes": [{"name": "Test code", "timestamp": 1}]}]}
-        with patch("src.gui.CharacterCodeTab.urlopen") as open_url:
-            open_url.return_value.__enter__.return_value.read.return_value = json.dumps(payload).encode()
-            codes = fetch_all_workshop_teams()
-
-        self.assertEqual(codes[0]["name"], "Test code")
-        self.assertEqual(codes[0]["team"], "Test team")
-        request = open_url.call_args.args[0]
-        self.assertEqual(request.full_url, "https://cfokwwchar.ok-script.com/teams.json")
-        self.assertEqual(request.get_header("User-agent"), "ok-wuthering-waves")
-        self.assertEqual(open_url.call_args.kwargs, {"timeout": 15})
-
-    def test_workshop_archive_sends_app_user_agent(self):
+    def test_offline_import_reads_the_embedded_archive(self):
         tab = CharacterCodeTab()
         try:
-            for field, url, expected_url in (
-                ("downloadUrl", "https://cfokwwchar.ok-script.com/team.zip",
-                 "https://cfokwwchar.ok-script.com/team.zip"),
-                ("rawUrl", "https://raw.githubusercontent.com/example/team.zip",
-                 "https://raw.githubusercontent.com/example/team.zip"),
-                ("downloadUrl", "https://okwwcharcode.ok-script.com/codes/team%20name.zip",
-                 "https://cfokwwchar.ok-script.com/codes/team%20name.zip"),
-            ):
-                with (
-                    self.subTest(url=url),
-                    patch("src.gui.CharacterCodeTab.urlopen") as open_url,
-                    patch.object(tab, "_preview_and_import_archive") as preview,
-                ):
-                    open_url.return_value.__enter__.return_value.read.return_value = b"archive contents"
-                    preview.side_effect = lambda path, **kwargs: self.assertEqual(
-                        path.read_bytes(), b"archive contents")
-                    tab._import_workshop_code({field: url}, tab)
+            code = fetch_all_workshop_teams()[0]
+            with patch.object(tab, "_preview_and_import_archive") as preview:
+                tab._import_workshop_code(code, tab)
+            archive = preview.call_args.args[0]
+            self.assertEqual(archive.parent.name, "codes")
+            self.assertTrue(archive.is_file())
+        finally:
+            tab.deleteLater()
 
-                    request = open_url.call_args.args[0]
-                    self.assertEqual(request.full_url, expected_url)
-                    self.assertEqual(request.get_header("User-agent"), "ok-wuthering-waves")
-                    self.assertEqual(open_url.call_args.kwargs, {"timeout": 30})
-                    preview.assert_called_once()
+    def test_offline_import_reports_missing_archive(self):
+        tab = CharacterCodeTab()
+        try:
+            with (
+                patch("src.gui.CharacterCodeTab.show_info_bar") as notification,
+                patch.object(tab, "_preview_and_import_archive") as preview,
+            ):
+                tab._import_workshop_code({"filename": "definitely-missing.zip", "team": "A, B, C"}, tab)
+            preview.assert_not_called()
+            notification.assert_called_once()
+            self.assertTrue(notification.call_args.kwargs["error"])
+        finally:
+            tab.deleteLater()
+
+    def test_missing_bundle_reports_error_instead_of_an_empty_dialog(self):
+        tab = CharacterCodeTab()
+        try:
+            with (
+                patch("src.gui.CharacterCodeTab.WORKSHOP_INDEX") as index,
+                patch("src.gui.CharacterCodeTab.WorkshopDialog") as dialog,
+                patch("src.gui.CharacterCodeTab.show_info_bar") as notification,
+            ):
+                index.read_text.side_effect = OSError("bundle missing")
+                tab._open_workshop()
+                dialog.assert_not_called()
+                notification.assert_called_once()
+                self.assertTrue(notification.call_args.kwargs["error"])
         finally:
             tab.deleteLater()
 

@@ -1,6 +1,7 @@
 __pycache__/
 **/__pycache__/
 .venv
+ok_tasks/
 ok_import/
 Monster-ww_scripts/
 Monster-ww_drop/
