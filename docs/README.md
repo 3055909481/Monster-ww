@@ -1,6 +1,6 @@
 # Documentation source
 
-This directory is the source for the ok-ww documentation website.
+This directory is the source for the Monster-ww documentation website.
 
 ## Layout
 

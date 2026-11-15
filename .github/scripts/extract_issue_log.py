@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safely extract diagnostic logs and screenshots from an OK-WW issue archive."""
+"""Safely extract diagnostic logs and screenshots from a Monster-ww issue archive."""
 
 from __future__ import annotations
 

@@ -5,7 +5,7 @@ description: Generate or update localized release patch notes for PyAppify launc
 
 # PyAppify Patch Notes
 
-Write curated notes for ok-ww users in the format supported by PyAppify's
+Write curated notes for Monster-ww users in the format supported by PyAppify's
 per-language changelog feature. Generate the files locally; a request for notes
 alone does not authorize a commit, tag, or push.
 

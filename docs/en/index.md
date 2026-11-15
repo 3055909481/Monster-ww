@@ -1,6 +1,6 @@
 <div align="center">
   <h1 align="center">
-    <img src="https://raw.githubusercontent.com/ok-oldking/ok-wuthering-waves/master/icons/icon.png" width="200" alt="Monster-ww logo"/>
+    <img src="https://raw.githubusercontent.com/3055909481/Monster-ww/master/icons/icon.png" width="200" alt="Monster-ww logo"/>
     <br/>
     Monster-ww
   </h1> 
@@ -58,10 +58,10 @@ If you encounter issues, please check the following steps one by one before aski
     *   It is recommended to turn off GPU filters such as RTX HDR, RTX Dynamic Vibrance, and AMD sharpening.
     *   Use the game's default brightness settings.
     *   Disable any overlays that display information on the game screen (e.g., frame rates from MSI Afterburner, Fraps, etc.).
-3.  **Custom Keybinds**: If you have changed the default in-game keybinds, you must update them accordingly in the `ok-ww` settings. Only the keybinds listed in the settings are supported.
-4.  **Software Version**: Check and ensure you are using the latest version of `ok-ww`.
+3.  **Custom Keybinds**: If you have changed the default in-game keybinds, you must update them accordingly in the `Monster-ww` settings. Only the keybinds listed in the settings are supported.
+4.  **Software Version**: Check and ensure you are using the latest version of `Monster-ww`.
 5.  **Game Performance**: Make sure the game can run stably at **60 FPS**. If the frame rate is unstable, try lowering the game's graphics quality or resolution.
-6.  **Game Disconnections**: Enable "Close Launcher After Start" in the `ok-ww` settings and make sure the launcher process is not running, or run `ok-ww` from source.
+6.  **Game Disconnections**: Enable "Close Launcher After Start" in the `Monster-ww` settings and make sure the launcher process is not running, or run `Monster-ww` from source.
 7.  **OpenVINO Error**: If you encounter error `0x000005` on an Intel CPU with an NPU, update to the latest Intel NPU driver.
 8.  **Getting Help**: If the steps above do not solve your problem, please submit a detailed bug report through our community channels.
 9.  **Disable Auto Sprint**: Turn off Auto Sprint in the game settings.
@@ -83,15 +83,15 @@ Before evaluating or improving a team, select the team and enter 深境再临 or
 
 | Skill | Description |
 | --- | --- |
-| [evaluate-team](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/evaluate-team/SKILL.md) | Evaluate the current team's automated combat over multiple runs and suggest improvements. |
-| [improve-team](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/improve-team/SKILL.md) | Propose and validate combat improvements based on a team evaluation. |
-| [ok-script-develop](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-script-develop/SKILL.md) | Develop and validate game automation with Mon-script. |
-| [ok-script-tasks](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-script-tasks/SKILL.md) | Create, modify, or review automation tasks. |
-| [ok-ww-characters](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-ww-characters/SKILL.md) | Develop, review, and test character combat logic. |
-| [ok-script-i18n](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-script-i18n/SKILL.md) | Add, synchronize, and compile task UI translations. |
-| [pr-review](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/pr-review/SKILL.md) | Review or merge this project's GitHub PRs. |
-| [deploy](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/deploy/SKILL.md) | Commit completed changes, create a version tag, and publish. |
-| [use-local-venv](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/use-local-venv/SKILL.md) | Prefer the repository's local virtual environment for Python commands. |
+| [evaluate-team](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/evaluate-team/SKILL.md) | Evaluate the current team's automated combat over multiple runs and suggest improvements. |
+| [improve-team](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/improve-team/SKILL.md) | Propose and validate combat improvements based on a team evaluation. |
+| [ok-script-develop](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-script-develop/SKILL.md) | Develop and validate game automation with Mon-script. |
+| [ok-script-tasks](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-script-tasks/SKILL.md) | Create, modify, or review automation tasks. |
+| [ok-ww-characters](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-ww-characters/SKILL.md) | Develop, review, and test character combat logic. |
+| [ok-script-i18n](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-script-i18n/SKILL.md) | Add, synchronize, and compile task UI translations. |
+| [pr-review](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/pr-review/SKILL.md) | Review or merge this project's GitHub PRs. |
+| [deploy](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/deploy/SKILL.md) | Commit completed changes, create a version tag, and publish. |
+| [use-local-venv](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/use-local-venv/SKILL.md) | Prefer the repository's local virtual environment for Python commands. |
 
 ### Command-Line Arguments
 

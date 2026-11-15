@@ -20,7 +20,7 @@ Proposed behavior:
 [Describe the desired behavior clearly]
 
 Relevant task, character, or configuration:
-[Identify the affected part of OK-WW]
+[Identify the affected part of Monster-ww]
 
 Acceptance examples:
 [Give one or two concrete examples of how the feature should behave]

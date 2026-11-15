@@ -1,4 +1,4 @@
 interface:
-  display_name: "OK-WW Characters"
-  short_description: "Create and modify OK-WW character logic"
+  display_name: "Monster-ww Characters"
+  short_description: "Create and modify Monster-ww character logic"
   default_prompt: "Use $ok-ww-characters to create or update a Wuthering Waves character class."

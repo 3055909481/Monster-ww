@@ -22,7 +22,7 @@ FAQ result:
 What you have already tried:
 [List documentation, settings, or troubleshooting steps you checked]
 
-OK-WW version:
+Monster-ww version:
 [For example] 3.5.23
 
 Windows version and relevant settings:

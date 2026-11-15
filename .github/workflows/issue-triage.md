@@ -161,7 +161,7 @@ max-ai-credits: 30
 timeout-minutes: 10
 ---
 
-# OK-WW issue triage assistant
+# Monster-ww issue triage assistant
 
 Triage the issue that triggered this workflow. Your job is to organize it, categorize it, apply accurate tags, investigate it against this repository, and answer the reporter's question when possible.
 
@@ -204,7 +204,7 @@ Choose exactly one `area: ...` label and one priority label:
 - `priority: normal`: normal confirmed defect or useful feature request.
 - `priority: low`: narrow edge case, cosmetic problem, or low-impact improvement.
 
-Add `more-information-needed` only when critical evidence is missing. For a bug, useful evidence commonly includes clear reproduction steps, actual versus expected behavior, OK-WW version, Windows version, relevant settings/team, and logs or screenshots. Ask only for information that is actually needed. On an edited or reopened issue, or after a follow-up comment, remove `more-information-needed` if the requested evidence is now present. Remove conflicting type, area, or priority labels left by templates or earlier triage.
+Add `more-information-needed` only when critical evidence is missing. For a bug, useful evidence commonly includes clear reproduction steps, actual versus expected behavior, Monster-ww version, Windows version, relevant settings/team, and logs or screenshots. Ask only for information that is actually needed. On an edited or reopened issue, or after a follow-up comment, remove `more-information-needed` if the requested evidence is now present. Remove conflicting type, area, or priority labels left by templates or earlier triage.
 
 ## Decide whether the issue is actionable
 
@@ -213,7 +213,7 @@ Assign an issue to `ok-oldking` only when it qualifies as either an actionable b
 An actionable bug must meet all of the following:
 
 - It is a genuine `bug`, not a question, feature request, duplicate, unsupported setup, or usage/configuration mistake.
-- It contains enough information to reproduce or diagnose the failure: clear actual and expected behavior, meaningful reproduction steps or strong diagnostic evidence, the affected OK-WW version, the affected task/character/configuration, and logs, screenshots, or exact error text when those are needed for this failure.
+- It contains enough information to reproduce or diagnose the failure: clear actual and expected behavior, meaningful reproduction steps or strong diagnostic evidence, the affected Monster-ww version, the affected task/character/configuration, and logs, screenshots, or exact error text when those are needed for this failure.
 - Repository code, documentation, or issue history identifies a plausible affected component and gives the maintainer a concrete next step. A speculative symptom without diagnostic evidence is not sufficient.
 
 For an actionable bug, assign exactly `ok-oldking`, remove `more-information-needed`, keep the issue open, and post the investigation summary. If it was previously closed only because information was missing, call `reopen_triggering_issue` with `requested-information-received: true`.

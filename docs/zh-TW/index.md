@@ -1,6 +1,6 @@
 <div align="center">
   <h1 align="center">
-    <img src="https://raw.githubusercontent.com/ok-oldking/ok-wuthering-waves/master/icons/icon.png" width="200" alt="Monster-ww logo"/>
+    <img src="https://raw.githubusercontent.com/3055909481/Monster-ww/master/icons/icon.png" width="200" alt="Monster-ww logo"/>
     <br/>
     Monster-ww
   </h1> 
@@ -58,10 +58,10 @@
     *   建議關閉顯示卡濾鏡，例如 RTX HDR、RTX 動態亮麗（RTX Dynamic Vibrance）、AMD 銳化等。
     *   使用遊戲預設的亮度設定。
     *   關閉任何在遊戲畫面上顯示資訊的疊加層（如 MSI Afterburner、Fraps 等顯示的幀率）。
-3.  **自訂按鍵**：如果您修改了遊戲內的預設按鍵，請務必在 `ok-ww` 的設定中同步設定。僅支援設定中列出的按鍵。
-4.  **軟體版本**：檢查並確保您使用的是最新版本的 `ok-ww`。
+3.  **自訂按鍵**：如果您修改了遊戲內的預設按鍵，請務必在 `Monster-ww` 的設定中同步設定。僅支援設定中列出的按鍵。
+4.  **軟體版本**：檢查並確保您使用的是最新版本的 `Monster-ww`。
 5.  **遊戲效能**：請確保遊戲能穩定以 **60 FPS** 執行。如果幀率不穩定，請嘗試調低遊戲畫質或解析度。
-6.  **遊戲斷線**：在 `ok-ww` 設定中開啟「啟動後關閉啟動器」，確保啟動器程序未在執行；或者使用原始碼執行。
+6.  **遊戲斷線**：在 `Monster-ww` 設定中開啟「啟動後關閉啟動器」，確保啟動器程序未在執行；或者使用原始碼執行。
 7.  **OpenVINO 錯誤**：如果遇到 `0x000005` 錯誤，並且使用的是配備 NPU 的 Intel CPU，請更新至 Intel 最新的 NPU 驅動程式。
 8.  **尋求協助**：如果以上步驟都無法解決您的問題，請透過社群管道提交詳細的錯誤回報。
 9.  **關閉自動奔跑**：在遊戲設定裡關閉自動奔跑。
@@ -83,15 +83,15 @@
 
 | 技能 | 簡介 |
 | --- | --- |
-| [evaluate-team](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/evaluate-team/SKILL.md) | 透過多次戰鬥評估目前隊伍的自動戰鬥循環並提出建議。 |
-| [improve-team](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/improve-team/SKILL.md) | 根據隊伍評估結果提出並驗證角色自動戰鬥改進。 |
-| [ok-script-develop](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-script-develop/SKILL.md) | 使用 Mon-script 開發和驗證遊戲自動化功能。 |
-| [ok-script-tasks](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-script-tasks/SKILL.md) | 建立、修改或審查自動化任務。 |
-| [ok-ww-characters](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-ww-characters/SKILL.md) | 開發、審查和測試角色自動戰鬥邏輯。 |
-| [ok-script-i18n](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/ok-script-i18n/SKILL.md) | 新增、同步和編譯任務介面翻譯。 |
-| [pr-review](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/pr-review/SKILL.md) | 審查或合併本專案的 GitHub PR。 |
-| [deploy](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/deploy/SKILL.md) | 提交已完成的修改、建立版本標籤並發布。 |
-| [use-local-venv](https://github.com/ok-oldking/ok-wuthering-waves/blob/master/.agents/skills/use-local-venv/SKILL.md) | 執行 Python 命令時優先使用倉庫的本地虛擬環境。 |
+| [evaluate-team](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/evaluate-team/SKILL.md) | 透過多次戰鬥評估目前隊伍的自動戰鬥循環並提出建議。 |
+| [improve-team](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/improve-team/SKILL.md) | 根據隊伍評估結果提出並驗證角色自動戰鬥改進。 |
+| [ok-script-develop](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-script-develop/SKILL.md) | 使用 Mon-script 開發和驗證遊戲自動化功能。 |
+| [ok-script-tasks](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-script-tasks/SKILL.md) | 建立、修改或審查自動化任務。 |
+| [ok-ww-characters](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-ww-characters/SKILL.md) | 開發、審查和測試角色自動戰鬥邏輯。 |
+| [ok-script-i18n](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/ok-script-i18n/SKILL.md) | 新增、同步和編譯任務介面翻譯。 |
+| [pr-review](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/pr-review/SKILL.md) | 審查或合併本專案的 GitHub PR。 |
+| [deploy](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/deploy/SKILL.md) | 提交已完成的修改、建立版本標籤並發布。 |
+| [use-local-venv](https://github.com/3055909481/Monster-ww/blob/master/.agents/skills/use-local-venv/SKILL.md) | 執行 Python 命令時優先使用倉庫的本地虛擬環境。 |
 
 ### 命令列參數
 

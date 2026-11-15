@@ -148,7 +148,7 @@ def translate_ui(message):
         if translated and translated != message:
             return translated
 
-    # Fallback dictionaries for all officially supported locales in ok-ww:
+    # Fallback dictionaries for all officially supported locales in Monster-ww:
     # zh_CN (Simplified Chinese), zh_TW (Traditional Chinese), ja_JP (Japanese), ko_KR (Korean), es_ES (Spanish)
     _locale_fallbacks = {
         "zh_CN": {
