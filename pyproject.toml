@@ -13,7 +13,7 @@ dependencies = [
     # Use the GitHub TAG ARCHIVE, not git+https: PyAppify strips Git from the
     # pip child process PATH (clear_python_envs), so a git URL cannot be cloned
     # during portable packaging. An https tarball needs no git executable.
-    "Mon-script[ocr,qt] @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.5b7-mon1.tar.gz",
+    "Mon-script[ocr,qt] @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.5b8-mon1.tar.gz",
     "ok-pyside-minimal==6.12.0.post2",
     "onnxocr-ppocrv5>=0.0.23",
     "openvino",
@@ -31,5 +31,5 @@ docs = [
 ]
 web-test = [
     # Mon-script does not provide a "web" extra; keep the same pinned fork.
-    "Mon-script @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.5b7-mon1.tar.gz",
+    "Mon-script @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.5b8-mon1.tar.gz",
 ]

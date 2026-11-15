@@ -8,7 +8,7 @@ icon: "icons/icon.png"
 # the `portable` branch: its tree contains runtime files only (no
 # templates_src/, tests/, docs/ or CI sources, ~41 MB instead of ~1.06 GB).
 # PyAppify ships that tree twice - as repo/objects and as working/ - so the
-# portable archive shrinks from 2.2 GiB to roughly 350-500 MB while keeping
+# portable archive shrinks from 2.2 GiB to ~205 MB (205.6 MB measured) while keeping
 # incremental updates. Do not point git_url at a full master tag again.
 keep_releases: 1
 profiles:
@@ -18,7 +18,7 @@ profiles:
     # fetches new versions from here. Change this URL to point updates at another
     # repository you publish; that repo must carry the same version tags with
     # the same runtime-only files (main.py, config.py, src/, assets/, icons/,
-    # i18n/, requirements.txt, pyappify.yml, ...).
+    # i18n/, workshop_bundle/, requirements.txt, pyappify.yml, ...).
     # It must NOT point at upstream update repositories.
     git_url: "https://github.com/3055909481/Monster-ww.git"
     admin: true

@@ -6,6 +6,7 @@ Monster-ww.exe
 readme
 README.md
 assets
+workshop_bundle
 icons
 requirements.txt
 main_debug.py
