@@ -538,42 +538,57 @@ jobs:
           }
           Write-Host "Embedded Monster-ww.exe next to Monster-ww.cmd in $($archive[0].Name)."
 
-      # Acceptance check for the slim release tag: PyAppify checks the tag out
-      # into working/ and keeps its objects in repo/objects. Both must be small
-      # and must still contain every runtime entry point.
+      # Acceptance check for the slim release tag. pyappify-action DELETES
+      # pyappify_dist/<App>/data after creating the archive (index.js removes
+      # appDistDir at the end of the profile loop), so the checkout can no
+      # longer be inspected on disk here: verify the ARCHIVE's file list instead.
       - name: Verify the packaged working tree is slim
+        env:
+          PACKAGE_FORMAT: ${{ inputs.package_format }}
         run: |
-          $app = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww'
-          $working = Join-Path $app 'working'
-          $objects = Join-Path $app 'repo/objects'
-          if (-not (Test-Path $working)) { throw "Packaged working tree not found: $working" }
+          $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+          if (-not $seven) {
+            $fallback = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+            if (Test-Path $fallback) { $seven = $fallback }
+          }
+          if (-not $seven) { throw '7-Zip is not available on this runner.' }
+          $archives = @(Get-ChildItem -Path pyappify_dist -Filter "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT" -File)
+          if ($archives.Count -ne 1) { throw "Expected one portable archive, found $($archives.Count)." }
+          $archive = $archives[0]
+          $listing = (& $seven l $archive.FullName | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "7z l failed for $($archive.Name)." }
 
+          $prefix = 'Monster-ww\data\apps\Monster-ww\working\'
           $heavy = @('templates_src', 'tests', 'docs', '.github', '.agents', '.codex')
-          $leaked = @($heavy | Where-Object { Test-Path (Join-Path $working $_) })
+          $leaked = @($heavy | Where-Object {
+            $listing -match [regex]::Escape($prefix + $_ + '\')
+          })
           if ($leaked.Count -gt 0) {
-            throw "The packaged working tree still contains development-only directories: $($leaked -join ', '). The release tag is not slim."
+            throw "The portable archive still contains development-only directories: $($leaked -join ', '). The release tag is not slim."
           }
-          $required = @('main.py', 'config.py', 'requirements.txt', 'pyappify.yml',
-                        'assets/echo_model/echo.onnx', 'icons/icon.png', 'src/identity.py')
-          $missing = @($required | Where-Object { -not (Test-Path (Join-Path $working $_)) })
+          $required = @(
+            'main.py', 'config.py', 'requirements.txt', 'pyappify.yml',
+            'assets\echo_model\echo.onnx', 'icons\icon.png', 'src\identity.py'
+          )
+          $missing = @($required | Where-Object {
+            $listing -notmatch [regex]::Escape($prefix + $_)
+          })
           if ($missing.Count -gt 0) {
-            throw "The packaged working tree is missing runtime files: $($missing -join ', ')."
+            throw "The portable archive is missing runtime files: $($missing -join ', ')."
           }
 
-          $workingBytes = (Get-ChildItem -LiteralPath $working -Recurse -File -ErrorAction SilentlyContinue |
-            Measure-Object -Property Length -Sum).Sum
-          $objectBytes = if (Test-Path $objects) {
-            (Get-ChildItem -LiteralPath $objects -Recurse -File -ErrorAction SilentlyContinue |
-              Measure-Object -Property Length -Sum).Sum
-          } else { 0 }
-          Write-Host ("Packaged working/ = {0} MB ; repo/objects = {1} MB" -f
-            [math]::Round($workingBytes / 1MB, 1), [math]::Round($objectBytes / 1MB, 1))
-          if ($workingBytes -gt 300MB) {
-            throw "Packaged working tree is $workingBytes bytes, expected < 300 MB for a slim release tag."
+          $sizeMB = [math]::Round($archive.Length / 1MB, 1)
+          Write-Host "Portable archive: $($archive.Name) = $sizeMB MB"
+          Write-Host 'Slim release tag verified: no development-only directories, all runtime entry points present.'
+          if ($archive.Length -gt 800MB) {
+            throw "Portable archive is $sizeMB MB, far above the ~350-500 MB expected from a slim release tag."
           }
 
       # Cheap post-mortem helper: shows which tags libgit2 kept in the bare
       # repository it cloned, useful when PyAppify rejects a setup version.
+      # NOTE: pyappify-action deletes the staged data/ folder after packaging,
+      # so on a SUCCESSFUL build this prints "Packaged repository not found";
+      # it is only informative when the build stopped before that cleanup.
       - name: Diagnose packaged repository tags
         if: always()
         env:
