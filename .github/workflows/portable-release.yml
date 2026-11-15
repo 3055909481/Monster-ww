@@ -7,15 +7,30 @@
 #   * MirrorChyan / release-note distribution.
 # The only published artifact is a self-contained portable archive.
 #
-# Updating WITHOUT re-downloading the ~2 GiB archive:
+# SLIM RELEASE TAG (why the archive is small):
+#   PyAppify bundles the checked-out release tag TWICE: as the bare git object
+#   database (data/apps/Monster-ww/repo/objects) and as the checkout
+#   (data/apps/Monster-ww/working). A normal master tag contains 894 MB of
+#   templates_src screenshots and 124 MB of tests, so BOTH copies are ~1.1 GB
+#   and the 7z ends up at 2.2 GiB. None of those files are read at runtime
+#   (deploy.txt does not list them; only tests/ and docs/ reference them).
+#   The "Create slim release tag" step therefore builds a dedicated release
+#   commit whose tree omits the development-only directories, and publishes
+#   THAT commit under the version tag. Its tree is ~41 MB, so both copies
+#   shrink together and the archive drops to roughly 350-500 MB, dominated by
+#   the bundled Python environment. The commit lives on the "portable" branch
+#   and every release extends that slim history, so the launcher's depth-100
+#   shallow fetch can never pull the big screenshots back in through history.
+#
+# Updating WITHOUT re-downloading the whole archive:
 #   pyappify-action always emits a launcher-only "<App>-win32.zip" next to the
 #   portable archive. That zip contains PyAppify's real Tauri launcher. In
 #   "updater" mode this workflow extracts it and puts it back into the archive
 #   as Monster-ww/Monster-ww.exe. The launcher reads data/apps/Monster-ww/app.json,
 #   fetches only NEW release tags from pyappify.yml's git_url (our own fork),
-#   and checks them out into data/apps/Monster-ww/working. Python, pip packages,
-#   bundled templates and configs/ are NOT tracked by that repository, so they
-#   survive every update. Only changed source files are transferred.
+#   and checks them out into data/apps/Monster-ww/working. Python, pip packages
+#   and configs/ are NOT tracked by that repository, so they survive every
+#   update. Only changed source files are transferred.
 #   In "cmd-only" mode a tiny icon-only exe wrapper is shipped instead, with no
 #   network/update logic at all, for users who prefer a fully offline package.
 #
@@ -39,7 +54,7 @@ on:
         default: ''
         type: string
       package_format:
-        description: 'Archive format. 7z is the default: solid LZMA2 keeps the package small enough for a GitHub Release asset. The zip build is ~2.25 GiB and exceeds GitHub''s 2 GiB per-asset limit, so it is delivered as an Actions artifact only. Open 7z with 7-Zip or Windows 11 23H2+.'
+        description: 'Archive format. 7z is the default: solid LZMA2 gives the smallest archive. With the slim release tag the package is ~350-500 MB, well under GitHub''s 2 GiB per-asset limit, so a single asset is published. Open 7z with 7-Zip or Windows 11 23H2+.'
         required: true
         default: '7z'
         type: choice
@@ -55,7 +70,7 @@ on:
           - updater
           - cmd-only
       update_repo:
-        description: 'UPDATE SOURCE: git URL the launcher pulls new versions from. Leave empty to use this fork (your own published release tags). For another repository, enter a version tag manually in "version" and publish the SAME tag there first, with runnable source files and a pyappify.yml whose git_url points back to that repo.'
+        description: 'UPDATE SOURCE: git URL the launcher pulls new versions from. Leave empty to use this fork (your own slim release tags). For another repository, enter a version tag manually in "version" and publish the SAME tag there first, with the same runtime-only files and a pyappify.yml whose git_url points back to that repo; the slim tag created here is only pushed to this repository.'
         required: false
         default: ''
         type: string
@@ -192,27 +207,120 @@ jobs:
           "number=$($tag -replace '^v', '')" >> $env:GITHUB_OUTPUT
           Write-Host "Packaging version tag: $tag"
 
-      - name: Create version tag on the current commit
+      # See the "SLIM RELEASE TAG" note at the top of this file. PyAppify ships
+      # the release tag twice (git objects + working checkout), so publishing a
+      # tag with the full master tree doubles 894 MB of screenshots into the
+      # archive. This step publishes a runtime-only tree instead.
+      - name: Create slim release tag (runtime files only)
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          git fetch --tags --force
-          # git tag -l yields no output (PowerShell $null) when the tag is absent;
-          # Out-String guarantees a string so .Trim() is always safe.
-          $existing = (& git tag -l "$env:TAG" | Out-String).Trim()
-          if ($existing -eq $env:TAG) {
-            $tagged = (& git rev-parse "$env:TAG^{commit}" | Out-String).Trim()
-            $head = (& git rev-parse HEAD | Out-String).Trim()
-            if ($tagged -ne $head) {
-              throw "Tag $env:TAG already exists on commit $tagged (HEAD is $head). Use another version or leave version empty for an auto-selected one."
+          $tag = "$env:TAG".Trim()
+          & git fetch origin --tags --force
+          if ($LASTEXITCODE -ne 0) { throw 'git fetch --tags failed.' }
+
+          # Rerunning a build may find the tag already published. Reuse it only
+          # when it is one of OUR slim tags; a tag pointing at a full master
+          # commit would put the 1.1 GB screenshot tree back into the package.
+          $reuse = $false
+          $existing = (& git tag -l $tag | Out-String).Trim()
+          if ($existing -eq $tag) {
+            $tagged = (& git rev-parse "$tag^{commit}" | Out-String).Trim()
+            $isSlim = $true
+            foreach ($dir in @('templates_src', 'tests')) {
+              $present = (& git ls-tree --name-only $tagged -- $dir | Out-String).Trim()
+              if ($present) { $isSlim = $false }
             }
-            Write-Host "Reusing existing tag $env:TAG on HEAD."
-          } else {
-            & git tag -a "$env:TAG" -m "Monster-ww portable release $env:TAG"
-            if ($LASTEXITCODE -ne 0) { throw "git tag failed." }
-            & git push origin "refs/tags/$env:TAG"
-            if ($LASTEXITCODE -ne 0) { throw "git push tag failed." }
-            Write-Host "Created and pushed tag $env:TAG."
+            if (-not $isSlim) {
+              throw "Tag $tag already exists on a full commit $tagged. Use a newer version or leave version empty."
+            }
+            Write-Host "Reusing existing slim tag $tag -> $tagged."
+            $reuse = $true
+          }
+
+          if (-not $reuse) {
+            # A separate index keeps the real index/working tree untouched:
+            # pyappify-action reads pyappify.yml and icons/ from this checkout.
+            $slimIndex = Join-Path (Get-Location) '.git/slim-release-index'
+            Remove-Item -LiteralPath $slimIndex -Force -ErrorAction SilentlyContinue
+            $env:GIT_INDEX_FILE = $slimIndex
+            try {
+              & git read-tree HEAD
+              if ($LASTEXITCODE -ne 0) { throw 'git read-tree HEAD failed.' }
+
+              # Development-only trees. deploy.txt lists the runtime paths;
+              # src/ and config.py only ever load assets/, icons/, i18n/,
+              # readme/ and the root python files.
+              $drop = @('templates_src', 'tests', 'docs', '.github', '.agents', '.codex')
+              foreach ($dir in $drop) {
+                & git rm -r --cached -q --ignore-unmatch -- $dir
+                if ($LASTEXITCODE -ne 0) { throw "Removing $dir from the slim tree failed." }
+              }
+              $tree = (& git write-tree | Out-String).Trim()
+              if ($tree -notmatch '^[0-9a-f]{40}$') { throw "git write-tree failed: '$tree'." }
+
+              $mustHave = @(
+                'main.py', 'config.py', 'requirements.txt', 'pyappify.yml', 'deploy.txt',
+                'src/identity.py', 'src/gui/CharacterCodeTab.py',
+                'assets/echo_model/echo.onnx', 'assets/coco_annotations.json',
+                'icons/icon.png', 'i18n/zh_CN/LC_MESSAGES/ok.mo'
+              )
+              foreach ($path in $mustHave) {
+                & git cat-file -e "${tree}:$path"
+                if ($LASTEXITCODE -ne 0) { throw "Slim tree is missing runtime file $path." }
+              }
+
+              $total = [long]0
+              $count = 0
+              foreach ($line in (& git ls-tree -r --long $tree)) {
+                $match = [regex]::Match($line, '^\d+ \w+ [0-9a-f]+\s+(\d+)\t')
+                if ($match.Success) {
+                  $total += [long]$match.Groups[1].Value
+                  $count++
+                }
+              }
+              Write-Host ("Slim tree {0}: {1} files, {2} MB" -f $tree, $count, [math]::Round($total / 1MB, 2))
+              if ($total -gt 100MB) {
+                throw "Slim tree is $total bytes, expected < 100 MB. A large file leaked into the release tag."
+              }
+            } finally {
+              Remove-Item Env:\GIT_INDEX_FILE -ErrorAction SilentlyContinue
+              Remove-Item -LiteralPath $slimIndex -Force -ErrorAction SilentlyContinue
+            }
+
+            # Every release extends the SLIM history. If the parent were the
+            # master commit, PyAppify's depth-100 shallow fetch would drag the
+            # 894 MB screenshot tree back into repo/objects.
+            $parent = ''
+            $remoteBranch = (& git ls-remote --heads origin portable | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) { throw 'git ls-remote for the portable branch failed.' }
+            if ($remoteBranch) {
+              & git fetch --no-tags origin 'refs/heads/portable:refs/remotes/origin/portable'
+              if ($LASTEXITCODE -ne 0) { throw 'Fetching the portable branch failed.' }
+              $parent = (& git rev-parse 'refs/remotes/origin/portable' | Out-String).Trim()
+              if ($parent -notmatch '^[0-9a-f]{40}$') { throw "Invalid portable branch head: '$parent'." }
+              Write-Host "Previous slim release: $parent"
+            } else {
+              Write-Host 'First slim release: creating an orphan commit.'
+            }
+
+            $message = "Monster-ww portable release $tag (runtime files only)"
+            if ($parent) {
+              $commit = (& git commit-tree $tree -p $parent -m $message | Out-String).Trim()
+            } else {
+              $commit = (& git commit-tree $tree -m $message | Out-String).Trim()
+            }
+            if ($commit -notmatch '^[0-9a-f]{40}$') { throw "git commit-tree failed: '$commit'." }
+
+            # Push the commit first so the tag always points at a reachable
+            # object, then tag that exact commit.
+            & git push origin ("{0}:refs/heads/portable" -f $commit)
+            if ($LASTEXITCODE -ne 0) { throw 'Publishing the slim release commit failed.' }
+            & git tag -a $tag $commit -m "Monster-ww portable release $tag"
+            if ($LASTEXITCODE -ne 0) { throw 'git tag failed.' }
+            & git push origin ("refs/tags/{0}" -f $tag)
+            if ($LASTEXITCODE -ne 0) { throw 'git push tag failed.' }
+            Write-Host "Created and pushed slim tag $tag -> $commit."
           }
 
       - name: Validate custom update repository
@@ -230,7 +338,7 @@ jobs:
           $found = (& git ls-remote --tags $url "refs/tags/$env:TAG" | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) { throw "Cannot read tags from custom update repo $url." }
           if (-not $found) {
-            throw "Custom update repo $url has no tag $env:TAG. Publish this tag (with main.py, config.py, src/, pyappify.yml, ...) there first, or leave update_repo empty to use this fork."
+            throw "Custom update repo $url has no tag $env:TAG. Publish the SAME slim tag there first (main.py, config.py, src/, assets/, icons/, i18n/, requirements.txt, pyappify.yml, ... but no templates_src/ or tests/), or leave update_repo empty to use this fork's slim tag."
           }
           Write-Host "Custom update repo $url already carries tag $env:TAG."
 
@@ -239,11 +347,13 @@ jobs:
           APP_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
           CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
         run: |
-          # git_url is the UPDATE SOURCE. By default it is this fork: every tag
-          # created above is one of OUR OWN published releases, so the launcher
+          # git_url is the UPDATE SOURCE. By default it is this fork: the tag
+          # created above is one of OUR OWN slim release tags, so the launcher
           # never talks to upstream update repositories. keep_releases: 1
           # makes both the bundled clone and later fetches shallow, so an update
           # transfers only the new tag's changed objects, not the Python env.
+          # The checkout of that slim tag is what lands in working/, so the
+          # archive contains no templates_src/, tests/ or build sources.
           $repoUrl = $env:APP_REPO_URL
           if (-not [string]::IsNullOrWhiteSpace($env:CUSTOM_UPDATE_REPO)) {
             $repoUrl = "$env:CUSTOM_UPDATE_REPO".Trim()
@@ -428,6 +538,40 @@ jobs:
           }
           Write-Host "Embedded Monster-ww.exe next to Monster-ww.cmd in $($archive[0].Name)."
 
+      # Acceptance check for the slim release tag: PyAppify checks the tag out
+      # into working/ and keeps its objects in repo/objects. Both must be small
+      # and must still contain every runtime entry point.
+      - name: Verify the packaged working tree is slim
+        run: |
+          $app = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww'
+          $working = Join-Path $app 'working'
+          $objects = Join-Path $app 'repo/objects'
+          if (-not (Test-Path $working)) { throw "Packaged working tree not found: $working" }
+
+          $heavy = @('templates_src', 'tests', 'docs', '.github', '.agents', '.codex')
+          $leaked = @($heavy | Where-Object { Test-Path (Join-Path $working $_) })
+          if ($leaked.Count -gt 0) {
+            throw "The packaged working tree still contains development-only directories: $($leaked -join ', '). The release tag is not slim."
+          }
+          $required = @('main.py', 'config.py', 'requirements.txt', 'pyappify.yml',
+                        'assets/echo_model/echo.onnx', 'icons/icon.png', 'src/identity.py')
+          $missing = @($required | Where-Object { -not (Test-Path (Join-Path $working $_)) })
+          if ($missing.Count -gt 0) {
+            throw "The packaged working tree is missing runtime files: $($missing -join ', ')."
+          }
+
+          $workingBytes = (Get-ChildItem -LiteralPath $working -Recurse -File -ErrorAction SilentlyContinue |
+            Measure-Object -Property Length -Sum).Sum
+          $objectBytes = if (Test-Path $objects) {
+            (Get-ChildItem -LiteralPath $objects -Recurse -File -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum).Sum
+          } else { 0 }
+          Write-Host ("Packaged working/ = {0} MB ; repo/objects = {1} MB" -f
+            [math]::Round($workingBytes / 1MB, 1), [math]::Round($objectBytes / 1MB, 1))
+          if ($workingBytes -gt 300MB) {
+            throw "Packaged working tree is $workingBytes bytes, expected < 300 MB for a slim release tag."
+          }
+
       # Cheap post-mortem helper: shows which tags libgit2 kept in the bare
       # repository it cloned, useful when PyAppify rejects a setup version.
       - name: Diagnose packaged repository tags
@@ -509,7 +653,8 @@ jobs:
               ''
               'Launcher: PyAppify Tauri updater (Monster-ww/Monster-ww.exe).'
               "Update source (pyappify.yml git_url): $repoUrl"
-              'Updates fetch only the new tag''s changed git objects into data/apps/Monster-ww/working; the Python env, pip packages, templates and configs/ are not tracked there and survive intact.'
+              'Updates fetch only the new slim tag''s changed git objects into data/apps/Monster-ww/working; the Python env, pip packages and configs/ are not tracked there and survive intact.'
+              'The release tag carries runtime files only (no templates_src/, tests/, docs/ or build sources), which keeps both the bundled git database and the checkout small.'
               'The first download is the full archive; later updates transfer only changed source files.'
               'Monster-ww/Monster-ww.cmd remains available for command-line or fully offline starts (it sets PYAPPIFY_UPGRADEABLE=0).'
             )
@@ -533,7 +678,7 @@ jobs:
             'Extract (7z needs 7-Zip or Windows 11 23H2+) and double-click Monster-ww/Monster-ww.exe; Monster-ww/Monster-ww.cmd remains available for command-line arguments.'
             'Custom scripts use Monster-ww_scripts/ and Monster-ww_drop/; runtime logs use Monster-ww-runtime.log.'
             'Both entry points request administrator rights. The game runs elevated, so a non-elevated script gets Win32 error 5 (Access is denied) on every PostMessage and cannot click or press keys.'
-            'The app ships templates_src/ images with long file names; extract with 7-Zip / WinRAR into a short folder (e.g. C:\Monster-ww) if Windows Explorer reports a long-path error.'
+            'Slim release tag: templates_src/, tests/, docs/ and build tooling are excluded, so the archive is ~350-500 MB instead of 2.2 GiB while still supporting incremental updates.'
           ) + $launcherSummary
           if ($releaseReady -eq 'false') {
             $summary += @(
@@ -665,14 +810,15 @@ jobs:
             - **必须以管理员权限运行**：`Monster-ww.exe` 已内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权；`Monster-ww.cmd` 通过 `fltmc` 自提权。鸣潮客户端本身是管理员权限，脚本若以普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应
             - 本次启动器模式：`${{ inputs.launcher }}`
             - 更新源（`pyappify.yml` 的 `git_url`）：`${{ inputs.update_repo || format('{0}/{1}.git', github.server_url, github.repository) }}`
-            - `updater` 模式：`Monster-ww.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster-ww/working`；Python 环境、pip 依赖、模板资源和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
+            - `updater` 模式：`Monster-ww.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster-ww/working`；Python 环境、pip 依赖和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
+            - **本版使用精简发布 tag**：发布 tag 只包含运行时文件，不含 `templates_src/`（894 MB 测试截图）、`tests/`、`docs/` 和构建脚本。PyAppify 会把 tag 同时打包成 git 对象库和 `working/` 检出目录，两份一起缩小，因此压缩包从原来的 2.2 GiB 降到约 350–500 MB，且**增量更新能力完全保留**。运行时只读 `assets/`、`icons/`、`i18n/`、`src/` 和根目录的 Python 文件，功能不受影响
+            - 从旧版（`templates_src/` 尚在包内）通过 updater 升级时，切换 tag 会自动移除 `working/` 里的开发素材，`configs/`、日志和自定义脚本目录不受影响；但旧包已有的 git 对象库不会自动回收，想彻底减小磁盘占用建议下载本包全新解压
             - `cmd-only` 模式：`Monster-ww.exe` 只是带图标和管理员权限清单的轻量包装器，不含更新或联网逻辑
             - `Monster-ww.cmd` 设置了 `PYAPPIFY_UPGRADEABLE=0`，适合命令行参数或完全离线启动
             - 仅提供便携压缩包，不含安装程序，也不含在线安装包
             - 默认 7z 格式，请用 7-Zip 或 Windows 11 23H2+ 解压
-            - 若资产为 `.7z.001`、`.7z.002` 等分卷：把全部分卷下载到同一目录，用 7-Zip 打开第一个（`.001`）解压即可，无需手动合并
+            - 若资产为 `.7z.001`、`.7z.002` 等分卷：把全部分卷下载到同一目录，用 7-Zip 打开第一个（`.001`）解压即可，无需手动合并（精简版正常情况下不会出现分卷）
             - Python 环境与依赖已随包提供，首次运行无需联网下载
-            - 包内 `templates_src/` 含长文件名，建议用 7-Zip / WinRAR 解压到较短目录（如 `C:\Monster-ww`）
             - 由手动触发的 `Monster-ww Portable Release` 工作流构建
           files: ${{ steps.release.outputs.pattern }}
         env:
