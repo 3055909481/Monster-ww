@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77", "cython>=3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Monster-ww"
+version = "0.0.1"
+requires-python = ">=3.11"
+dependencies = [
+    "dulwich==1.2.21",
+    "mcp==2.3.0",
+    # Forked framework: distribution Mon-script, Python package Mon.
+    # Use the GitHub TAG ARCHIVE, not git+https: PyAppify strips Git from the
+    # pip child process PATH (clear_python_envs), so a git URL cannot be cloned
+    # during portable packaging. An https tarball needs no git executable.
+    "Mon-script[ocr,qt] @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.5b7-mon1.tar.gz",
+    "ok-pyside-minimal==6.12.0.post2",
+    "onnxocr-ppocrv5>=0.0.23",
+    "openvino",
+    "opencv-python",
+    "pyappify[standalone]>=1.0.20"
+]
+
+[project.optional-dependencies]
+dev = [
+    "polib",
+    "pytest",
+]
+docs = [
+    "mkdocs-material>=9.5,<10",
+]
+web-test = [
+    # Mon-script does not provide a "web" extra; keep the same pinned fork.
+    "Mon-script @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.5b7-mon1.tar.gz",
+]

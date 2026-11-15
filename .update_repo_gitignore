@@ -1,0 +1,12 @@
+__pycache__/
+**/__pycache__/
+.venv
+ok_import/
+Monster-ww_scripts/
+Monster-ww_drop/
+__pycache__
+*.pyc
+logs/
+**/logs/
+*.log
+*.log.*

@@ -1,0 +1,29 @@
+name: "Monster-ww"
+icon: "icons/icon.png"
+# The launcher keeps only the newest release tag, so both the bundled clone
+# and every later fetch stay small: an update transfers only the changed
+# objects of the new tag, never the Python environment bundled in the archive.
+#
+# The release tags published by portable-release.yml point at a SLIM commit on
+# the `portable` branch: its tree contains runtime files only (no
+# templates_src/, tests/, docs/ or CI sources, ~41 MB instead of ~1.06 GB).
+# PyAppify ships that tree twice - as repo/objects and as working/ - so the
+# portable archive shrinks from 2.2 GiB to roughly 350-500 MB while keeping
+# incremental updates. Do not point git_url at a full master tag again.
+keep_releases: 1
+profiles:
+  - name: "Portable"
+    # UPDATE SOURCE. This is our own fork, i.e. the slim release tags published
+    # by the "Monster-ww Portable Release" workflow. The launcher (Monster-ww.exe)
+    # fetches new versions from here. Change this URL to point updates at another
+    # repository you publish; that repo must carry the same version tags with
+    # the same runtime-only files (main.py, config.py, src/, assets/, icons/,
+    # i18n/, requirements.txt, pyappify.yml, ...).
+    # It must NOT point at upstream update repositories.
+    git_url: "https://github.com/3055909481/Monster-ww.git"
+    admin: true
+    main_script: "main.py"
+    requires_python: "3.12"
+    requirements: "requirements.txt"
+    use_pythonw: true
+    pip_args: "--no-deps"
