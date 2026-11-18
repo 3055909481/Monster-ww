@@ -6,7 +6,7 @@ selected step, rendered with the framework's own config editors.
 
 from copy import deepcopy
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QHBoxLayout, QInputDialog, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
@@ -16,8 +16,7 @@ from Mon.ui.qt.kit.buttons import Button
 from Mon.ui.qt.kit.dialogs import Dialog
 from Mon.ui.qt.kit.feedback import show_toast
 from Mon.ui.qt.kit.inputs import ComboBox
-
-from src.gui.RoutineIcons import IconConfigForm, task_icon
+from Mon.ui.qt.tasks.config_form import ConfigForm
 
 from src.task.routine.RoutinePlans import (
     DEFAULT_PLAN_NAME, ENTRIES, ENTRIES_BY_ID, PLAN_SELECTOR, PlanItemConfig,
@@ -88,9 +87,6 @@ class RoutinePlanDialog(Dialog):
 
         order_row = QHBoxLayout()
         self.add_combo = ComboBox([entry.name for entry in ENTRIES])
-        for index, entry in enumerate(ENTRIES):
-            self.add_combo.setItemIcon(index, task_icon(entry.task_id))
-        self.add_combo.setIconSize(QSize(22, 22))
         self.add_combo.setToolTip(task.tr('Choose a step to add'))
         order_row.addWidget(self.add_combo, 1)
         self.add_button = QPushButton(task.tr('Add Step'), left)
@@ -137,7 +133,6 @@ class RoutinePlanDialog(Dialog):
         for item in self._current_items():
             entry = ENTRIES_BY_ID[item['id']]
             widget_item = QListWidgetItem(entry.name)
-            widget_item.setIcon(task_icon(item['id']))
             widget_item.setFlags(widget_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             widget_item.setCheckState(Qt.CheckState.Checked if item['enabled'] else Qt.CheckState.Unchecked)
             widget_item.setData(ID_ROLE, item['id'])
@@ -181,8 +176,8 @@ class RoutinePlanDialog(Dialog):
             widget_item.setData(PARAMS_ROLE, deepcopy(new_values))
 
         config = PlanItemConfig(params, entry.default_config, on_change)
-        form = IconConfigForm(_PlanItemStub(entry), config, entry.default_config,
-                              entry.config_description, entry.config_type, self.config_host)
+        form = ConfigForm(_PlanItemStub(entry), config, entry.default_config,
+                          entry.config_description, entry.config_type, self.config_host)
         self.config_layout.addWidget(form)
         self.config_layout.addStretch(1)
 
@@ -218,7 +213,6 @@ class RoutinePlanDialog(Dialog):
             return
         item = new_item(task_id)
         widget_item = QListWidgetItem(ENTRIES_BY_ID[task_id].name)
-        widget_item.setIcon(task_icon(task_id))
         widget_item.setFlags(widget_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         widget_item.setCheckState(Qt.CheckState.Checked)
         widget_item.setData(ID_ROLE, task_id)
