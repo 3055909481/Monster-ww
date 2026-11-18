@@ -16,6 +16,12 @@ from src.task.FarmEchoTask import FarmEchoTask
 from src.task.ForgeryTask import ForgeryTask
 from src.task.SimulationTask import SimulationTask
 from src.task.TacetTask import TacetTask
+from src.task.TrainingGuideTask import (
+    BUDGET_KEY as GUIDE_BUDGET_KEY,
+    ROLE_KEY as GUIDE_ROLE_KEY,
+    CATEGORY_KEYS as GUIDE_CATEGORY_KEYS,
+    TrainingGuideTask,
+)
 from src.task.WWOneTimeTask import WWOneTimeTask
 from src.task.account.RuntimeTaskConfig import account_task_config
 from src.task.routine import RoutineCatalog as catalog
@@ -32,11 +38,11 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.name = '🧩 Daily Routine Pipeline'
+        self.name = '🧩 日常一条龙'
         self.icon = task_icon('daily')
-        self.group_name = 'Daily Activities'
+        self.group_name = '日常活动'
         self.group_icon = task_icon('category-daily')
-        self.description = 'Run a fully customizable daily pipeline. Each account may select its own plan.'
+        self.description = '高度自定义的日常流水线，每个账号可选择自己的计划。'
         self.support_schedule_task = True
         self.default_config[PLAN_SELECTOR] = DEFAULT_PLAN_NAME
         self.config_description[PLAN_SELECTOR] = 'Plan name saved in configs/RoutinePlans.json.'
@@ -47,7 +53,7 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         self.default_config[EDIT_PLANS] = False
         self.config_type[EDIT_PLANS] = {
             'type': 'button',
-            'text': 'Configure Routine',
+            'text': '配置流水线',
             'callback': self.configure_plans,
         }
         self.add_exit_after_config()
@@ -93,7 +99,7 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         items = normalize_items(plans.get(self.plan_name, plans[DEFAULT_PLAN_NAME]))
         selected = [item for item in items if item['enabled']]
         if not selected:
-            self.log_info(self.tr('Routine plan has no enabled item; nothing to do.'), notify=True)
+            self.log_info(self.tr('流水线没有启用的步骤，无需执行。'), notify=True)
             return
 
         self.ensure_main(time_out=180)
@@ -106,19 +112,19 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
                 raise
             except Exception as error:
                 self.results.append((entry_id, 'failed', str(error)))
-                self.log_error(self.tr('Routine item failed: {id}').format(id=entry_id), error)
+                self.log_error(self.tr('流水线步骤失败：{id}').format(id=entry_id), error)
                 self.screenshot(f'routine_fail_{entry_id}')
                 self.ensure_main(time_out=180)
             else:
                 self.results.append((entry_id, 'success', ''))
         self.info_set('流水线结果', self.results)
-        self.log_info(self.tr('Daily routine finished: {success}/{total}').format(
+        self.log_info(self.tr('日常流水线完成：{success}/{total}').format(
             success=sum(status == 'success' for _, status, _ in self.results),
             total=len(self.results)), notify=True)
 
     def _run_entry(self, entry_id, params):
         params = deepcopy(params)
-        self.log_info(self.tr('Run routine item: {id} {params}').format(id=entry_id, params=params))
+        self.log_info(self.tr('执行流水线步骤：{id} {params}').format(id=entry_id, params=params))
         if entry_id == 'claim_daily':
             daily = self.get_task_by_class(DailyTask)
             daily.claim_daily()
@@ -161,12 +167,23 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
                 'Boss': 'Other',
                 'Repeat Farm Count': min(3, max(1, int(params.get('次数', 3) or 3))),
             })
+        elif entry_id == 'training_guide':
+            guide = self.get_task_by_class(TrainingGuideTask)
+            guide_config = {
+                GUIDE_ROLE_KEY: params.get('目标角色', ''),
+                GUIDE_BUDGET_KEY: int(params.get('体力预算', 240) or 0),
+            }
+            for domain, key in GUIDE_CATEGORY_KEYS.items():
+                default = domain != 'weekly_boss'
+                guide_config[key] = bool(params.get(key, default))
+            with account_task_config(guide, guide_config):
+                guide.run()
         else:
-            raise ValueError(self.tr('Unknown routine item: {id}').format(id=entry_id))
+            raise ValueError(self.tr('未知流水线步骤：{id}').format(id=entry_id))
         self.ensure_main()
 
     def _farm_echo(self, config):
         task = self.get_task_by_class(FarmEchoTask)
-        self.log_info(self.tr('Farm echo with: {config}').format(config=config))
+        self.log_info(self.tr('刷取声骸，配置：{config}').format(config=config))
         with account_task_config(task, config):
             task.run()

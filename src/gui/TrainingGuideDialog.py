@@ -13,35 +13,36 @@ from Mon.ui.qt.kit.dialogs import Dialog
 
 class TrainingGuideDialog(Dialog):
     def __init__(self, parent, task):
-        super().__init__(parent, task.tr('Training guide (automatic)'),
-                         ok_text=task.tr('Close'), cancel_text=None, width=580)
+        super().__init__(parent, task.tr('培养目标自动补齐'),
+                         ok_text=task.tr('关闭'), cancel_text=None, width=580)
         root = QWidget(self.panel)
         layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
 
         intro = QLabel(task.tr(
-            'Configure this task card: set 总体力预算 and toggle the categories to fill. '
-            'The task opens 素材获取 → 培养目标, reads each row, and only farms rows '
-            'that offer 直接挑战 with a real shortage (拥有 &lt; 需要); 前往 rows are skipped.'
+            '在任务卡片上设置「总体力预算」和要补齐的类别开关。'
+            '任务会自动打开「素材获取 → 培养目标」，逐行读取缺口，'
+            '只对显示「直接挑战」且确有缺口（拥有 &lt; 需要）的行进行补齐；'
+            '显示「前往」的行会自动跳过。'
         ), root)
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
         mapping = QLabel(task.tr(
-            'Group → category mapping:\n'
+            '分组与副本类别对应关系：\n'
             '  共鸣者突破材料 → 讨伐强敌（补讨伐强敌）\n'
             '  武器与技能素材 → 凝素领域（补凝素领域）\n'
             '  技能升级材料 / 突破材料 → 战歌重奏（补战歌重奏）\n\n'
-            'Each fight costs the domain\'s stamina (凝素 40 / 讨伐 60 / 战歌 60). '
-            'The task stops when the total budget is spent or enabled rows are satisfied.'
+            '每次挑战消耗对应体力（凝素 40 / 讨伐 60 / 战歌 60）。'
+            '体力预算用完，或已启用类别的缺口都补齐后，任务自动结束。'
         ), root)
         mapping.setWordWrap(True)
         layout.addWidget(mapping)
 
         note = QLabel(task.tr(
-            'Note: the game decides which specific boss/domain a 直接挑战 button opens. '
-            'If detection fails on your resolution, adjust the constants in '
-            'src/task/TrainingGuideTask.py (Config class) and rebuild.'
+            '说明：点「直接挑战」后进入哪个具体副本由游戏决定，脚本无需选择。'
+            '若在你的分辨率下识别失败，请调整 src/task/TrainingGuideTask.py '
+            '中 Config 类的参数后重新打包。'
         ), root)
         note.setWordWrap(True)
         layout.addWidget(note)
