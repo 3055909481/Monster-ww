@@ -26,6 +26,11 @@ from src.task.account.MultiAccountConfigStore import (
 from src.task.account.RuntimeTaskConfig import effective_config
 
 
+def _routine_task_class():
+    from src.task.RoutineTask import RoutineTask
+    return RoutineTask
+
+
 class AccountStatusTable(QTableWidget):
     """Show complete wrapped rows; let the page own vertical scrolling."""
 
@@ -246,6 +251,7 @@ class MultiAccountConfigTab(CustomTab):
         self.elapsed_text = ''
         self.results_signature = None
         self.run_results = {}
+        self._routine_options = None
         header = QHBoxLayout()
         title = QLabel('多账号配置')
         title.setProperty('role', 'subtitle')
@@ -322,8 +328,39 @@ class MultiAccountConfigTab(CustomTab):
                 for account in accounts:
                     self.add_account(account)
                 self.loaded = True
+                # Snapshot the plan names so edits made in the routine editor
+                # (which has its own modal dialog) can be detected on refresh.
+                self._routine_options = self._plan_options()
         self.refresh_status()
         self.timer.start()
+
+    def _plan_options(self):
+        """Read plan names straight from disk, independent of task config init."""
+        if self.executor is None:
+            return None
+        from src.task.routine.RoutinePlans import PLAN_SELECTOR, RoutinePlanStore
+        options = list(RoutinePlanStore(self.executor.config_folder).load())
+        try:
+            task = self.executor.get_task_by_class(_routine_task_class())
+        except (KeyError, LookupError, TypeError):
+            task = None
+        if task is not None:
+            config_type = task.config_type.get(PLAN_SELECTOR)
+            if isinstance(config_type, dict):
+                config_type['options'] = options
+        return options
+
+    def _sync_plan_options(self):
+        """Rebuild RoutineTask cards when plans were added/renamed elsewhere."""
+        options = self._plan_options()
+        if options is None or options == self._routine_options:
+            return
+        self._routine_options = options
+        task_class = _routine_task_class()
+        for card in self.cards:
+            selected = card.selected_task()
+            if selected is not None and isinstance(selected, task_class):
+                card.render_config()
 
     def hideEvent(self, event):
         self.timer.stop()
@@ -377,6 +414,7 @@ class MultiAccountConfigTab(CustomTab):
 
     def refresh_status(self):
         self.refresh_results()
+        self._sync_plan_options()
         busy = bool(self.runner and self.runner.enabled)
         ready = self.loaded and self.runner is not None
         self.start_button.setEnabled(ready and not busy)
