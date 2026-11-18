@@ -296,6 +296,7 @@ config = {
         ["src.task.GardenTask", "GardenTask"],
         ["src.task.TacetEliminationTask", "TacetEliminationTask"],
         ["src.task.RoutineTask", "RoutineTask"],
+        ["src.task.TrainingGuideTask", "TrainingGuideTask"],
         # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],
