@@ -67,6 +67,10 @@ class RoutineTab(CustomTab):
         edit_button = Button(self.tr('Edit steps'), icon='pen', parent=plan_row)
         edit_button.clicked.connect(self._edit_steps)
         plan_layout.addWidget(edit_button)
+        guide_button = Button(self.tr('Training guide'), parent=plan_row)
+        guide_button.setToolTip(self.tr('Plan stamina runs from material shortages'))
+        guide_button.clicked.connect(self._open_training_guide)
+        plan_layout.addWidget(guide_button)
         layout.addWidget(plan_row)
 
         self.step_list = QListWidget(card)
@@ -79,6 +83,9 @@ class RoutineTab(CustomTab):
         # Re-render after save so both the preview list and the plan dropdown
         # reflect plans/steps added or renamed in the editor.
         self.task.configure_plans(on_saved=self._render)
+
+    def _open_training_guide(self):
+        self.task.configure_training_guide(on_saved=self._render)
 
     def _fill_steps(self, items):
         self.step_list.clear()
