@@ -1,54 +1,50 @@
-"""Information dialog for the fully automatic training-guide task.
+"""Information dialog for the semi-automatic training-guide task.
 
-The task no longer asks users to pick domains or fill in shortages: it reads
-the game's own 所需材料 panel and only acts on rows that offer a 直接挑战
-button with a real shortage. This dialog explains that behaviour and surfaces
-the tunable screen-detection settings, so nobody expects a manual table.
+All real configuration (stamina budget + per-category toggles) lives on the
+task card itself and is rendered by the framework from default_config. This
+dialog just explains the mapping and behaviour so users know what the toggles
+mean, since the material panel itself only shows icons and group text.
 """
 
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from Mon.ui.qt.kit.dialogs import Dialog
 
-from src.task.TrainingGuideTask import Config as GuideConfig
-
 
 class TrainingGuideDialog(Dialog):
     def __init__(self, parent, task):
         super().__init__(parent, task.tr('Training guide (automatic)'),
-                         ok_text=task.tr('Close'), cancel_text=None, width=560)
+                         ok_text=task.tr('Close'), cancel_text=None, width=580)
         root = QWidget(self.panel)
         layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
 
         intro = QLabel(task.tr(
-            'The task opens 素材获取 → 培养目标 → 所需材料 by itself. It reads each '
-            'row\'s "have/need" number and only farms rows that show a 直接挑战 '
-            'button and still lack material. Rows showing 前往 are skipped because '
-            'the game does not offer a direct challenge for them.'
+            'Configure this task card: set 总体力预算 and toggle the categories to fill. '
+            'The task opens 素材获取 → 培养目标, reads each row, and only farms rows '
+            'that offer 直接挑战 with a real shortage (拥有 &lt; 需要); 前往 rows are skipped.'
         ), root)
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        detail = QLabel(task.tr(
-            'Because the game decides which domain a 直接挑战 button leads to, '
-            'there is nothing to configure here. Set "每行刷取次数上限" on the task '
-            'card to cap repeats per row (0 = until no shortage).'
+        mapping = QLabel(task.tr(
+            'Group → category mapping:\n'
+            '  共鸣者突破材料 → 讨伐强敌（补讨伐强敌）\n'
+            '  武器与技能素材 → 凝素领域（补凝素领域）\n'
+            '  技能升级材料 / 突破材料 → 战歌重奏（补战歌重奏）\n\n'
+            'Each fight costs the domain\'s stamina (凝素 40 / 讨伐 60 / 战歌 60). '
+            'The task stops when the total budget is spent or enabled rows are satisfied.'
         ), root)
-        detail.setWordWrap(True)
-        layout.addWidget(detail)
+        mapping.setWordWrap(True)
+        layout.addWidget(mapping)
 
-        tuning = QLabel(task.tr(
-            'Detection region: {region}\n'
-            'Same-row tolerance: {tol}\n'
-            'Max rows per run: {cap}\n\n'
+        note = QLabel(task.tr(
+            'Note: the game decides which specific boss/domain a 直接挑战 button opens. '
             'If detection fails on your resolution, adjust the constants in '
             'src/task/TrainingGuideTask.py (Config class) and rebuild.'
-        ).format(region=GuideConfig.ROWS_REGION,
-                 tol=GuideConfig.SAME_ROW_TOLERANCE,
-                 cap=GuideConfig.MAX_ROWS), root)
-        tuning.setWordWrap(True)
-        layout.addWidget(tuning)
+        ), root)
+        note.setWordWrap(True)
+        layout.addWidget(note)
 
         self.body.addWidget(root)
 
