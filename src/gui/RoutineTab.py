@@ -8,6 +8,7 @@ from Mon.ui.qt.kit.inputs import ComboBox
 from Mon.ui.qt.widget.Card import Card
 from Mon.ui.qt.widget.CustomTab import CustomTab
 
+from src.gui.RoutineIcons import task_icon
 from src.task.RoutineTask import RoutineTask
 from src.task.routine.RoutinePlans import (
     DEFAULT_PLAN_NAME, ENTRIES_BY_ID, PLAN_SELECTOR, RoutinePlanStore,
@@ -93,6 +94,7 @@ class RoutineTab(CustomTab):
             if params:
                 label += '  —  ' + ', '.join(f'{key}: {value}' for key, value in params.items())
             list_item = QListWidgetItem(label)
+            list_item.setIcon(task_icon(item['id']))
             list_item.setToolTip(entry.name)
             self.step_list.addItem(list_item)
 
