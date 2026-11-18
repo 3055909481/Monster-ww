@@ -67,6 +67,19 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         if saved and callable(on_saved):
             on_saved()
 
+    def configure_training_guide(self, on_saved=None):
+        """Open the training-guide planner (material shortage -> runs)."""
+        from PySide6.QtWidgets import QApplication
+        from src.gui.TrainingGuideDialog import TrainingGuideDialog
+
+        dialog = TrainingGuideDialog(QApplication.activeWindow(), self)
+        try:
+            saved = dialog.exec()
+        finally:
+            dialog.deleteLater()
+        if saved and callable(on_saved):
+            on_saved()
+
     def plan_options(self):
         return list(RoutinePlanStore(self.executor.config_folder).load())
 
