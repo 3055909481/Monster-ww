@@ -12,6 +12,7 @@ select its own plan name and get an independent stamina workflow.
 import json
 import os
 import tempfile
+import uuid
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,29 +115,40 @@ def default_items():
     ]
 
 
+def new_item(task_id):
+    """Create a fresh step with a unique id so the same task can appear twice."""
+    entry = ENTRIES_BY_ID.get(task_id)
+    if entry is None:
+        raise ValueError(f'Unknown routine item: {task_id}')
+    return {
+        'id': task_id,
+        'uid': uuid.uuid4().hex,
+        'enabled': True,
+        'params': deepcopy(entry.default_config),
+    }
+
+
 def normalize_items(items):
-    """Drop unknown ids, deduplicate, append missing entries, fill params."""
+    """Validate items, fill params, assign uids. Keeps duplicates on purpose."""
     raw = items if isinstance(items, list) else []
     normalized = []
-    seen = set()
     for item in raw:
         if not isinstance(item, dict):
             continue
         task_id = item.get('id')
         entry = ENTRIES_BY_ID.get(task_id)
-        if entry is None or task_id in seen:
+        if entry is None:
             continue
         params = deepcopy(entry.default_config)
         if isinstance(item.get('params'), dict):
             params.update({key: value for key, value in item['params'].items()
                            if key in entry.default_config})
-        normalized.append({'id': task_id, 'enabled': bool(item.get('enabled', False)),
+        uid = item.get('uid')
+        if not isinstance(uid, str) or not uid:
+            uid = uuid.uuid4().hex
+        normalized.append({'id': task_id, 'uid': uid,
+                           'enabled': bool(item.get('enabled', False)),
                            'params': params})
-        seen.add(task_id)
-    for entry in ENTRIES:
-        if entry.task_id not in seen:
-            normalized.append({'id': entry.task_id, 'enabled': False,
-                               'params': deepcopy(entry.default_config)})
     return normalized
 
 
