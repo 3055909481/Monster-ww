@@ -55,15 +55,17 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         self.results = []
 
     # ------------------------------------------------------------------ GUI
-    def configure_plans(self):
+    def configure_plans(self, on_saved=None):
         from PySide6.QtWidgets import QApplication
         from src.gui.RoutinePlanDialog import RoutinePlanDialog
 
         dialog = RoutinePlanDialog(QApplication.activeWindow(), self)
         try:
-            dialog.exec()
+            saved = dialog.exec()
         finally:
             dialog.deleteLater()
+        if saved and callable(on_saved):
+            on_saved()
 
     def plan_options(self):
         return list(RoutinePlanStore(self.executor.config_folder).load())

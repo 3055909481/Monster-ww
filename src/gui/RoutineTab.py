@@ -65,7 +65,7 @@ class RoutineTab(CustomTab):
         plan_layout.addWidget(QLabel(self.tr('Active plan')), 0)
         plan_layout.addWidget(self.plan_combo, 1)
         edit_button = Button(self.tr('Edit steps'), icon='pen', parent=plan_row)
-        edit_button.clicked.connect(self.task.configure_plans)
+        edit_button.clicked.connect(self._edit_steps)
         plan_layout.addWidget(edit_button)
         layout.addWidget(plan_row)
 
@@ -74,6 +74,11 @@ class RoutineTab(CustomTab):
         layout.addWidget(self.step_list, 1)
         self._fill_steps(plans.get(self.plan_combo.currentText(), []))
         self.vBoxLayout.addWidget(card)
+
+    def _edit_steps(self):
+        # Re-render after save so both the preview list and the plan dropdown
+        # reflect plans/steps added or renamed in the editor.
+        self.task.configure_plans(on_saved=self._render)
 
     def _fill_steps(self, items):
         self.step_list.clear()

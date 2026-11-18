@@ -19,12 +19,13 @@ from Mon.ui.qt.kit.inputs import ComboBox
 from Mon.ui.qt.tasks.config_form import ConfigForm
 
 from src.task.routine.RoutinePlans import (
-    DEFAULT_PLAN_NAME, ENTRIES_BY_ID, PLAN_SELECTOR, PlanItemConfig,
-    RoutinePlanStore, default_items, normalize_items,
+    DEFAULT_PLAN_NAME, ENTRIES, ENTRIES_BY_ID, PLAN_SELECTOR, PlanItemConfig,
+    RoutinePlanStore, default_items, new_item, normalize_items,
 )
 
 ID_ROLE = Qt.UserRole
 PARAMS_ROLE = Qt.UserRole + 1
+UID_ROLE = Qt.UserRole + 2
 
 
 class _PlanItemStub:
@@ -85,13 +86,25 @@ class RoutinePlanDialog(Dialog):
         left_layout.addWidget(self.step_list, 1)
 
         order_row = QHBoxLayout()
+        self.add_combo = ComboBox([entry.name for entry in ENTRIES])
+        self.add_combo.setToolTip(task.tr('Choose a step to add'))
+        order_row.addWidget(self.add_combo, 1)
+        self.add_button = QPushButton(task.tr('Add Step'), left)
+        self.add_button.clicked.connect(self._add_step)
+        order_row.addWidget(self.add_button)
+        left_layout.addLayout(order_row)
+
+        order_row2 = QHBoxLayout()
         self.up_button = QPushButton(task.tr('Move Up'), left)
         self.down_button = QPushButton(task.tr('Move Down'), left)
+        self.delete_step_button = QPushButton(task.tr('Delete Step'), left)
         self.up_button.clicked.connect(lambda: self._move(-1))
         self.down_button.clicked.connect(lambda: self._move(1))
-        order_row.addWidget(self.up_button)
-        order_row.addWidget(self.down_button)
-        left_layout.addLayout(order_row)
+        self.delete_step_button.clicked.connect(self._delete_step)
+        order_row2.addWidget(self.up_button)
+        order_row2.addWidget(self.down_button)
+        order_row2.addWidget(self.delete_step_button)
+        left_layout.addLayout(order_row2)
 
         right = QWidget(root)
         self.right_layout = QVBoxLayout(right)
@@ -123,6 +136,7 @@ class RoutinePlanDialog(Dialog):
             widget_item.setFlags(widget_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             widget_item.setCheckState(Qt.CheckState.Checked if item['enabled'] else Qt.CheckState.Unchecked)
             widget_item.setData(ID_ROLE, item['id'])
+            widget_item.setData(UID_ROLE, item.get('uid'))
             widget_item.setData(PARAMS_ROLE, deepcopy(item['params']))
             widget_item.setToolTip(entry.name)
             self.step_list.addItem(widget_item)
@@ -138,6 +152,7 @@ class RoutinePlanDialog(Dialog):
             params = deepcopy(entry.default_config)
             params.update(widget_item.data(PARAMS_ROLE) or {})
             items.append({'id': task_id,
+                          'uid': widget_item.data(UID_ROLE),
                           'enabled': widget_item.checkState() == Qt.CheckState.Checked,
                           'params': params})
         return normalize_items(items)
@@ -190,6 +205,36 @@ class RoutinePlanDialog(Dialog):
         self.step_list.setCurrentRow(target)
         self._loading = False
         self.plans[self.active_name] = self._collect_steps()
+
+    def _add_step(self):
+        name = self.add_combo.currentText()
+        task_id = next((entry.task_id for entry in ENTRIES if entry.name == name), None)
+        if task_id is None:
+            return
+        item = new_item(task_id)
+        widget_item = QListWidgetItem(ENTRIES_BY_ID[task_id].name)
+        widget_item.setFlags(widget_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        widget_item.setCheckState(Qt.CheckState.Checked)
+        widget_item.setData(ID_ROLE, task_id)
+        widget_item.setData(UID_ROLE, item['uid'])
+        widget_item.setData(PARAMS_ROLE, deepcopy(item['params']))
+        widget_item.setToolTip(ENTRIES_BY_ID[task_id].name)
+        self.step_list.addItem(widget_item)
+        self.step_list.setCurrentItem(widget_item)
+        self.plans[self.active_name] = self._collect_steps()
+
+    def _delete_step(self):
+        row = self.step_list.currentRow()
+        if row < 0:
+            return
+        self._loading = True
+        self.step_list.takeItem(row)
+        self._loading = False
+        self.plans[self.active_name] = self._collect_steps()
+        if self.step_list.count():
+            self.step_list.setCurrentRow(min(row, self.step_list.count() - 1))
+        else:
+            self._render_config(None)
 
     def _plan_changed(self, name):
         if self._loading or not name:
