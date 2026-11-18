@@ -45,8 +45,8 @@ class _PlanItemStub:
 
 class RoutinePlanDialog(Dialog):
     def __init__(self, parent, task):
-        super().__init__(parent, task.tr('Daily Routine Pipeline'),
-                         ok_text=task.tr('Save and Close'), cancel_text=task.tr('Cancel'), width=1000)
+        super().__init__(parent, task.tr('日常一条龙'),
+                         ok_text=task.tr('保存并关闭'), cancel_text=task.tr('取消'), width=1000)
         self.task = task
         self.store = RoutinePlanStore(task.executor.config_folder if task.executor else 'configs')
         self.plans = self.store.load()
@@ -67,11 +67,11 @@ class RoutinePlanDialog(Dialog):
         self.plan_combo = ComboBox(list(self.plans))
         self.plan_combo.setCurrentText(self.active_name)
         self.plan_combo.currentTextChanged.connect(self._plan_changed)
-        plan_row.addWidget(QLabel(task.tr('Plan')), 0)
+        plan_row.addWidget(QLabel(task.tr('计划')), 0)
         plan_row.addWidget(self.plan_combo, 1)
-        self.new_button = Button(task.tr('New'), parent=left)
+        self.new_button = Button(task.tr('新建'), parent=left)
         self.new_button.clicked.connect(self._new_plan)
-        self.delete_button = Button(task.tr('Delete'), variant='subtle', parent=left)
+        self.delete_button = Button(task.tr('删除'), variant='subtle', parent=left)
         self.delete_button.clicked.connect(self._delete_plan)
         plan_row.addWidget(self.new_button)
         plan_row.addWidget(self.delete_button)
@@ -87,17 +87,17 @@ class RoutinePlanDialog(Dialog):
 
         order_row = QHBoxLayout()
         self.add_combo = ComboBox([entry.name for entry in ENTRIES])
-        self.add_combo.setToolTip(task.tr('Choose a step to add'))
+        self.add_combo.setToolTip(task.tr('选择要添加的步骤'))
         order_row.addWidget(self.add_combo, 1)
-        self.add_button = QPushButton(task.tr('Add Step'), left)
+        self.add_button = QPushButton(task.tr('添加步骤'), left)
         self.add_button.clicked.connect(self._add_step)
         order_row.addWidget(self.add_button)
         left_layout.addLayout(order_row)
 
         order_row2 = QHBoxLayout()
-        self.up_button = QPushButton(task.tr('Move Up'), left)
-        self.down_button = QPushButton(task.tr('Move Down'), left)
-        self.delete_step_button = QPushButton(task.tr('Delete Step'), left)
+        self.up_button = QPushButton(task.tr('上移'), left)
+        self.down_button = QPushButton(task.tr('下移'), left)
+        self.delete_step_button = QPushButton(task.tr('删除步骤'), left)
         self.up_button.clicked.connect(lambda: self._move(-1))
         self.down_button.clicked.connect(lambda: self._move(1))
         self.delete_step_button.clicked.connect(self._delete_step)
@@ -113,7 +113,7 @@ class RoutinePlanDialog(Dialog):
         self.config_layout = QVBoxLayout(self.config_host)
         self.config_layout.setContentsMargins(0, 0, 0, 0)
         self.right_layout.addWidget(self.config_host, 1)
-        self.hint = QLabel(task.tr('Check a step to include it. Drag to reorder. Runs top to bottom.'), right)
+        self.hint = QLabel(task.tr('勾选步骤以纳入；拖拽可排序，从上到下依次执行。'), right)
         self.hint.setWordWrap(True)
         self.right_layout.addWidget(self.hint)
 
@@ -166,7 +166,7 @@ class RoutinePlanDialog(Dialog):
             return
         entry = ENTRIES_BY_ID[widget_item.data(ID_ROLE)]
         if not entry.default_config:
-            label = QLabel(self.task.tr('This step has no settings.'), self.config_host)
+            label = QLabel(self.task.tr('此步骤无需设置。'), self.config_host)
             label.setWordWrap(True)
             self.config_layout.addWidget(label)
             return
@@ -246,12 +246,12 @@ class RoutinePlanDialog(Dialog):
         self._loading = False
 
     def _new_plan(self):
-        name, ok = QInputDialog.getText(self, self.task.tr('New plan'), self.task.tr('Plan name'))
+        name, ok = QInputDialog.getText(self, self.task.tr('新建计划'), self.task.tr('计划名称'))
         if not ok or not name.strip():
             return
         name = name.strip()
         if name in self.plans:
-            show_toast(self, self.task.tr('Plan already exists'), tone='warning')
+            show_toast(self, self.task.tr('计划已存在'), tone='warning')
             return
         self.plans[self.active_name] = self._collect_steps()
         self.plans[name] = default_items()
@@ -266,7 +266,7 @@ class RoutinePlanDialog(Dialog):
 
     def _delete_plan(self):
         if len(self.plans) <= 1:
-            show_toast(self, self.task.tr('Keep at least one plan'), tone='warning')
+            show_toast(self, self.task.tr('至少保留一个计划'), tone='warning')
             return
         name = self.active_name
         self.plans.pop(name, None)
@@ -293,5 +293,5 @@ class RoutinePlanDialog(Dialog):
         config_type = self.task.config_type.get(PLAN_SELECTOR)
         if isinstance(config_type, dict) and 'options' in config_type:
             config_type['options'] = list(self.plans)
-        show_toast(self.parentWidget(), self.task.tr('Routine plan saved'), tone='success')
+        show_toast(self.parentWidget(), self.task.tr('流水线计划已保存'), tone='success')
         return True

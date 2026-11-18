@@ -18,7 +18,7 @@ class RoutineTab(CustomTab):
     def __init__(self):
         super().__init__()
         self.setObjectName('RoutineTab')
-        self.tr_name = self.tr('Daily Routine')
+        self.tr_name = self.tr('日常一条龙')
         self.task = None
 
     @property
@@ -41,10 +41,10 @@ class RoutineTab(CustomTab):
             if old.widget() is not None:
                 old.widget().deleteLater()
         if self.task is None:
-            self.vBoxLayout.addWidget(QLabel(self.tr('Routine task is unavailable.')))
+            self.vBoxLayout.addWidget(QLabel(self.tr('流水线任务不可用。')))
             return
 
-        card = Card(self.tr('Daily Routine Pipeline'), QWidget(), parent=self.view)
+        card = Card(self.tr('日常一条龙'), QWidget(), parent=self.view)
         layout = QVBoxLayout(card.widget)
 
         intro = QLabel(self.tr(
@@ -62,13 +62,13 @@ class RoutineTab(CustomTab):
         self.plan_combo = ComboBox(list(plans))
         self.plan_combo.setCurrentText(self.task.config.get(PLAN_SELECTOR, DEFAULT_PLAN_NAME))
         self.plan_combo.currentTextChanged.connect(self._plan_changed)
-        plan_layout.addWidget(QLabel(self.tr('Active plan')), 0)
+        plan_layout.addWidget(QLabel(self.tr('当前计划')), 0)
         plan_layout.addWidget(self.plan_combo, 1)
-        edit_button = Button(self.tr('Edit steps'), icon='pen', parent=plan_row)
+        edit_button = Button(self.tr('编辑步骤'), icon='pen', parent=plan_row)
         edit_button.clicked.connect(self._edit_steps)
         plan_layout.addWidget(edit_button)
-        guide_button = Button(self.tr('Training guide'), parent=plan_row)
-        guide_button.setToolTip(self.tr('Plan stamina runs from material shortages'))
+        guide_button = Button(self.tr('培养目标'), parent=plan_row)
+        guide_button.setToolTip(self.tr('根据材料缺口规划体力副本'))
         guide_button.clicked.connect(self._open_training_guide)
         plan_layout.addWidget(guide_button)
         layout.addWidget(plan_row)
@@ -107,4 +107,4 @@ class RoutineTab(CustomTab):
         self.task.config[PLAN_SELECTOR] = name
         plans = RoutinePlanStore(self.executor.config_folder).load()
         self._fill_steps(plans.get(name, []))
-        show_toast(self, self.tr('Active plan changed'), tone='success')
+        show_toast(self, self.tr('已切换计划'), tone='success')
