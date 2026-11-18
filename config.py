@@ -184,6 +184,7 @@ config = {
     # so re-enable it here for the Monster-ww build.
     'custom_tabs': [
         ["src.gui.CharacterCodeTab", "CharacterCodeTab"],
+        ["src.gui.RoutineTab", "RoutineTab"],
     ],
     'ocr': {
         'lib': 'onnxocr',
@@ -294,6 +295,7 @@ config = {
         ["src.task.ChangeEchoTask", "ChangeEchoTask"],
         ["src.task.GardenTask", "GardenTask"],
         ["src.task.TacetEliminationTask", "TacetEliminationTask"],
+        ["src.task.RoutineTask", "RoutineTask"],
         # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],

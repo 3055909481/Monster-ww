@@ -53,8 +53,12 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
         self.openF2Book('gray_book_boss')
         return self.get_stamina()
 
-    def farm_domain_with_recovery_loop(self, must_use, teleport_into_domain_once, max_recovery_retries=3):
-        """包装副本刷取循环：死亡恢复后自动从 F2 重新进入，并限制重试次数。"""
+    def farm_domain_with_recovery_loop(self, must_use, teleport_into_domain_once, max_recovery_retries=3,
+                                       max_runs=0):
+        """包装副本刷取循环：死亡恢复后自动从 F2 重新进入，并限制重试次数。
+
+        max_runs > 0 时刷够次数就退出；0 表示沿用原逻辑（刷到体力耗尽）。
+        """
         recovery_retries = 0
         self.realm_entry_at_heal_point = False
         while True:
@@ -65,7 +69,7 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
                 return
             teleport_into_domain_once()
             self.sleep(1)
-            finished, must_use = self.farm_in_domain(must_use=must_use)
+            finished, must_use = self.farm_in_domain(must_use=must_use, max_runs=max_runs)
             if finished:
                 return
             recovery_retries += 1
@@ -78,14 +82,16 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
             self.realm_entry_at_heal_point = True  # 恢复后站在信标上, 从 F2 直接进本
             self.sleep(1)
 
-    def farm_in_domain(self, must_use=0):
+    def farm_in_domain(self, must_use=0, max_runs=0):
         """刷本循环；返回 (是否整段正常结束, 剩余 must_use)。
 
         第二项在死亡提前退出时仍会带上本局内已扣过的额度，供外层恢复循环继续传参。
+        max_runs > 0 时刷够次数正常结束。
         """
         if self.stamina_once <= 0:
             raise RuntimeError(self.tr('"self.stamina_once" must be override'))
         self.info_incr('used stamina', 0)
+        runs = 0
         while True:
             self.walk_until_f(time_out=4, backward_time=0, raise_if_not_found=True)
             self.pick_f()
@@ -101,7 +107,11 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
             can_continue, used = self.use_stamina(once=self.stamina_once, must_use=must_use)
             self.info_incr('used stamina', used)
             must_use -= used
+            runs += 1
             self.sleep(4)
+            if max_runs and runs >= max_runs:
+                self.log_info(self.tr('reached configured run count ({runs})').format(runs=runs))
+                break
             if not can_continue:
                 self.log_info(self.tr('used all stamina'))
                 break

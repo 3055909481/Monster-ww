@@ -1,0 +1,216 @@
+"""Routine plan registry, persistence and config adapters.
+
+A plan is an ordered list of items::
+
+    [{"id": "forgery", "enabled": true,
+      "params": {"地区": "瑾珑·梦州", "武器类型": "长刃", "次数": 2}}, ...]
+
+Plans live in ``configs/RoutinePlans.json`` so each multi-account entry can
+select its own plan name and get an independent stamina workflow.
+"""
+
+import json
+import os
+import tempfile
+from copy import deepcopy
+from dataclasses import dataclass
+from pathlib import Path
+
+from src.task.routine import RoutineCatalog as catalog
+
+DEFAULT_PLAN_NAME = '默认'
+PLAN_SELECTOR = 'Routine Plan'
+EDIT_PLANS = 'Configure Routine Plans'
+
+
+@dataclass(frozen=True)
+class RoutineEntry:
+    task_id: str
+    name: str
+    group: str
+    default_config: dict
+    config_description: dict
+    config_type: dict
+
+
+def _count_schema():
+    return {
+        '次数': 0,
+    }, {
+        '次数': '刷取次数；0 表示刷到体力耗尽（战歌重奏请填 1~3）。',
+    }, {
+        '次数': {'min': 0, 'max': 99},
+    }
+
+
+def _build_entries():
+    count_default, count_desc, count_type = _count_schema()
+    entries = [
+        RoutineEntry('claim_daily', '领取活跃度奖励 / 邮件', '奖励',
+                     {}, {}, {}),
+        RoutineEntry('battle_pass', '领取先约电台经验与等级奖励', '奖励',
+                     {}, {}, {}),
+        RoutineEntry('weekly_garden', '周度游历奖励（梦幻游园）', '奖励',
+                     {}, {}, {}),
+        RoutineEntry('simulation', '模拟领域', '清体力',
+                     {'地区': catalog.simulation_regions()[0],
+                      '材料': 'Shell Credit', **count_default},
+                     {'地区': '按地区选择；一次 40 体力。',
+                      '材料': '共鸣者经验 / 武器经验 / 贝币；一次 40 体力。', **count_desc},
+                     {'地区': {'type': 'drop_down', 'options': catalog.simulation_regions()},
+                      '材料': {'type': 'drop_down', 'options': catalog.simulation_options()},
+                      **count_type}),
+        RoutineEntry('forgery', '凝素领域', '清体力',
+                     {'地区': catalog.forgery_region_names()[0],
+                      '武器类型': catalog.forgery_weapon_types()[0],
+                      **count_default},
+                     {'地区': '按地区选择；一次 40 体力。',
+                      '武器类型': '长刃 / 迅刃 / 佩枪 / 臂铠 / 音感仪。',
+                      **count_desc},
+                     {'地区': {'type': 'drop_down', 'options': catalog.forgery_region_names()},
+                      '武器类型': {'type': 'drop_down', 'options': catalog.forgery_weapon_types()},
+                      **count_type}),
+        RoutineEntry('tacet', '无音清剿', '清体力',
+                     {'无音区': catalog.tacet_zones()[0], **count_default},
+                     {'无音区': '从 F2 手册从上往下选择；一次 60 体力。', **count_desc},
+                     {'无音区': {'type': 'drop_down', 'options': catalog.tacet_zones()},
+                      **count_type}),
+        RoutineEntry('boss_challenge', '讨伐强敌', '清体力',
+                     {'BOSS': catalog.boss_challenges()[0], '次数': 1},
+                     {'BOSS': '获取共鸣者突破材料；一次 60 体力。',
+                      '次数': '重复挑战次数；填 0 表示一直刷。'},
+                     {'BOSS': {'type': 'drop_down', 'options': catalog.boss_challenges()},
+                      '次数': count_type['次数']}),
+        RoutineEntry('weekly_boss', '战歌重奏', '周常',
+                     {'周本': catalog.weekly_display_names()[0], '次数': 3},
+                     {'周本': '按 BOSS 名称展示，实际按副本名称查找；一次 60 体力。',
+                      '次数': '每周最多 3 次。'},
+                     {'周本': {'type': 'drop_down', 'options': catalog.weekly_display_names()},
+                      '次数': {'min': 0, 'max': 3}}),
+    ]
+    return entries
+
+
+ENTRIES = _build_entries()
+ENTRIES_BY_ID = {entry.task_id: entry for entry in ENTRIES}
+
+
+def default_items():
+    """A reasonable first-run plan: rewards first, then stamina until empty."""
+    return [
+        {'id': 'claim_daily', 'enabled': True, 'params': {}},
+        {'id': 'battle_pass', 'enabled': True, 'params': {}},
+        {'id': 'weekly_garden', 'enabled': True, 'params': {}},
+        {'id': 'weekly_boss', 'enabled': False,
+         'params': deepcopy(ENTRIES_BY_ID['weekly_boss'].default_config)},
+        {'id': 'simulation', 'enabled': False,
+         'params': deepcopy(ENTRIES_BY_ID['simulation'].default_config)},
+        {'id': 'forgery', 'enabled': True,
+         'params': deepcopy(ENTRIES_BY_ID['forgery'].default_config)},
+        {'id': 'tacet', 'enabled': False,
+         'params': deepcopy(ENTRIES_BY_ID['tacet'].default_config)},
+        {'id': 'boss_challenge', 'enabled': False,
+         'params': deepcopy(ENTRIES_BY_ID['boss_challenge'].default_config)},
+    ]
+
+
+def normalize_items(items):
+    """Drop unknown ids, deduplicate, append missing entries, fill params."""
+    raw = items if isinstance(items, list) else []
+    normalized = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        task_id = item.get('id')
+        entry = ENTRIES_BY_ID.get(task_id)
+        if entry is None or task_id in seen:
+            continue
+        params = deepcopy(entry.default_config)
+        if isinstance(item.get('params'), dict):
+            params.update({key: value for key, value in item['params'].items()
+                           if key in entry.default_config})
+        normalized.append({'id': task_id, 'enabled': bool(item.get('enabled', False)),
+                           'params': params})
+        seen.add(task_id)
+    for entry in ENTRIES:
+        if entry.task_id not in seen:
+            normalized.append({'id': entry.task_id, 'enabled': False,
+                               'params': deepcopy(entry.default_config)})
+    return normalized
+
+
+def normalize_plans(plans):
+    if not isinstance(plans, dict) or not plans:
+        return {DEFAULT_PLAN_NAME: default_items()}
+    normalized = {}
+    for name, items in plans.items():
+        if isinstance(name, str) and name.strip():
+            normalized[name.strip()] = normalize_items(items)
+    return normalized or {DEFAULT_PLAN_NAME: default_items()}
+
+
+class RoutinePlanStore:
+    """Atomic JSON store; independent of the framework Config merge rules."""
+
+    def __init__(self, folder='configs'):
+        self.path = Path(folder) / 'RoutinePlans.json'
+
+    def load(self):
+        if not self.path.exists():
+            return {DEFAULT_PLAN_NAME: default_items()}
+        with self.path.open(encoding='utf-8') as stream:
+            plans = json.load(stream)
+        return normalize_plans(plans)
+
+    def save(self, plans):
+        normalized = normalize_plans(plans)
+        content = json.dumps(normalized, ensure_ascii=False, indent=2, allow_nan=False)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.path.parent,
+                                             prefix='.RoutinePlans-', suffix='.tmp',
+                                             delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(content + '\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+        return normalized
+
+
+class PlanItemConfig(dict):
+    """ConfigForm-compatible view over one plan item's params."""
+
+    def __init__(self, values, defaults, on_change=None):
+        self.default = deepcopy(defaults)
+        self.on_change = on_change
+        super().__init__(deepcopy(defaults))
+        if isinstance(values, dict):
+            self.update(deepcopy(values))
+
+    def get_default(self, key):
+        return deepcopy(self.default.get(key))
+
+    def has_user_config(self):
+        return bool(self.default)
+
+    def reset_to_default(self):
+        dict.clear(self)
+        dict.update(deepcopy(self.default))
+        self._notify()
+
+    def save_file(self):
+        pass
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self._notify()
+
+    def _notify(self):
+        if self.on_change is not None:
+            self.on_change(dict(self))

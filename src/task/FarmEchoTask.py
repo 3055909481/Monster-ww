@@ -64,8 +64,8 @@ class FarmEchoTask(WWOneTimeTask, BaseCombatTask):
                           'Nightmare: Hecate', 'Fenrico', 'Nameless Explorer']
         self.config_type['Boss'] = {'type': "drop_down", 'options': self.boss_list}
         self.combat_end_condition = self.find_echos
-        self.total_weekly_number = 9
-        self.total_boss_number = 20
+        self.total_weekly_number = 11
+        self.total_boss_number = 23
         # F2 Nightmare Purification list: nightmare nests, then special nightmares
         self.nightmare_structure = [5, 10]
         self.add_exit_after_config()

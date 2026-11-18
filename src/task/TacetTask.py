@@ -49,7 +49,7 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         self.wait_in_team_and_world(esc=True)
         self.farm_tacet()
 
-    def farm_tacet(self, daily=False, used_stamina=0, config=None, max_recovery_retries=3):
+    def farm_tacet(self, daily=False, used_stamina=0, config=None, max_recovery_retries=3, max_runs=0):
         if config is None:
             config = self.config
         if daily:
@@ -58,6 +58,7 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
             must_use = 0
         self.info_incr('used stamina', 0)
         recovery_retries = 0
+        runs = 0
         self.realm_entry_at_heal_point = False
         while True:
             self.sleep(1)
@@ -96,6 +97,12 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 can_continue, used = self.use_stamina(once=self.stamina_once, must_use=must_use)
                 self.info_incr('used stamina', used)
                 self.sleep(4)
+                runs += 1
+                if max_runs and runs >= max_runs:
+                    self.click_relative(0.365, 0.853, hcenter=True)
+                    self.wait_in_team_and_world(time_out=120)
+                    self.log_info(self.tr('reached configured run count ({runs})').format(runs=runs))
+                    return None
                 if not can_continue:
                     self.click_relative(0.365, 0.853, hcenter=True)
                     self.wait_in_team_and_world(time_out=120)
