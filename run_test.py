@@ -15,15 +15,31 @@ def translate_for_test(task, message):
 def _patch_mon_test_compat():
     """Compatibility shim for Mon-script's TaskTestCase.
 
-    Mon.test.TaskTestCase imports `from Mon.test import Mon` in setUpClass /
-    set_image / set_images, but Mon.test.__init__ only exports a lowercase
-    `ok` object. The imported name is never actually used (the code uses the
-    module-global `ok` instead), so the stale import is harmless once the
-    symbol exists. Inject an alias so those tests run on this Mon-script build.
+    Mon-script's Mon.test.TaskTestCase uses a module-global `ok` in four
+    places (setUpClass / set_image / set_images) but never imports it -- the
+    real object lives in Mon.test.ok and is created by init_ok(). It also does
+    `from Mon.test import Mon`, which Mon.test does not export. Both are
+    upstream packaging bugs. Provide a lazy proxy that forwards attribute
+    access to Mon.test.ok, so the tests work on this Mon-script build without
+    patching the installed package or dropping any test.
     """
     import Mon.test
+
+    class _OkProxy:
+        def __getattr__(self, name):
+            target = getattr(Mon.test, 'ok', None)
+            if target is None:
+                raise RuntimeError('Mon.test.ok is not initialized (init_ok not called)')
+            return getattr(target, name)
+
     if not hasattr(Mon.test, 'Mon'):
-        Mon.test.Mon = getattr(Mon.test, 'ok', None) or object()
+        Mon.test.Mon = _OkProxy()
+    try:
+        import Mon.test.TaskTestCase as task_test_case
+        if not hasattr(task_test_case, 'ok'):
+            task_test_case.ok = _OkProxy()
+    except ImportError:
+        pass
 
 
 def main():
