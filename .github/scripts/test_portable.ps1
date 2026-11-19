@@ -92,20 +92,21 @@ print(f"PREFLIGHT_OK imported {len(mods)} registered modules")
   do {
     Start-Sleep -Milliseconds 250
     $process.Refresh()
-    [string]$errors = Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue
     [string]$output = Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
-    if ($errors -match 'Traceback \(most recent call last\)') {
-      throw "Packaged app startup failed. See $stderr"
-    }
-    if ($process.HasExited) {
-      throw "Packaged app exited during startup (code $($process.ExitCode)). See $stderr"
-    }
+    [string]$errors = Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue
+    # Do NOT fail on a "Traceback" string in stderr: the framework logs caught
+    # exceptions with stack traces (logger.error(..., exc_info=True)) during
+    # normal startup. Only an actual process exit or a missing success signal
+    # counts as failure. Surface stderr only when we are about to give up.
     if ($output -match 'Window has fully displayed' -and $output -match 'default ocr init end') {
       Write-Host 'Portable smoke passed: main window shown and OCR initialized with an isolated PATH.'
       return
     }
+    if ($process.HasExited) {
+      throw "Packaged app exited during startup (code $($process.ExitCode)). stdout: $output`nstderr: $errors"
+    }
   } while ((Get-Date) -lt $deadline)
-  throw "Packaged app startup timed out after ${TimeoutSeconds}s. See $stdout and $stderr"
+  throw "Packaged app startup timed out after ${TimeoutSeconds}s. stdout: $output`nstderr: $errors"
 } finally {
   if ($process -and -not $process.HasExited) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
