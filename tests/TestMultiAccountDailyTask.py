@@ -23,7 +23,9 @@ class FakeComboTask:
     _select_account_by_combo = MultiAccountDailyTask._select_account_by_combo
 
     def __init__(self, done=()):
-        self.done_set = {normalize_account_name(name) for name in done}
+        # The task stores account identifiers verbatim (no OCR-tolerance
+        # normalization) so distinct accounts are never merged by mistake.
+        self.done_set = set(done)
         self.all_accounts = set()
 
     def _login_combo(self):
@@ -81,8 +83,8 @@ class TestMultiAccountDailyTask(unittest.TestCase):
         class FakeTask:
             def __init__(self):
                 self.done_set = {
-                    normalize_account_name("aa****01@example.com"),
-                    normalize_account_name("bb****02@example.com"),
+                    "aa****01@example.com",
+                    "bb****02@example.com",
                 }
                 self.all_accounts = set()
                 self.clicked = []
@@ -127,7 +129,7 @@ class TestMultiAccountDailyTask(unittest.TestCase):
 
         self.assertEqual(account, "Display Name")
         self.assertEqual(selected, [1])
-        self.assertEqual(task.all_accounts, {normalize_account_name(name) for name in items})
+        self.assertEqual(task.all_accounts, set(items))
 
     def test_combo_selection_returns_none_when_every_account_is_done(self):
         items = ["aa****01@example.com", "Display Name"]
@@ -173,7 +175,7 @@ if __name__ == "__main__":
             executor = FakeExecutor()
 
             def __init__(self):
-                self.done_set = {normalize_account_name("aa****01@example.com")}
+                self.done_set = {"aa****01@example.com"}
                 self.all_accounts = set()
                 self.clicked = []
                 self.logs = []
