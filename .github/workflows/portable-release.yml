@@ -255,6 +255,8 @@ jobs:
       - name: Run tests against compiled modules
         timeout-minutes: 20
         env:
+          PYTHONIOENCODING: 'utf-8'
+          PYTHONLEGACYWINDOWSSTDIO: 'utf-8'
           GITHUB_TOKEN: ''
           GH_TOKEN: ''
           ACTIONS_RUNTIME_TOKEN: ''
