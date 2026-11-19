@@ -147,22 +147,20 @@ jobs:
         id: version
         env:
           INPUT_VERSION: ${{ inputs.version }}
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
           $tag = "$env:INPUT_VERSION".Trim()
-          $adjusted = $false
 
-          # PyAppify rejects a --setup-version that is not among the newest
-          # release tags ("Setup version ... is no longer available"). This
-          # fork inherited 1000+ upstream tags (newest v3.8.0), so a low
-          # version such as v1.0.0 fails. Keep the build tag strictly newer
-          # than every existing release tag, exactly like upstream releases do.
+          # Versions follow SemVer starting at v1.0.0. Old upstream tags were
+          # purged when this project restarted its own release line; if any
+          # remain (hand-pushed tags), we still must stay newer than the newest
+          # because PyAppify rejects a --setup-version that is not among the
+          # newest release tags ("Setup version ... is no longer available").
           $maxMajor = 0; $maxMinor = 0; $maxPatch = 0
           $rawTags = (& git tag -l "v*" | Out-String).Trim()
           foreach ($existingTag in ($rawTags -split "`n")) {
             if ($existingTag.Trim() -match '^v?(\d+)\.(\d+)\.(\d+)$') {
-              # PowerShell variable names are case-insensitive: $M and $m would
-              # be the SAME variable, so use distinct names for major/minor/patch.
+              # PowerShell variable names are case-insensitive: use distinct
+              # names for major/minor/patch.
               $curMajor = [int]$Matches[1]; $curMinor = [int]$Matches[2]; $curPatch = [int]$Matches[3]
               if (($curMajor -gt $maxMajor) -or
                   ($curMajor -eq $maxMajor -and $curMinor -gt $maxMinor) -or
@@ -174,9 +172,14 @@ jobs:
           Write-Host "Newest existing release tag: v$maxMajor.$maxMinor.$maxPatch"
 
           if ([string]::IsNullOrWhiteSpace($tag)) {
-            $tag = "v$($maxMajor + 1).0.$env:RUN_NUMBER"
-            $adjusted = $true
-            Write-Host "Auto-selected version tag: $tag"
+            # Clean release line: first build is v1.0.0; subsequent builds bump
+            # the patch number (v1.0.1, v1.0.2, ...). No run-number padding.
+            if ($maxMajor -eq 0 -and $maxMinor -eq 0 -and $maxPatch -eq 0) {
+              $tag = 'v1.0.0'
+            } else {
+              $tag = "v$maxMajor.$maxMinor.$($maxPatch + 1)"
+            }
+            Write-Host "Auto-selected SemVer tag: $tag"
           } elseif ($tag -match '^v?(\d+)\.(\d+)\.(\d+)((?:[-.](?:alpha|beta|rc)(?:\.\d+)?)?)$') {
             $inMajor = [int]$Matches[1]; $inMinor = [int]$Matches[2]; $inPatch = [int]$Matches[3]
             $suffix = $Matches[4]
@@ -184,24 +187,20 @@ jobs:
                      ($inMajor -eq $maxMajor -and $inMinor -gt $maxMinor) -or
                      ($inMajor -eq $maxMajor -and $inMinor -eq $maxMinor -and $inPatch -gt $maxPatch)
             if (-not $newer) {
-              $raised = "v$($maxMajor + 1).$inMinor.$inPatch$suffix"
-              Write-Host "Requested $tag is older than v$maxMajor.$maxMinor.$maxPatch; raised to $raised because PyAppify packages only the newest release tag."
+              $raised = "v$($maxMajor + 1).0.0$suffix"
+              Write-Host "Requested $tag is not newer than v$maxMajor.$maxMinor.$maxPatch; raised to $raised because PyAppify packages only the newest release tag."
               $tag = $raised
-              $adjusted = $true
             }
           }
 
           # Auto-generated / raised tags must not collide with an existing one.
-          if ($adjusted) {
-            $used = @((& git tag -l | Out-String).Trim() -split "`n" | ForEach-Object { $_.Trim() })
-            while ($used -contains $tag) {
-              if ($tag -match '^v(\d+)\.(\d+)\.(\d+)(.*)$') {
-                $collMajor = [int]$Matches[1]; $collMinor = [int]$Matches[2]; $collPatch = [int]$Matches[3] + 1
-                $suf = $Matches[4]
-                $tag = "v$collMajor.$collMinor.$collPatch$suf"
-              } else { break }
-            }
-            Write-Host "Final auto-adjusted tag: $tag"
+          $used = @((& git tag -l | Out-String).Trim() -split "`n" | ForEach-Object { $_.Trim() })
+          while ($used -contains $tag) {
+            if ($tag -match '^v(\d+)\.(\d+)\.(\d+)(.*)$') {
+              $collMajor = [int]$Matches[1]; $collMinor = [int]$Matches[2]; $collPatch = [int]$Matches[3] + 1
+              $suf = $Matches[4]
+              $tag = "v$collMajor.$collMinor.$collPatch$suf"
+            } else { break }
           }
 
           # Must match PyAppify's version-tag pattern: v?X.Y.Z[-(alpha|beta|rc)[.N]]
@@ -244,6 +243,23 @@ jobs:
           if (-not (Test-Path 'src/task/BaseWWTask.cp312-win_amd64.pyd')) { throw 'BaseWWTask.pyd missing.' }
           if (-not (Test-Path 'config.cp312-win_amd64.pyd')) { throw 'config.pyd missing.' }
           if (-not (Test-Path 'build/char_sources/BaseChar.py')) { throw 'char_sources snapshot missing.' }
+
+      # Run the existing unittest suite against the freshly compiled modules.
+      # With .py and .pyd side by side, Python prefers the .pyd extension, so
+      # these tests exercise the actual obfuscated artifacts. This is the gate
+      # that catches stale imports (e.g. a leftover `from ok ...`) that would
+      # otherwise only surface on a real user's first launch.
+      - name: Install runtime dependencies for tests
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run tests against compiled modules
+        timeout-minutes: 20
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+          ACTIONS_RUNTIME_TOKEN: ''
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
+        run: ./run_tests.ps1
 
       # See the "SLIM RELEASE TAG" note at the top of this file. PyAppify ships
       # the release tag twice (git objects + working checkout), so publishing a
@@ -681,6 +697,32 @@ jobs:
           if ($archive.Length -gt 800MB) {
             throw "Portable archive is $sizeMB MB, far above the ~205 MB (measured 205.6 MB) expected from a slim release tag."
           }
+
+      # Smoke-test the actual packaged artifact: extract the archive and start
+      # it with the bundled Python on an isolated PATH. Catches obfuscation
+      # defects (bad imports compiled into .pyd) that only surface at runtime.
+      - name: Smoke-test packaged app
+        env:
+          PACKAGE_FORMAT: ${{ inputs.package_format }}
+        run: |
+          $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+          if (-not $seven) {
+            $fallback = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+            if (Test-Path $fallback) { $seven = $fallback }
+          }
+          if (-not $seven) { throw '7-Zip is not available on this runner.' }
+          $archive = @(Get-ChildItem -Path pyappify_dist -Filter "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT" -File)[0]
+          if (-not $archive) { throw 'Portable archive not found for smoke test.' }
+          $extract = Join-Path (Get-Location) 'build/smoke-extract'
+          if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
+          New-Item -ItemType Directory -Path $extract -Force | Out-Null
+          & $seven x $archive.FullName "-o$extract" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Failed to extract archive for smoke test." }
+          $root = Join-Path $extract 'Monster-ww'
+          if (-not (Test-Path -LiteralPath $root)) { throw "Archive has no Monster-ww/ root at $root." }
+          Write-Host "Smoke-testing packaged tree: $root"
+          & ./.github/scripts/test_portable.ps1 -PackageRoot $root -TimeoutSeconds 90
+          if ($LASTEXITCODE -ne 0) { throw 'Portable smoke test failed.' }
 
       # Cheap post-mortem helper: shows which tags libgit2 kept in the bare
       # repository it cloned, useful when PyAppify rejects a setup version.

@@ -585,6 +585,16 @@ def import_custom_team(archive_info):
         (temp_folder / TEAM_MANIFEST_FILE).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        # Validate that every imported class actually loads before committing
+        # the team, but do so under throwaway module names: these modules carry
+        # temporary __file__ paths and must never become the live runtime
+        # classes (critical in compiled builds where built-ins are .pyd).
+        char_classes = _team_char_classes(class_names)
+        for class_name in class_names:
+            _load_class_from_file(
+                char_classes[class_name], temp_folder / f"{class_name}.py",
+                f"monster_ww_import_validation_{temp_folder.name}_{class_name}",
+            )
         backup = folder.with_name(folder.name + ".backup")
         if backup.exists():
             shutil.rmtree(backup)
