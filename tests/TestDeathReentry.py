@@ -180,7 +180,7 @@ class TestDomainHealPoint(unittest.TestCase):
         task.open_F2_book_and_get_stamina = lambda: (120, 0, 120)
         task.sleep = task.log_info = lambda *args, **kwargs: None
         results = iter([(False, 0), (False, 0), (True, 0)])
-        task.farm_in_domain = lambda must_use: next(results)
+        task.farm_in_domain = lambda must_use, max_runs=0: next(results)
         flags = record_heal_point(task, 'farm_in_domain')
 
         task.farm_domain_with_recovery_loop(0, lambda: None)
