@@ -98,8 +98,13 @@ print(f"PREFLIGHT_OK imported {len(mods)} registered modules")
     # exceptions with stack traces (logger.error(..., exc_info=True)) during
     # normal startup. Only an actual process exit or a missing success signal
     # counts as failure. Surface stderr only when we are about to give up.
-    if ($output -match 'Window has fully displayed' -and $output -match 'default ocr init end') {
-      Write-Host 'Portable smoke passed: main window shown and OCR initialized with an isolated PATH.'
+    # "Window has fully displayed" is emitted only after pyappify.upgrade()
+    # inside showEvent, which can block on a network version check in CI.
+    # "default ocr init end" is the reliable signal that the framework and
+    # all compiled modules initialized successfully -- that is what this
+    # smoke test verifies.
+    if ($output -match 'default ocr init end') {
+      Write-Host 'Portable smoke passed: framework and OCR initialized with an isolated PATH.'
       return
     }
     if ($process.HasExited) {
