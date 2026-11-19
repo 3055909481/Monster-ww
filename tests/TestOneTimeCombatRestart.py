@@ -39,7 +39,10 @@ class TestOneTimeCombatRestart(unittest.TestCase):
             raise TaskDisabledException()
 
         self.task.do_run = Mock(side_effect=interrupt_rotation)
-        self.task.run()
+        # FarmEchoTask.run re-raises TaskDisabledException instead of wrapping
+        # it as a monthly-card retry, so stopping a task surfaces here.
+        with self.assertRaises(TaskDisabledException):
+            self.task.run()
         self.assertFalse(self.task.enabled)
         self.assertIs(self.task.chars[0], char)
 
