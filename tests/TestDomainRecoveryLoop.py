@@ -16,10 +16,15 @@ class TestDomainRecoveryLoop(unittest.TestCase):
         )
 
     def test_method_has_retry_parameter_with_default(self):
+        # Locate max_recovery_retries by name: other optional parameters
+        # (e.g. max_runs) may follow it, so it is not necessarily the last arg.
         args = self.method_node.args.args
-        self.assertEqual(args[-1].arg, "max_recovery_retries")
-        self.assertEqual(len(self.method_node.args.defaults), 1)
-        default_value = self.method_node.args.defaults[0]
+        defaults = self.method_node.args.defaults
+        names = [a.arg for a in args]
+        self.assertIn("max_recovery_retries", names)
+        # Defaults align with the tail of args.
+        default_by_name = dict(zip(names[len(names) - len(defaults):], defaults))
+        default_value = default_by_name["max_recovery_retries"]
         self.assertIsInstance(default_value, ast.Constant)
         self.assertEqual(default_value.value, 3)
 
