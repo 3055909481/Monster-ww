@@ -7,7 +7,7 @@ import win32gui
 import win32process
 
 from Mon import Box
-from ok.task.exceptions import WaitFailedException
+from Mon.task.exceptions import WaitFailedException
 from src.task.DailyTask import DailyTask
 from src.task.WWOneTimeTask import WWOneTimeTask
 from src.task.BaseCombatTask import BaseCombatTask
