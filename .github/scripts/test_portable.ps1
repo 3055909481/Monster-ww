@@ -38,10 +38,23 @@ try {
   # startup. A compiled-in bad import fails here with a precise traceback,
   # faster and clearer than waiting for the GUI path.
   $preflight = @'
-import importlib, re, pathlib, sys
+import importlib, sys
 sys.path.insert(0, r"{working}")
-src = pathlib.Path(r"{working}/config.py").read_text(encoding="utf-8")
-mods = set(re.findall(r"\[['\"](src\.[A-Za-z0-9_.]+)['\"]\s*,\s*['\"][A-Za-z0-9_]+['\"]\]", src))
+# In the obfuscated build config.py is a .pyd, so read the registered module
+# names from the imported config object rather than from source text.
+import config as app_config
+cfg = app_config.config
+mods = set()
+for key in ("onetime_tasks", "trigger_tasks", "custom_tabs"):
+    for entry in cfg.get(key, []) or []:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 1 and isinstance(entry[0], str):
+            mods.add(entry[0])
+scene = cfg.get("scene")
+if isinstance(scene, (list, tuple)) and len(scene) >= 1 and isinstance(scene[0], str):
+    mods.add(scene[0])
+my_app = cfg.get("my_app")
+if isinstance(my_app, (list, tuple)) and len(my_app) >= 1 and isinstance(my_app[0], str):
+    mods.add(my_app[0])
 failed = []
 for m in sorted(mods):
     try:
