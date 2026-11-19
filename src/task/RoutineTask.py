@@ -7,6 +7,7 @@ run. Multi-account users simply pick a different plan name per account.
 """
 
 from copy import deepcopy
+from datetime import date
 
 from Mon import Logger, TaskDisabledException
 
@@ -26,7 +27,8 @@ from src.task.WWOneTimeTask import WWOneTimeTask
 from src.task.account.RuntimeTaskConfig import account_task_config
 from src.task.routine import RoutineCatalog as catalog
 from src.task.routine.RoutinePlans import (
-    DEFAULT_PLAN_NAME, EDIT_PLANS, PLAN_SELECTOR, RoutinePlanStore, normalize_items,
+    DEFAULT_PLAN_NAME, EDIT_PLANS, PLAN_SELECTOR, RoutinePlanStore,
+    is_scheduled_today, normalize_items,
 )
 from src.task.task_icons import task_icon
 
@@ -103,8 +105,13 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             return
 
         self.ensure_main(time_out=180)
+        today = date.today()
         for item in selected:
             entry_id = item['id']
+            if not is_scheduled_today(item['params'], today):
+                self.log_info(self.tr('步骤「{id}」今日非运行日，跳过。').format(id=entry_id))
+                self.results.append((entry_id, 'skipped', ''))
+                continue
             self.info_set('当前流水线步骤', entry_id)
             try:
                 self._run_entry(entry_id, item['params'])
@@ -118,9 +125,11 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             else:
                 self.results.append((entry_id, 'success', ''))
         self.info_set('流水线结果', self.results)
-        self.log_info(self.tr('日常流水线完成：{success}/{total}').format(
-            success=sum(status == 'success' for _, status, _ in self.results),
-            total=len(self.results)), notify=True)
+        acted = [row for row in self.results if row[1] != 'skipped']
+        self.log_info(self.tr('日常流水线完成：{success}/{total}，跳过 {skipped} 项。').format(
+            success=sum(status == 'success' for _, status, _ in acted),
+            total=len(acted),
+            skipped=sum(status == 'skipped' for _, status, _ in self.results)), notify=True)
 
     def _run_entry(self, entry_id, params):
         params = deepcopy(params)

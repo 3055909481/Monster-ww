@@ -15,6 +15,7 @@ import tempfile
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from src.task.routine import RoutineCatalog as catalog
@@ -22,6 +23,32 @@ from src.task.routine import RoutineCatalog as catalog
 DEFAULT_PLAN_NAME = '默认'
 PLAN_SELECTOR = 'Routine Plan'
 EDIT_PLANS = 'Configure Routine Plans'
+
+WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+RUN_DAYS_KEY = '运行日'
+
+
+def is_scheduled_today(params, today=None):
+    """Whether a weekly step is allowed to run on ``today``.
+
+    ``运行日`` holds weekday labels (周一..周日). An empty or absent selection
+    means "no restriction" so clearing every checkbox cannot silently disable
+    the step forever.
+    """
+    days = params.get(RUN_DAYS_KEY) if isinstance(params, dict) else None
+    if not isinstance(days, list) or not days:
+        return True
+    if today is None:
+        today = date.today()
+    return WEEKDAYS[today.weekday()] in days
+
+
+def _run_days_schema():
+    return {RUN_DAYS_KEY: list(WEEKDAYS)}, {
+        RUN_DAYS_KEY: '仅在所选的星期执行；全选表示每天，全部取消表示不限制。',
+    }, {
+        RUN_DAYS_KEY: {'type': 'multi_selection', 'options': list(WEEKDAYS)},
+    }
 
 
 @dataclass(frozen=True)
@@ -46,13 +73,14 @@ def _count_schema():
 
 def _build_entries():
     count_default, count_desc, count_type = _count_schema()
+    days_default, days_desc, days_type = _run_days_schema()
     entries = [
         RoutineEntry('claim_daily', '领取活跃度奖励 / 邮件', '奖励',
                      {}, {}, {}),
         RoutineEntry('battle_pass', '领取先约电台经验与等级奖励', '奖励',
                      {}, {}, {}),
         RoutineEntry('weekly_garden', '周度游历奖励（梦幻游园）', '奖励',
-                     {}, {}, {}),
+                     deepcopy(days_default), deepcopy(days_desc), deepcopy(days_type)),
         RoutineEntry('simulation', '模拟领域', '清体力',
                      {'地区': catalog.simulation_regions()[0],
                       '材料': 'Shell Credit', **count_default},
@@ -83,11 +111,12 @@ def _build_entries():
                      {'BOSS': {'type': 'drop_down', 'options': catalog.boss_challenges()},
                       '次数': count_type['次数']}),
         RoutineEntry('weekly_boss', '战歌重奏', '周常',
-                     {'周本': catalog.weekly_display_names()[0], '次数': 3},
+                     {'周本': catalog.weekly_display_names()[0], '次数': 3,
+                      **days_default},
                      {'周本': '按 BOSS 名称展示，实际按副本名称查找；一次 60 体力。',
-                      '次数': '每周最多 3 次。'},
+                      '次数': '每周最多 3 次。', **days_desc},
                      {'周本': {'type': 'drop_down', 'options': catalog.weekly_display_names()},
-                      '次数': {'min': 0, 'max': 3}}),
+                      '次数': {'min': 0, 'max': 3}, **days_type}),
         RoutineEntry('training_guide', '培养目标自动补齐', '清体力',
                      {'目标角色': '', '体力预算': 240,
                       '补凝素领域': True, '补讨伐强敌': True, '补战歌重奏': False},
