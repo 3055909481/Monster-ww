@@ -38,6 +38,9 @@ pyappify
 *.bat
 .vscode/
 **/__pycache__/
+# Native extension build artifacts (source obfuscation, produced in CI)
+*.pyd
+*.c
 # Distribution / packaging
 .Python
 tests/configs/

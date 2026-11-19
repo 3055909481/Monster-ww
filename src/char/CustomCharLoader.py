@@ -690,10 +690,17 @@ def read_builtin_char_code(char_cls):
     cached = _builtin_code_cache.get(char_cls)
     if cached is not None:
         return cached
-    path = inspect.getsourcefile(char_cls)
-    if not path:
-        raise RuntimeError(f"Cannot find source file for {char_cls.__name__}")
-    code = Path(path).read_text(encoding="utf-8")
+    # Compiled builds ship no importable .py for built-in characters, so the
+    # source is read from the bundled snapshot first and falls back to the
+    # live module only in a source checkout.
+    from src.char._char_sources import read_char_source
+
+    code = read_char_source(char_cls.__name__)
+    if code is None:
+        path = inspect.getsourcefile(char_cls)
+        if not path:
+            raise RuntimeError(f"Cannot find source file for {char_cls.__name__}")
+        code = Path(path).read_text(encoding="utf-8")
     _builtin_code_cache[char_cls] = code
     return code
 
@@ -770,7 +777,10 @@ def _load_class_from_file(char_cls, path, module_name):
         raise RuntimeError(f"Cannot load custom char module: {path}")
 
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # exec from bytes keeps custom code loading identical in source and
+    # compiled builds (spec.loader.exec_module resolves differently once the
+    # built-in modules are .pyd rather than .py).
+    exec(compile(path.read_bytes(), str(path), "exec"), module.__dict__)
     custom_cls = getattr(module, char_cls.__name__, None)
     if custom_cls is None:
         raise RuntimeError(f"Custom code must define class {char_cls.__name__}")

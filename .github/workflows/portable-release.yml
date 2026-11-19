@@ -212,6 +212,39 @@ jobs:
           "number=$($tag -replace '^v', '')" >> $env:GITHUB_OUTPUT
           Write-Host "Packaging version tag: $tag"
 
+      # SOURCE OBFUSCATION: compile every runtime module to a native .pyd so the
+      # distributed package carries no readable application logic. The slim tag
+      # below ships the compiled modules instead of their .py sources. Python
+      # 3.12 must match pyappify.yml's requires_python (the .pyd ABI tag is
+      # cp312). identity.py and __init__.py stay as source: the former's runtime
+      # monkeypatches need real Python descriptors, the latter enables package
+      # discovery. char_sources/ snapshots keep built-in character-code editing
+      # working without importable .py files.
+      - name: Set up Python 3.12 for native compilation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Cython build toolchain
+        run: |
+          python -m pip install --disable-pip-version-check "cython>=3" "setuptools>=77"
+
+      - name: Generate character source snapshots
+        run: python .github/scripts/build_char_sources.py
+
+      - name: Compile runtime sources to native extensions
+        run: python setup.py build_ext --inplace --force
+
+      - name: Verify compiled modules
+        shell: pwsh
+        run: |
+          $count = @(Get-ChildItem -Recurse -Filter '*.cp312-win_amd64.pyd' -ErrorAction SilentlyContinue).Count
+          Write-Host "Compiled $count native modules."
+          if ($count -lt 100) { throw "Expected 100+ compiled modules, got $count. Compilation likely failed." }
+          if (-not (Test-Path 'src/task/BaseWWTask.cp312-win_amd64.pyd')) { throw 'BaseWWTask.pyd missing.' }
+          if (-not (Test-Path 'config.cp312-win_amd64.pyd')) { throw 'config.pyd missing.' }
+          if (-not (Test-Path 'build/char_sources/BaseChar.py')) { throw 'char_sources snapshot missing.' }
+
       # See the "SLIM RELEASE TAG" note at the top of this file. PyAppify ships
       # the release tag twice (git objects + working checkout), so publishing a
       # tag with the full master tree doubles 894 MB of screenshots into the
@@ -261,12 +294,57 @@ jobs:
                 & git rm -r --cached -q --ignore-unmatch -- $dir
                 if ($LASTEXITCODE -ne 0) { throw "Removing $dir from the slim tree failed." }
               }
-              $tree = (& git write-tree | Out-String).Trim()
+
+              # SOURCE OBFUSCATION: replace every compiled .py with its .pyd in
+              # the release tree, and drop the readable source from the index.
+              # identity.py / __init__.py / main.py are intentionally kept as
+              # source (see the compile step above for why).
+              $keepSource = @('identity.py', '__init__.py')
+              $stripped = 0
+              $pyFiles = @(Get-ChildItem -Recurse -Filter '*.py' -Path src -ErrorAction SilentlyContinue)
+              foreach ($file in $pyFiles) {
+                if ($keepSource -contains $file.Name) { continue }
+                $pyd = [System.IO.Path]::ChangeExtension($file.FullName, '.cp312-win_amd64.pyd')
+                if (-not (Test-Path -LiteralPath $pyd)) {
+                  throw "No compiled module for $($file.FullName); refusing to ship an uncompiled source."
+                }
+                $rel = $file.FullName.Substring((Get-Location).Path.Length + 1).Replace('\', '/')
+                & git rm --cached -q --ignore-unmatch -- $rel
+                if ($LASTEXITCODE -ne 0) { throw "Stripping source $rel from slim tree failed." }
+                $stripped++
+              }
+              if (Test-Path 'config.py') {
+                & git rm --cached -q --ignore-unmatch -- config.py
+                $stripped++
+              }
+              Write-Host "Stripped $stripped readable sources from the slim tree."
+
+              # Stage all compiled native modules (forced past .gitignore).
+              $pydFiles = @(Get-ChildItem -Recurse -Filter '*.cp312-win_amd64.pyd' -ErrorAction SilentlyContinue)
+              foreach ($file in $pydFiles) {
+                $rel = $file.FullName.Substring((Get-Location).Path.Length + 1).Replace('\', '/')
+                & git add -f -- $rel
+                if ($LASTEXITCODE -ne 0) { throw "Staging compiled module $rel failed." }
+              }
+
+              # Stage character-source snapshots at the tree root so
+              # src/char/_char_sources.py can find them after .py stripping.
+              $snapshotStaging = Join-Path (Get-Location) 'char_sources'
+              if (Test-Path -LiteralPath $snapshotStaging) { Remove-Item -LiteralPath $snapshotStaging -Recurse -Force }
+              Copy-Item -LiteralPath 'build/char_sources' -Destination $snapshotStaging -Recurse -Force
+              try {
+                & git add -f -- char_sources
+                if ($LASTEXITCODE -ne 0) { throw 'Staging char_sources snapshot failed.' }
+                $tree = (& git write-tree | Out-String).Trim()
+              } finally {
+                Remove-Item -LiteralPath $snapshotStaging -Recurse -Force -ErrorAction SilentlyContinue
+              }
               if ($tree -notmatch '^[0-9a-f]{40}$') { throw "git write-tree failed: '$tree'." }
 
               $mustHave = @(
-                'main.py', 'config.py', 'requirements.txt', 'pyappify.yml', 'deploy.txt',
-                'src/identity.py', 'src/gui/CharacterCodeTab.py',
+                'main.py', 'config.cp312-win_amd64.pyd', 'requirements.txt', 'pyappify.yml', 'deploy.txt',
+                'src/identity.py', 'src/gui/CharacterCodeTab.cp312-win_amd64.pyd',
+                'char_sources/BaseChar.py',
                 'assets/echo_model/echo.onnx', 'assets/coco_annotations.json',
                 'icons/icon.png', 'i18n/zh_CN/LC_MESSAGES/ok.mo',
                 'workshop_bundle/teams.json'
@@ -573,10 +651,23 @@ jobs:
             throw "The portable archive still contains development-only directories: $($leaked -join ', '). The release tag is not slim."
           }
           $required = @(
-            'main.py', 'config.py', 'requirements.txt', 'pyappify.yml',
+            'main.py', 'config.cp312-win_amd64.pyd', 'requirements.txt', 'pyappify.yml',
             'assets\echo_model\echo.onnx', 'icons\icon.png', 'src\identity.py',
+            'src\task\BaseWWTask.cp312-win_amd64.pyd', 'char_sources\BaseChar.py',
             'workshop_bundle\teams.json'
           )
+          # Obfuscation check: no readable application module may ship under
+          # working\src\ (except identity.py / __init__.py, kept as source by
+          # design). Root entry scripts and char_sources/ are intentionally
+          # readable and are not part of this check.
+          $srcPrefix = $prefix + 'src\'
+          $sourceLeak = @($listing -split "`n" | Where-Object {
+            $_ -match [regex]::Escape($srcPrefix) -and $_ -match '\.py\s*$' -and
+            $_ -notmatch '\\identity\.py\s*$' -and $_ -notmatch '\\__init__\.py\s*$'
+          })
+          if ($sourceLeak.Count -gt 0) {
+            throw "Readable app modules leaked into the obfuscated build: $($sourceLeak[0])."
+          }
           $missing = @($required | Where-Object {
             $listing -notmatch [regex]::Escape($prefix + $_)
           })

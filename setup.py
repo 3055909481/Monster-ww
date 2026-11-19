@@ -1,37 +1,49 @@
-import setuptools
-from Cython.Build import cythonize
-from distutils.extension import Extension
-from setuptools import Extension
+"""Compile the runtime sources into native extensions for source obfuscation.
+
+The portable build ships compiled modules only: ``src/**/*.py`` and
+``config.py`` become ``.pyd`` files so the distributable carries no readable
+application logic. Two modules deliberately stay as source:
+
+* ``__init__.py`` — package discovery needs it importable before the compiled
+  modules exist, and it holds no logic worth hiding.
+* ``identity.py`` — its runtime monkeypatches assign nested ``def`` functions
+  onto framework classes. Cython turns those into non-descriptor builtins that
+  cannot bind ``self`` once assigned, so it must remain pure Python.
+
+The build workflow strips every ``.py`` that has a matching ``.pyd`` from the
+slim release tree. See build_char_sources.py for the character-source snapshot
+that keeps "edit built-in character code" working in the compiled build.
+"""
 
 import os
+import pathlib
+
+import setuptools
+from Cython.Build import cythonize
+from setuptools import Extension
 
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
+ROOT = pathlib.Path(__file__).resolve().parent
+EXCLUDE_FILES = {"__init__.py", "identity.py"}
 
-def find_pyx_packages(base_dir):
+
+def collect_python_extensions(base_dir):
+    """One Extension per .py module under base_dir, plus root config.py."""
     extensions = []
-    for dirpath, _, filenames in os.walk(base_dir):
-        for filename in filenames:
-            if filename.endswith(".pyx"):
-                module_path = os.path.join(dirpath, filename).replace('/', '.').replace('\\', '.')
-                module_name = module_path[:-4]  # Remove the .pyx extension
-                extensions.append(
-                    Extension(name=module_name, language="c++", sources=[os.path.join(dirpath, filename)]))
-                print(f'add Extension: {module_name} {[os.path.join(dirpath, filename)]}')
+    for path in sorted(pathlib.Path(base_dir).rglob("*.py")):
+        if path.name in EXCLUDE_FILES:
+            continue
+        module = ".".join(path.with_suffix("").parts)
+        extensions.append(Extension(name=module, language="c++", sources=[str(path)]))
+    config_py = ROOT / "config.py"
+    if config_py.is_file():
+        extensions.append(Extension(name="config", language="c++", sources=["config.py"]))
+    print(f"collected {len(extensions)} modules to compile")
     return extensions
 
 
-def find_packages_with_init_files(base_dir):
-    packages = []
-    for dirpath, dirnames, filenames in os.walk(base_dir):
-        if '__init__.py' in filenames:
-            package = dirpath.replace('/', '.').replace('\\', '.')
-            packages.append(package)
-    return packages
-
-
-base_dir = "src"
-extensions = find_pyx_packages(base_dir)
+extensions = collect_python_extensions("src")
 
 setuptools.setup(
     name="Monster-ww",
@@ -48,5 +60,13 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: Microsoft :: Windows",
     ],
-    ext_modules=cythonize(extensions, compiler_directives={'language_level': "3"})
+    ext_modules=cythonize(
+        extensions,
+        compiler_directives={
+            "language_level": "3",
+            "embedsignature": False,
+            "binding": False,
+        },
+        nthreads=0,
+    ),
 )

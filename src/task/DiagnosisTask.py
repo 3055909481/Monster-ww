@@ -1,9 +1,12 @@
 import time
 
+from Mon import Logger
 
 from src.task.BaseCombatTask import BaseCombatTask
 from src.task.WWOneTimeTask import WWOneTimeTask
 from src.task.task_icons import task_icon
+
+logger = Logger.get_logger(__name__)
 
 
 class DiagnosisTask(WWOneTimeTask, BaseCombatTask):
