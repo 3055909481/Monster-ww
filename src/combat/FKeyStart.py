@@ -110,6 +110,10 @@ class FKeyWatcher:
 
 f_key_watcher = FKeyWatcher()
 
+# 幂等标记放在模块级, 而不是函数对象上: ctypes.windll.user32.GetAsyncKeyState 是
+# builtin _FuncPtr, 不支持设置自定义属性 (fork 的 ok 环境可以, Mon 环境会 AttributeError)。
+_self_f_filter_installed = False
+
 
 def _filter_self_f(original, watcher):
     """包一层 GetAsyncKeyState: Monster-ww 自己正按着 F 时, F 读成没按。别的键、别的时候原样返回。"""
@@ -120,7 +124,6 @@ def _filter_self_f(original, watcher):
             return 0
         return state
 
-    GetAsyncKeyState.monsterww_self_f_filter = True
     return GetAsyncKeyState
 
 
@@ -132,21 +135,28 @@ def install_self_f_filter():
     它们都是每次调用时从共享的 ctypes.windll.user32 上取这个函数, 所以在这里换掉一次就都管到了, 队伍代码不用改。
     后台 PostMessage 下没人报「自己在按 F」, 这层包装什么都不做。
     """
+    global _self_f_filter_installed
+    if _self_f_filter_installed:
+        return True
     try:
         user32 = ctypes.windll.user32
         current = user32.GetAsyncKeyState
+        current.restype = ctypes.c_short
+        current.argtypes = (ctypes.c_int,)
+        user32.GetAsyncKeyState = _filter_self_f(current, f_key_watcher)
+        _self_f_filter_installed = True
+        return True
     except Exception as e:
         logger.warning(f'F 键过滤装不上 ({e}), 前台输入下自己按的 F 可能被当成玩家按的')
         return False
-    if getattr(current, 'monsterww_self_f_filter', False):
-        return True
-    current.restype = ctypes.c_short
-    current.argtypes = (ctypes.c_int,)
-    user32.GetAsyncKeyState = _filter_self_f(current, f_key_watcher)
-    return True
 
 
-install_self_f_filter()
+# import 期副作用必须兜底: 某些环境 (CI / 非 Windows / mock) 下 ctypes 不可写,
+# 不能因为可选的前台输入增强而让整个模块导入失败、连带 CombatCheck 全线挂掉。
+try:
+    install_self_f_filter()
+except Exception as e:
+    logger.warning(f'F 键过滤初始化失败 ({e}), 已跳过, 不影响按F开战主功能')
 
 
 def float_config(config, key, upper):

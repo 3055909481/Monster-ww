@@ -130,8 +130,16 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
         return abs(pressed - self._absorb_prompt_at) <= ABSORB_PROMPT_WINDOW
 
     def should_start_combat_by_key(self):
+        # 未走 __init__ 的实例 (测试 __new__ fixture / 提前调用) 没有 F 开战状态, 直接跳过。
+        # 否则 note_f_prompt -> f_search_box 会摸到未初始化的画面/配置属性而抛错。
+        if '_f_consumed' not in self.__dict__:
+            return False
         if self.f_start_enabled:
-            self.note_f_prompt()
+            try:
+                self.note_f_prompt()
+            except Exception as e:
+                # OCR / 画面未就绪不该让整个战斗判断崩掉, 最多这次不认「吸收声骸」。
+                self.log_info(f'F 提示读取失败, 跳过吸收判定: {e}')
         pressed = self.last_f_press()
         if pressed <= self._f_consumed:
             return False
