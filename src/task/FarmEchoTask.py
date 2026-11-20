@@ -307,7 +307,13 @@ class FarmEchoTask(WWOneTimeTask, BaseCombatTask):
         self.open_boss_book(feature)
         # special nightmares are listed after the nightmare nests
         book_serial = serial_number + sum(structure[:-1]) if structure else serial_number
-        is_team = self.click_on_book_target(book_serial, total_number, structure)
+        if teleport_to_boss in ('Weekly Challenge', 'Boss Challenge'):
+            # 按「从上往下第 N 个有按钮的行」找, 不再写死列表总数去点滚动条:
+            # 游戏新增 Boss 后旧写死值会整体错位(讨伐写死 20 实际 23、周本写死 9 实际 11)。
+            self.click_book_target_by_name(feature, target='', serial=book_serial)
+            is_team = self.wait_after_book_click()
+        else:
+            is_team = self.click_on_book_target(book_serial, total_number, structure)
         if is_team:
             if teleport_to_boss == 'Weekly Challenge':
                 self.click_configured_boss_level()

@@ -307,7 +307,7 @@ jobs:
               # Development-only trees. deploy.txt lists the runtime paths;
               # src/ and config.py only ever load assets/, icons/, i18n/,
               # workshop_bundle/, readme/ and the root python files.
-              $drop = @('templates_src', 'tests', 'docs', '.github', '.agents', '.codex')
+              $drop = @('templates_src', 'tests', 'docs', 'tools', '.github', '.agents', '.codex')
               foreach ($dir in $drop) {
                 & git rm -r --cached -q --ignore-unmatch -- $dir
                 if ($LASTEXITCODE -ne 0) { throw "Removing $dir from the slim tree failed." }
@@ -661,7 +661,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "7z l failed for $($archive.Name)." }
 
           $prefix = 'Monster-ww\data\apps\Monster-ww\working\'
-          $heavy = @('templates_src', 'tests', 'docs', '.github', '.agents', '.codex')
+          $heavy = @('templates_src', 'tests', 'docs', 'tools', '.github', '.agents', '.codex')
           $leaked = @($heavy | Where-Object {
             $listing -match [regex]::Escape($prefix + $_ + '\')
           })

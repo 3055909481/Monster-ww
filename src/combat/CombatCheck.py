@@ -1,6 +1,7 @@
 import re
 import time
 
+import cv2
 import win32api
 
 from Mon import find_boxes_by_name, Logger, calculate_color_percentage, TaskDisabledException
@@ -11,6 +12,13 @@ from src.char.Roccia import Roccia
 from src.task.BaseWWTask import BaseWWTask
 
 logger = Logger.get_logger(__name__)
+
+# 收手前需隔一次判定再确认, 避免一帧误报「声骸」就收手导致空站
+END_CONFIRM_SECONDS = 0.3
+# Boss 血条尖头/分段残血: 按连通块判断, 2K/1K 都能认到约 1% 血
+BOSS_SLIVER_MIN_HEIGHT = 9 / 2160
+BOSS_SLIVER_MAX_HEIGHT = 40 / 2160
+BOSS_SLIVER_MIN_WIDTH = 3 / 3840
 
 
 class CombatCheck(BaseWWTask):
@@ -35,6 +43,7 @@ class CombatCheck(BaseWWTask):
         self.target_enemy_time_out = 3
         self.switch_char_time_out = 5
         self.combat_end_condition = None
+        self._end_seen_since = 0.0
         self.has_lavitator = False
         self.target_enemy_error_notified = False
         self.cds = {
@@ -62,6 +71,7 @@ class CombatCheck(BaseWWTask):
 
     def do_reset_to_false(self):
         self.cds = {}
+        self._end_seen_since = 0.0
         self._in_combat = False
         self.skip_combat_check = False
         self.boss_lv_mask = None
@@ -152,9 +162,22 @@ class CombatCheck(BaseWWTask):
                 return self.reset_to_false(reason='on_combat_check failed')
             if self.has_target():
                 self.last_in_realm_not_combat = 0
+                self._end_seen_since = 0.0
                 return self.scene.set_in_combat()
-            if self.combat_end_condition is not None and self.combat_end_condition():
-                return self.reset_to_false(reason='end condition reached')
+            # Boss 还在(残血也算)就没打完, 只是一时没锁住(跳开/演出), 不能凭画面里有声骸收手
+            if (self.combat_end_condition is not None and not self.boss_still_alive()
+                    and self.combat_end_condition()):
+                # 一帧看到「声骸」不算: 识别会误报, 而 Boss 没死时收手要空站好几秒才接上。
+                # 隔一次判定再看到才收手, 中间照常出招
+                now = time.time()
+                if self._end_seen_since <= 0:
+                    self._end_seen_since = now
+                    self.log_info('end condition seen, confirm on next check')
+                    return self.scene.set_in_combat()
+                if now - self._end_seen_since >= END_CONFIRM_SECONDS:
+                    return self.reset_to_false(reason='end condition reached')
+                return self.scene.set_in_combat()
+            self._end_seen_since = 0.0
             has_health = self.check_health_bar()
             retarget_timeout = 30 if has_health else self.target_enemy_time_out
             if self.target_enemy(wait=True, time_out=retarget_timeout, check_health=has_health):
@@ -351,6 +374,32 @@ class CombatCheck(BaseWWTask):
                 self.boss_health_box.x += 6
                 self.boss_health = self.boss_health_box.crop_frame(self.frame)
                 self.draw_boxes('boss_health', boxes, color='blue')
+                return True
+        return False
+
+    def boss_health_area(self):
+        return self.box_of_screen(1269 / 3840, 58 / 2160, 2533 / 3840, 200 / 2160,
+                                  hcenter=True, vcenter=True)
+
+    def boss_still_alive(self):
+        """收手前问一句 Boss 还在不在: 破韧图标还挂着, 或者顶上血条还剩一点血色。
+
+        has_boss_health_bar 要求血色块占满外接框, 可血条左端是尖头, 残血时只剩尖头那一截,
+        实机截图量过: 剩 7~8% 以下 2K/1K 都认不到。这里按连通块算, 只要高度够半条血条、面积够,
+        尖头也算。只在要收手时看一次。
+        """
+        if self.is_boss():
+            return True
+        area = self.boss_health_area()
+        crop = self.frame[area.y:area.y + area.height, area.x:area.x + area.width, :3]
+        mask = get_mask_in_color_range(crop, boss_health_color)
+        count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+        min_h = self.height_of_screen(BOSS_SLIVER_MIN_HEIGHT)
+        max_h = self.height_of_screen(BOSS_SLIVER_MAX_HEIGHT)
+        min_area = min_h * self.width_of_screen(BOSS_SLIVER_MIN_WIDTH)
+        for i in range(1, count):
+            h, a = stats[i, cv2.CC_STAT_HEIGHT], stats[i, cv2.CC_STAT_AREA]
+            if min_h <= h <= max_h and a >= min_area:
                 return True
         return False
 

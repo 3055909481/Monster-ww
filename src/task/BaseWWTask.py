@@ -13,6 +13,7 @@ import cv2
 
 from src.Labels import Labels
 from src.scene.WWScene import WWScene
+from src.task import BossBook
 
 logger = Logger.get_logger(__name__)
 number_re = re.compile(r'(\d+)')
@@ -1126,9 +1127,39 @@ class BaseWWTask(BaseTask):
             raise_if_not_found=False,
         )
 
-    def click_team_challenge(self):
-        self.wait_click_feature('team_start_challenge', raise_if_not_found=True, click_after_delay=0.5, after_sleep=1)
-        self.wait_click_skip_dialog_confirm()
+    def click_team_challenge(self, time_out=120, retry_interval=4):
+        """从等级页/队伍页一路点到进副本，点击丢了会补点。
+
+        旧实现只点一次就 wait_click_feature，点丢后停在等级页干等 120 秒。
+        这里每轮看按钮还在不在：同页超过 retry_interval 秒没翻过去就再点一次。
+        """
+        start = time.time()
+        last_page = None
+        last_click = 0.0
+        while time.time() - start < time_out:
+            self.next_frame()
+            if self.in_team_and_world():
+                self.sleep(0.5)
+                return True
+            if self.click_skip_dialog_confirm():
+                continue
+            box = self.find_one('team_start_challenge')
+            if box is not None:
+                now = time.time()
+                page = self.ocr(*self.CHALLENGE_BUTTON_BOX, name='challenge_buttons') or []
+                page_key = tuple(sorted(getattr(item, 'name', '') for item in page))
+                wait = 1.0 if page_key != last_page else retry_interval
+                if now - last_click >= wait:
+                    if page_key == last_page:
+                        self.log_info(self.tr('challenge: start button did not respond, click again'))
+                    self.click_box(box, after_sleep=0.5)
+                    last_click, last_page = now, page_key
+                    continue
+            self.sleep(0.5)
+        raise Exception(self.tr('challenge: not in world after {seconds}s').format(seconds=time_out))
+
+    # 等级页「单人挑战」和队伍页「开启挑战」都在右下这一条（用于判断翻页与否）
+    CHALLENGE_BUTTON_BOX = (0.60, 0.86, 0.98, 0.97)
 
     def wait_click_travel(self):
         self.wait_until(self.click_traval_button, raise_if_not_found=True, time_out=10)
@@ -1229,6 +1260,116 @@ class BaseWWTask(BaseTask):
             target = max(btns, key=lambda box: box.y)
         self.draw_boxes(boxes=target, color="red")
         self.click(target, after_sleep=1)
+        feature = self.wait_feature(['fast_travel_custom', 'gray_teleport', 'remove_custom', *TEAM_SCREEN_FEATURES],
+                                    time_out=10, settle_time=0.5, raise_if_not_found=True)
+        return feature.name in TEAM_SCREEN_FEATURES
+
+    # 素材获取列表：名字列（含地区标题）和每行右侧「直接挑战/前往」按钮所在的竖条
+    BOOK_NAME_BOX = (0.44, 0.19, 0.70, 0.90)
+    BOOK_BUTTON_BOX = (0.9113, 0.229, 0.9613, 0.861)
+    # 名字框顶 → 同一行按钮顶，2K 实测 0.023~0.026；地区标题到下一行按钮 ≥0.09
+    BOOK_ROW_BUTTON_DY = (0.0, 0.06)
+    # 滚轮 1 格约 0.0244 屏高，一行 Boss 约 0.142；10 格 ≈1.7 行，一屏 4~5 行，翻页不会漏行
+    BOOK_SCROLL_TICKS = 10
+
+    def _read_book_rows(self):
+        """当前画面列表里的行，从上往下 [(OCR 名字, 名字 y 占比, 同一行按钮或 None, 是否梦魇聚落)] 和全部按钮。"""
+        texts = sorted(self.ocr(*self.BOOK_NAME_BOX, name='boss_book_names') or [], key=lambda b: b.y)
+        btns = self.find_feature('boss_proceed', box=self.box_of_screen(*self.BOOK_BUTTON_BOX), threshold=0.8)
+        cjk_only = self.game_lang == 'zh_CN'
+        lo, hi = self.BOOK_ROW_BUTTON_DY
+        progress = [t.y / self.height for t in texts if BossBook.is_progress_text(t.name)]
+        rows = []
+        for t in texts:
+            if not BossBook.is_candidate_text(t.name, cjk_only):
+                continue
+            ty = t.y / self.height
+            btn = next((b for b in btns if lo <= b.y / self.height - ty <= hi), None)
+            nest = '聚落' in t.name or any(0.03 <= py - ty <= 0.10 for py in progress)
+            rows.append((t.name, ty, btn, nest))
+        return rows, btns
+
+    @staticmethod
+    def _pick_book_row(rows, category, target, serial, seen, nests):
+        """本页能点的目标行 (名字, 按钮)，没有返回 None。"""
+        if target:
+            others = [n for n in BossBook.known_names(category) if not BossBook.same_name(n, target)]
+            best = None
+            for name, _, btn, _ in rows:
+                d = BossBook.match_distance(name, target)
+                if d is None or (d > 0 and BossBook.nearer_to_other(name, d, others)):
+                    continue
+                if best is None or d < best[0]:
+                    best = (d, name, btn)
+            return (best[1], best[2]) if best and best[2] is not None else None
+        eligible = [s for s in seen if not (category == 'mengyan' and BossBook.norm(s) in nests)]
+        if serial < 1 or len(eligible) < serial:
+            return None
+        want = eligible[serial - 1]
+        for name, _, btn, _ in rows:
+            if btn is not None and BossBook.same_name(name, want):
+                return name, btn
+        return None
+
+    def _learn_book_names(self, category, seen, reads, nests):
+        """学新 Boss 名: 只认读到 2 次的, 防 OCR 错字进下拉框。"""
+        observed = [n for n in seen if BossBook.norm(n) not in nests and reads.get(BossBook.norm(n), 0) >= 2]
+        new = BossBook.learn_names(category, observed)
+        if new:
+            self.log_info(self.tr('boss book: learned new names: {names}').format(
+                names='、'.join(new)))
+
+    def click_book_target_by_name(self, category, target='', serial=0, max_pages=30):
+        """在已打开的素材获取分类里找 Boss，点它那一行的「直接挑战/前往」，返回点到的 OCR 名字。
+
+        target 非空按名字模糊匹配（容 OCR 错 1 个字）；为空时数第 serial 个有按钮的行。
+        只用滚轮往下翻、每页 OCR，不依赖列表总数和滚动条位置，游戏新加 Boss 不会点歪。
+        """
+        self.sleep(0.5)
+        seen = []
+        nests = set()
+        reads = {}
+        last_sig = None
+        for page in range(max_pages):
+            self.next_frame()
+            rows, btns = self._read_book_rows()
+            frames = [rows]
+            if page == 0:
+                self.sleep(0.3)
+                self.next_frame()
+                frames.append(self._read_book_rows()[0])
+            for frame_rows in frames:
+                for name, _, btn, nest in frame_rows:
+                    if btn is None:
+                        continue
+                    key = BossBook.norm(name)
+                    if nest:
+                        nests.add(key)
+                    reads[key] = reads.get(key, 0) + 1
+                    if not any(BossBook.same_name(name, s) for s in seen):
+                        seen.append(name)
+            hit = self._pick_book_row(rows, category, target, serial, seen, nests)
+            if hit:
+                name, btn = hit
+                self._learn_book_names(category, seen, reads, nests)
+                self.log_info(self.tr('boss book: clicked {name}').format(name=name))
+                self.draw_boxes(boxes=btn, color="red")
+                self.click(btn, after_sleep=1)
+                return name
+            sig = tuple(round(b.y / self.height, 2) for b in btns)
+            if page > 0 and sig == last_sig:
+                break
+            last_sig = sig
+            self.scroll_relative(0.65, 0.6, -self.BOOK_SCROLL_TICKS)
+            self.sleep(0.6)
+        self._learn_book_names(category, seen, reads, nests)
+        names = '、'.join(seen)
+        wanted = target if target else f'#{serial}'
+        raise Exception(self.tr('boss book: {wanted} not found, list has: {names}').format(
+            wanted=wanted, names=names))
+
+    def wait_after_book_click(self):
+        """点了「直接挑战/前往」之后：队伍界面返回 True，地图传送界面返回 False。"""
         feature = self.wait_feature(['fast_travel_custom', 'gray_teleport', 'remove_custom', *TEAM_SCREEN_FEATURES],
                                     time_out=10, settle_time=0.5, raise_if_not_found=True)
         return feature.name in TEAM_SCREEN_FEATURES

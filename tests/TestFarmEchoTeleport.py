@@ -18,6 +18,10 @@ def make_task(config, is_team):
     task.book_targets = []
     task.click_on_book_target = lambda serial, total, structure=None: task.book_targets.append(
         (serial, total, structure)) or is_team
+    task.by_name_calls = []
+    task.click_book_target_by_name = lambda category, target='', serial=0, max_pages=30: (
+        task.by_name_calls.append((category, target, serial)))
+    task.wait_after_book_click = lambda: is_team
     return task
 
 
@@ -41,7 +45,9 @@ class TestFarmEchoTeleport(unittest.TestCase):
         self.assertFalse(task.teleport_to_configured_boss())
 
         task.open_boss_book.assert_called_once_with('qiangdi')
-        self.assertEqual([(3, 20, None)], task.book_targets)
+        # 讨伐/周本现在按「从上往下第 N 个有按钮的行」找，不再传写死总数
+        self.assertEqual([('qiangdi', '', 3)], task.by_name_calls)
+        self.assertEqual([], task.book_targets)
         task.wait_click_travel.assert_called_once_with()
 
     # With too few waveplates (incl. reserve), a "no rewards, enter anyway?" popup shows after
