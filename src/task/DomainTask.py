@@ -60,10 +60,19 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
         max_runs > 0 时刷够次数就退出；0 表示沿用原逻辑（刷到体力耗尽）。
         """
         recovery_retries = 0
+        stamina_waited = False
         self.realm_entry_at_heal_point = False
         while True:
             current, _, total = self.open_F2_book_and_get_stamina()
             if total < self.stamina_once or total < must_use or (must_use == 0 and current < self.stamina_once):
+                # Finite-count runs (from the routine) may wait once for natural
+                # stamina recovery to finish the configured count without waste.
+                if (not stamina_waited and getattr(self, '_routine_wait_stamina', False)
+                        and self.stamina_once):
+                    stamina_waited = True
+                    gap = getattr(self, '_routine_stamina_gap', 10)
+                    if self.wait_for_stamina_enough(self.stamina_once, gap):
+                        continue  # re-read stamina and proceed with the normal flow
                 self.log_info(self.tr('not enough stamina'), notify=True)
                 self.back()
                 return

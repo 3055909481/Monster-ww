@@ -433,6 +433,43 @@ class BaseWWTask(BaseTask):
         self.info_set('back_up_stamina', back_up)
         return current, back_up, current + back_up
 
+    # 体力自然恢复约每 4 分钟 1 点（每天 360），等待估算与超时上限都基于它。
+    STAMINA_RECOVER_SECONDS = 240
+    STAMINA_WAIT_HARD_CAP = 3600  # 单缺口最长等 60 分钟，超时就放弃继续后面的步骤
+
+    def wait_for_stamina_enough(self, need, gap_limit=10):
+        """有限次数副本体力不足时，等自然恢复到够本次所需。
+
+        Need "current" stamina (natural regeneration), not the spare crystal.
+        Only waits when the gap is small (<= gap_limit) so an abnormal large
+        shortfall can never stall the routine for hours. Caller must be on a
+        screen where get_stamina() works (e.g. F2 book).
+
+        Returns True if enough stamina is available now or after waiting,
+        False if the gap is too large or the wait timed out.
+        """
+        current, _, _ = self.get_stamina()
+        if current < 0:
+            return False
+        if current >= need:
+            return True
+        gap = need - current
+        if gap > gap_limit:
+            self.log_info(self.tr('Stamina short by {gap}, above the {limit} limit; skip waiting.').format(
+                gap=gap, limit=gap_limit))
+            return False
+        time_out = min(max(gap * self.STAMINA_RECOVER_SECONDS, 60), self.STAMINA_WAIT_HARD_CAP)
+        self.log_info(self.tr('Stamina short by {gap}; waiting up to {minutes:.0f} min for recovery.').format(
+            gap=gap, minutes=time_out / 60))
+        result = self.wait_until(
+            lambda: (self.get_stamina()[0] >= need),
+            time_out=time_out, settle_time=0, raise_if_not_found=False)
+        if result:
+            self.log_info(self.tr('Stamina recovered; continue.'))
+        else:
+            self.log_info(self.tr('Timed out waiting for stamina; continue with remaining steps.'))
+        return bool(result)
+
     def use_stamina(self, once=60, must_use=0):
         self.sleep(1)
         current, back_up, total = self.get_stamina()

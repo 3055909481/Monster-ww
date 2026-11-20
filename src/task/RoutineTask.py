@@ -43,6 +43,9 @@ from src.task.task_icons import task_icon
 
 logger = Logger.get_logger(__name__)
 
+WAIT_STAMINA_KEY = '等待体力恢复'
+STAMINA_GAP_KEY = '体力等待缺口上限'
+
 
 class RoutineTask(WWOneTimeTask, BaseCombatTask):
     """Run a user-defined sequence of daily/stamina tasks."""
@@ -67,6 +70,15 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             'text': '配置流水线',
             'callback': self.configure_plans,
         }
+        # 体力未满时，有限次数副本最后几次体力不够，可等待自然恢复补齐。
+        self.default_config[WAIT_STAMINA_KEY] = False
+        self.config_description[WAIT_STAMINA_KEY] = (
+            'Finite-count domains wait for stamina to recover before the last runs. '
+            'Unlimited (count=0) domains are never waited on.')
+        self.default_config[STAMINA_GAP_KEY] = 10
+        self.config_description[STAMINA_GAP_KEY] = (
+            'Only wait when current stamina is short by at most this many points; '
+            'a larger shortfall is skipped to avoid long waits.')
         self.add_exit_after_config()
         self.plan_name = DEFAULT_PLAN_NAME
         self.results = []
@@ -248,6 +260,16 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             total=len(acted),
             skipped=sum(status == 'skipped' for _, status, _ in self.results)), notify=True)
 
+    def _configure_stamina_wait(self, task, max_runs):
+        """Tell a finite-count domain task to wait for stamina recovery if enabled.
+
+        Unlimited runs (max_runs=0) deliberately burn stamina to empty and must
+        never wait, otherwise they would stall the whole routine.
+        """
+        enabled = bool(self.config.get(WAIT_STAMINA_KEY, False)) and max_runs > 0
+        task._routine_wait_stamina = enabled
+        task._routine_stamina_gap = int(self.config.get(STAMINA_GAP_KEY, 10) or 0)
+
     def _run_entry(self, entry_id, params):
         params = deepcopy(params)
         self.log_info(self.tr('执行流水线步骤：{id} {params}').format(id=entry_id, params=params))
@@ -261,22 +283,28 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             self.get_task_by_class(DailyTask).check_weekly_garden()
         elif entry_id == 'simulation':
             task = self.get_task_by_class(SimulationTask)
+            max_runs = int(params.get('次数', 0) or 0)
+            self._configure_stamina_wait(task, max_runs)
             with account_task_config(task, {
                     'Region Selection': params.get('地区', catalog.simulation_regions()[0]),
                     'Material Selection': params.get('材料', 'Shell Credit'),
             }):
-                task.farm_simulation(max_runs=int(params.get('次数', 0) or 0))
+                task.farm_simulation(max_runs=max_runs)
         elif entry_id == 'forgery':
             task = self.get_task_by_class(ForgeryTask)
+            max_runs = int(params.get('次数', 0) or 0)
+            self._configure_stamina_wait(task, max_runs)
             serial = catalog.forgery_serial(params.get('地区', catalog.forgery_region_names()[0]),
                                             params.get('武器类型', catalog.forgery_weapon_types()[0]))
             with account_task_config(task, {'Which Forgery Challenge to Farm': serial}):
-                task.farm_forgery(max_runs=int(params.get('次数', 0) or 0))
+                task.farm_forgery(max_runs=max_runs)
         elif entry_id == 'tacet':
             task = self.get_task_by_class(TacetTask)
+            max_runs = int(params.get('次数', 0) or 0)
+            self._configure_stamina_wait(task, max_runs)
             serial = catalog.tacet_serial(params.get('无音区', catalog.tacet_zones()[0]))
             with account_task_config(task, {'Which Tacet Suppression to Farm': serial}):
-                task.farm_tacet(max_runs=int(params.get('次数', 0) or 0))
+                task.farm_tacet(max_runs=max_runs)
         elif entry_id == 'boss_challenge':
             boss = params.get('BOSS', catalog.boss_challenges()[0])
             self._farm_echo({

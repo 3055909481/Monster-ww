@@ -59,6 +59,7 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         self.info_incr('used stamina', 0)
         recovery_retries = 0
         runs = 0
+        stamina_waited = False
         self.realm_entry_at_heal_point = False
         while True:
             self.sleep(1)
@@ -68,6 +69,15 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 self.click_relative(0.04, 0.4, after_sleep=1)
                 current, back_up, total = self.get_stamina()
             if total < self.stamina_once:
+                # Finite-count runs (from the routine) may wait once for natural recovery.
+                if (not stamina_waited and getattr(self, '_routine_wait_stamina', False)
+                        and self.stamina_once):
+                    stamina_waited = True
+                    gap = getattr(self, '_routine_stamina_gap', 10)
+                    if self.wait_for_stamina_enough(self.stamina_once, gap):
+                        current, back_up, total = self.get_stamina()
+                        if total >= self.stamina_once:
+                            continue
                 return self.not_enough_stamina()
 
             self.open_boss_book('wuyin')
