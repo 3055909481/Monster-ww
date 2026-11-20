@@ -164,7 +164,9 @@ class TestFarmEchoDeathReentry(unittest.TestCase):
                 for name in ('ensure_main', 'info_set', 'openF2Book', 'open_boss_book', 'click_team_challenge',
                              'wait_click_travel', 'wait_in_team_and_world', 'sleep'):
                     setattr(task, name, noop)
-                task.click_on_book_target = lambda *args: is_team
+                # Boss Challenge now uses name-based row lookup instead of click_on_book_target.
+                task.click_book_target_by_name = lambda *args, **kwargs: 'mock-boss'
+                task.wait_after_book_click = lambda: is_team
 
                 task.teleport_to_configured_boss()
 
