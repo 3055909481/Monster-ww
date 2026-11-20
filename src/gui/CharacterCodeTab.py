@@ -25,6 +25,7 @@ from Mon import Logger, og
 from Mon.ui.qt.tasks.EditTaskTab import CodeEditor
 from Mon.ui.qt.tasks.PythonHighlighter import PythonHighlighter
 from Mon.ui.qt.widget.CustomTab import CustomTab
+from src.gui import WorkshopSource
 from src.char.CharFactory import apply_team_char_classes, char_dict
 from src.char.CustomCharLoader import (
     TEAM_CODE_MODE_BUILTIN, TEAM_CODE_MODE_IMPORT, TEAM_CODE_STATE_NONE,
@@ -41,6 +42,10 @@ WORKSHOP_BUNDLE_DIR = Path(__file__).resolve().parent.parent.parent / "workshop_
 WORKSHOP_INDEX = WORKSHOP_BUNDLE_DIR / "teams.json"
 WORKSHOP_CODES_DIR = WORKSHOP_BUNDLE_DIR / "codes"
 WORKSHOP_USER_AGENT = "Monster-ww"
+# Online-refresh cache. Kept under the working tree's configs folder so it
+# survives app updates (updater preserves configs/) and needs no admin rights.
+WORKSHOP_CACHE_DIR = Path("configs") / "workshop_cache"
+WORKSHOP_CACHE_INDEX = WORKSHOP_CACHE_DIR / "teams.json"
 logger = Logger.get_logger(__name__)
 
 # The team list marks each team with a haloed dot, and both switch buttons wear the
@@ -165,6 +170,12 @@ def translate_ui(message):
             "Version": "版本",
             "Modified": "修改时间",
             "Action": "操作",
+            "Scene": "场景",
+            "Difficulty": "难度",
+            "Refresh": "刷新",
+            "Fetch the newest shared codes from the upstream workshop": "从上游工坊拉取最新的共享配置",
+            "Workshop updated: {count} configurations.": "工坊已更新：{count} 个配置。",
+            "Workshop refresh failed: {error}": "工坊刷新失败：{error}",
             "Import": "导入",
             "Close": "关闭",
             "Switch to Built In Code": "切换为内置代码",
@@ -220,6 +231,12 @@ def translate_ui(message):
             "Version": "版本",
             "Modified": "修改時間",
             "Action": "操作",
+            "Scene": "場景",
+            "Difficulty": "難度",
+            "Refresh": "重新整理",
+            "Fetch the newest shared codes from the upstream workshop": "從上游工坊拉取最新的共享設定",
+            "Workshop updated: {count} configurations.": "工坊已更新：{count} 個設定。",
+            "Workshop refresh failed: {error}": "工坊重新整理失敗：{error}",
             "Import": "匯入",
             "Close": "關閉",
             "Switch to Built In Code": "切換為內建程式碼",
@@ -275,6 +292,12 @@ def translate_ui(message):
             "Version": "バージョン",
             "Modified": "更新日時",
             "Action": "操作",
+            "Scene": "シナリオ",
+            "Difficulty": "難易度",
+            "Refresh": "更新",
+            "Fetch the newest shared codes from the upstream workshop": "上流ワークショップから最新の共有コードを取得",
+            "Workshop updated: {count} configurations.": "ワークショップを更新しました：{count} 件。",
+            "Workshop refresh failed: {error}": "ワークショップの更新に失敗：{error}",
             "Import": "インポート",
             "Close": "閉じる",
             "Switch to Built In Code": "組み込みコードに切り替え",
@@ -330,6 +353,12 @@ def translate_ui(message):
             "Version": "버전",
             "Modified": "수정일",
             "Action": "동작",
+            "Scene": "장면",
+            "Difficulty": "난이도",
+            "Refresh": "새로고침",
+            "Fetch the newest shared codes from the upstream workshop": "상위 워크숍에서 최신 공유 코드 가져오기",
+            "Workshop updated: {count} configurations.": "워크숍 업데이트됨: {count}개 구성.",
+            "Workshop refresh failed: {error}": "워크숍 새로고침 실패: {error}",
             "Import": "가져오기",
             "Close": "닫기",
             "Switch to Built In Code": "내장 코드로 전환",
@@ -385,6 +414,12 @@ def translate_ui(message):
             "Version": "Versión",
             "Modified": "Modificado",
             "Action": "Acción",
+            "Scene": "Escenario",
+            "Difficulty": "Dificultad",
+            "Refresh": "Actualizar",
+            "Fetch the newest shared codes from the upstream workshop": "Obtener los códigos compartidos más recientes del taller superior",
+            "Workshop updated: {count} configurations.": "Taller actualizado: {count} configuraciones.",
+            "Workshop refresh failed: {error}": "Error al actualizar el taller: {error}",
             "Import": "Importar",
             "Close": "Cerrar",
             "Switch to Built In Code": "Cambiar a código integrado",
@@ -475,18 +510,20 @@ def workshop_team_url(team):
 
 
 def _workshop_archive_for(code):
-    """Locate the embedded archive for a workshop entry."""
+    """Locate the archive for a workshop entry (bundled snapshot or online cache)."""
     filename = Path(str(code.get("filename") or "")).name
-    candidate = WORKSHOP_CODES_DIR / filename
-    if filename and candidate.is_file():
-        return candidate
+    for directory in (WORKSHOP_CODES_DIR, WORKSHOP_CACHE_DIR):
+        candidate = directory / filename
+        if filename and candidate.is_file():
+            return candidate
     try:
         slug = workshop_team_slug(str(code.get("team") or ""))
     except ValueError:
         return None
-    fallback = WORKSHOP_CODES_DIR / f"{slug}.zip"
-    if fallback.is_file():
-        return fallback
+    for directory in (WORKSHOP_CODES_DIR, WORKSHOP_CACHE_DIR):
+        fallback = directory / f"{slug}.zip"
+        if fallback.is_file():
+            return fallback
     return None
 
 
@@ -675,6 +712,7 @@ class TeamInfoDialog(TranslatedDialog):
 
 class WorkshopDialog(TranslatedDialog):
     import_requested = Signal(object)
+    refresh_requested = Signal()
 
     def __init__(self, codes, team_name=None, parent=None):
         super().__init__(parent)
@@ -721,12 +759,18 @@ class WorkshopDialog(TranslatedDialog):
         filter_layout.addWidget(QLabel(self.tr("Character:"), self.panel))
         filter_layout.addWidget(self.char_filter_combo)
         filter_layout.addWidget(self.count_label)
+        self.refresh_button = Button(self.tr("Refresh"), icon="refresh", parent=self.panel)
+        self.refresh_button.setToolTip(
+            self.tr("Fetch the newest shared codes from the upstream workshop"))
+        self.refresh_button.clicked.connect(self.refresh_requested.emit)
+        filter_layout.addWidget(self.refresh_button)
         self.body.addLayout(filter_layout)
 
         self.table = QTableWidget(self.panel)
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            self.tr("Team"), self.tr("Description"), self.tr("Author"),
+            self.tr("Team"), self.tr("Scene"), self.tr("Difficulty"),
+            self.tr("Description"), self.tr("Author"),
             self.tr("Version"), self.tr("Modified"), self.tr("Action"),
         ])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -736,16 +780,20 @@ class WorkshopDialog(TranslatedDialog):
         self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 185)
-        self.table.setColumnWidth(2, 130)
-        self.table.setColumnWidth(3, 85)
-        self.table.setColumnWidth(4, 120)
-        self.table.setColumnWidth(5, 80)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Interactive)
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 175)
+        self.table.setColumnWidth(1, 110)
+        self.table.setColumnWidth(2, 80)
+        self.table.setColumnWidth(4, 110)
+        self.table.setColumnWidth(5, 75)
+        self.table.setColumnWidth(6, 105)
+        self.table.setColumnWidth(7, 80)
         self.table.setStyleSheet("QTableView::item { padding-left: 5px; padding-right: 5px; }")
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
 
@@ -758,6 +806,28 @@ class WorkshopDialog(TranslatedDialog):
 
         self.ok_button.setText(self.tr("Close"))
         self.set_cancel_visible(False)
+        self._apply_filter()
+
+    def set_codes(self, codes):
+        """Replace the displayed entries after an online refresh."""
+        self.all_codes = list(codes)
+        current_char = self.char_filter_combo.currentData()
+        all_chars = set()
+        for code in self.all_codes:
+            for member in code.get("members", []):
+                if member:
+                    all_chars.add(member)
+        sorted_chars = sorted(
+            all_chars, key=lambda c: self.tr(get_english_char_name(c)).casefold())
+        self.char_filter_combo.blockSignals(True)
+        self.char_filter_combo.clear()
+        self.char_filter_combo.addItem(self.tr("All Characters"), userData="")
+        for char_name in sorted_chars:
+            self.char_filter_combo.addItem(
+                self.tr(get_english_char_name(char_name)), userData=char_name)
+        index = self.char_filter_combo.findData(current_char)
+        self.char_filter_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.char_filter_combo.blockSignals(False)
         self._apply_filter()
 
     def _team_display_text(self, code):
@@ -821,6 +891,8 @@ class WorkshopDialog(TranslatedDialog):
             desc = lines[0] if lines else ""
             values = (
                 display_team,
+                WorkshopSource.extract_scene(code),
+                WorkshopSource.extract_difficulty(code),
                 desc,
                 code.get("author", ""),
                 code.get("version", ""),
@@ -829,7 +901,7 @@ class WorkshopDialog(TranslatedDialog):
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-                if column == 1:
+                if column == 3:
                     # Hovering shows the original full multi-line description without loss
                     item.setToolTip(raw_desc)
                 self.table.setItem(row, column, item)
@@ -843,7 +915,7 @@ class WorkshopDialog(TranslatedDialog):
             button.setFixedSize(60, 28)
             button.clicked.connect(lambda _checked=False, item=code: self.import_requested.emit(item))
             container_layout.addWidget(button)
-            self.table.setCellWidget(row, 5, container)
+            self.table.setCellWidget(row, 7, container)
 
     def _on_row_double_clicked(self, row, _col):
         if 0 <= row < len(self.filtered_codes):
@@ -1570,17 +1642,61 @@ class CharacterCodeTab(CustomTab):
         # An import selects the imported team, so ask before anything is downloaded.
         if not self._guard_unsaved_changes():
             return
-        try:
-            codes = fetch_all_workshop_teams()
-        except Exception as e:
-            show_info_bar(self.window(), str(e), title=self.tr("Workshop Error"), error=True)
+        codes = self._load_workshop_codes()
+        if codes is None:
             return
         dialog = WorkshopDialog(codes, parent=self.window())
         dialog.import_requested.connect(lambda code: self._import_workshop_code(code, dialog))
+        dialog.refresh_requested.connect(lambda: self._refresh_workshop(dialog))
         dialog.exec()
+
+    def _load_workshop_codes(self):
+        """Cached online index when available, otherwise the bundled snapshot."""
+        cached = WorkshopSource.load_index_cache(WORKSHOP_CACHE_INDEX)
+        if cached is not None:
+            try:
+                return WorkshopSource.parse_index(cached)
+            except ValueError:
+                pass
+        try:
+            return fetch_all_workshop_teams()
+        except Exception as e:
+            show_info_bar(self.window(), str(e), title=self.tr("Workshop Error"), error=True)
+            return None
+
+    def _refresh_workshop(self, dialog):
+        app = QApplication.instance()
+        if app is not None:
+            app.setOverrideCursor(Qt.WaitCursor)
+        try:
+            codes, payload, _source = WorkshopSource.fetch_latest_codes()
+        except Exception as e:
+            show_info_bar(dialog, self.tr("Workshop refresh failed: {error}").format(error=e),
+                          title=self.tr("Workshop Error"), error=True)
+            return
+        finally:
+            if app is not None:
+                app.restoreOverrideCursor()
+        try:
+            WorkshopSource.save_index_cache(payload, WORKSHOP_CACHE_INDEX)
+        except OSError:
+            pass
+        dialog.set_codes(codes)
+        show_info_bar(dialog, self.tr("Workshop updated: {count} configurations.").format(
+            count=len(codes)), title=self.tr("Success"))
 
     def _import_workshop_code(self, code, parent):
         archive = _workshop_archive_for(code)
+        if archive is None and (code.get("rawUrl") or code.get("downloadUrl")):
+            # Not bundled: try to fetch the shared code on demand.
+            app = QApplication.instance()
+            if app is not None:
+                app.setOverrideCursor(Qt.WaitCursor)
+            try:
+                archive = WorkshopSource.download_archive(code, WORKSHOP_CACHE_DIR)
+            finally:
+                if app is not None:
+                    app.restoreOverrideCursor()
         if archive is None:
             show_info_bar(parent, translate_ui("The workshop archive is missing from this build."),
                           title=self.tr("Error"), error=True)
