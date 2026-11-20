@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -39,6 +40,18 @@ _team_class_cache = {}
 # them once per member per team, which turns a scan over every team into a hundred
 # file reads. Cache the result and keep the existing clear hooks pointed at it.
 _builtin_code_cache = {}
+
+
+def make_work_folder(parent, prefix):
+    """在 parent 下建临时工作目录，权限继承 parent（不能用 mkdtemp：3.12.4+ 在 Windows 上建出的目录只有创建者可访问）。"""
+    parent = Path(parent)
+    while True:
+        folder = parent / f"{prefix}{uuid.uuid4().hex[:8]}"
+        try:
+            folder.mkdir()
+            return folder
+        except FileExistsError:
+            continue
 
 
 def get_english_char_name(char_cls_or_name):

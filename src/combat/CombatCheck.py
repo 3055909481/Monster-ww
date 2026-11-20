@@ -9,6 +9,7 @@ from Mon import find_color_rectangles, get_mask_in_color_range, is_pure_black
 from src import text_white_color
 from src.Labels import Labels
 from src.char.Roccia import Roccia
+from src.combat.FKeyStart import GRACE_LOG_INTERVAL, GRACE_TARGET_INTERVAL
 from src.task.BaseWWTask import BaseWWTask
 
 logger = Logger.get_logger(__name__)
@@ -147,7 +148,38 @@ class CombatCheck(BaseWWTask):
     def is_boss(self):
         return self.find_one('boss_break_shield') or self.find_one('boss_break_lock')
 
+    # ---- 按 F 开始战斗的钩子（实现在 AutoCombatTask，其它任务保持默认关闭） ----
+    def should_start_combat_by_key(self):
+        return False
+
+    def start_combat_by_key(self):
+        return False
+
+    def f_grace_limit_seconds(self):
+        """保护期最多撑多久，0 = 一直撑到锁到目标。"""
+        return 0.0
+
+    def f_grace_hold(self):
+        """按 F 开打后怪还没出来: 补点一下中键就放行，不判脱战，宏照常出招。"""
+        since = getattr(self, '_f_grace_since', -1.0)
+        if not getattr(self, '_in_combat', False) or since <= 0:
+            return False
+        held = time.time() - since
+        limit = self.f_grace_limit_seconds()
+        if limit > 0 and held >= limit:
+            self._f_grace_since = -1.0
+            self.log_info(f'F 开始战斗: {limit:.0f} 秒还没锁到目标, 按原规则找怪')
+            return False
+        self.middle_click(interval=GRACE_TARGET_INTERVAL)
+        now = time.time()
+        if now - getattr(self, '_f_grace_log', 0) >= GRACE_LOG_INTERVAL:
+            self._f_grace_log = now
+            self.log_info(f'F 开始战斗: 还没锁到目标, 不判脱战({held:.0f}s)')
+        return True
+
     def do_check_in_combat(self, target):
+        if not getattr(self, '_in_combat', False) and self.should_start_combat_by_key():
+            return self.start_combat_by_key()
         if self.in_liberation:
             return True
         if self._in_combat:
@@ -327,6 +359,8 @@ class CombatCheck(BaseWWTask):
             self.middle_click()
         else:
             if self.has_target():
+                return True
+            elif self.f_grace_hold():
                 return True
             else:
                 timeout = self.target_enemy_time_out if time_out is None else time_out

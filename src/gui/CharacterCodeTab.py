@@ -26,6 +26,10 @@ from Mon.ui.qt.tasks.EditTaskTab import CodeEditor
 from Mon.ui.qt.tasks.PythonHighlighter import PythonHighlighter
 from Mon.ui.qt.widget.CustomTab import CustomTab
 from src.gui import WorkshopSource
+from src.char import TeamVariants
+from src.char.TeamVariants import (
+    activate_variant, delete_variant, forget_active, import_archive_as_active, list_variants,
+)
 from src.char.CharFactory import apply_team_char_classes, char_dict
 from src.char.CustomCharLoader import (
     TEAM_CODE_MODE_BUILTIN, TEAM_CODE_MODE_IMPORT, TEAM_CODE_STATE_NONE,
@@ -177,6 +181,19 @@ def translate_ui(message):
             "Workshop updated: {count} configurations.": "工坊已更新：{count} 个配置。",
             "Workshop refresh failed: {error}": "工坊刷新失败：{error}",
             "Import": "导入",
+            "Delete": "删除",
+            "Delete Saved Variants": "删除存档",
+            "Check the variants to delete (the active one is not listed; deletion is permanent):":
+                "勾选要删掉的存档（生效中的那份不在这里，删了不能恢复）：",
+            "Delete Checked": "删除勾选的",
+            "Saved code variants for this team; pick one to switch instantly":
+                "这支队伍存着的几份代码，选一份立刻换过去；现在这份会自动存起来",
+            "Delete unused saved variants of this team": "删除这支队伍未生效的存档",
+            "Switched to saved variant {label}; the previous one was kept.": "已换成「{label}」，原来那份已存进存档。",
+            "Current team reloaded.": "当前队伍已重新加载。",
+            "Team imported as saved variant {variant}.": "已导入为存档「{variant}」。",
+            "The previous code was kept in the variants.": "原来的代码已存入存档。",
+            "Deleted {count} saved variant(s).": "已删除 {count} 份存档。",
             "Close": "关闭",
             "Switch to Built In Code": "切换为内置代码",
             "Switch to Imported Code": "切换为导入代码",
@@ -943,6 +960,33 @@ class WorkshopDialog(TranslatedDialog):
                 self.import_requested.emit(code)
 
 
+class VariantDeleteDialog(TranslatedDialog):
+    """挑要删的存档，生效中的那份不在列表里。"""
+
+    def __init__(self, variants, parent=None):
+        super().__init__(parent)
+        self.panel.setFixedWidth(520)
+        self.set_dialog_title(self.tr("Delete Saved Variants"))
+        self.body.addWidget(QLabel(
+            self.tr("Check the variants to delete (the active one is not listed; deletion is permanent):"),
+            self.panel))
+        self.list_widget = QListWidget(self.panel)
+        self.list_widget.setMinimumHeight(220)
+        for variant in variants:
+            item = QListWidgetItem(variant["label"])
+            item.setData(Qt.UserRole, variant["id"])
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            item.setToolTip(str(variant["manifest"].get("description") or ""))
+            self.list_widget.addItem(item)
+        self.body.addWidget(self.list_widget)
+        self.ok_button.setText(self.tr("Delete Checked"))
+
+    def selected_ids(self):
+        items = (self.list_widget.item(row) for row in range(self.list_widget.count()))
+        return [item.data(Qt.UserRole) for item in items if item.checkState() == Qt.Checked]
+
+
 class CharacterCodeTab(CustomTab):
     current_team_loaded = Signal(object)
 
@@ -976,6 +1020,20 @@ class CharacterCodeTab(CustomTab):
         self.team_list.setItemDelegate(TeamListDelegate(self.team_list))
         self.team_list.currentRowChanged.connect(self._team_selected)
         left_layout.addWidget(self.team_list, 1)
+        # 同一支队伍的多份代码存档：选一份立即换过去
+        variant_layout = QHBoxLayout()
+        self.variant_combo = ComboBox(parent=left)
+        self.variant_combo.setSizeAdjustPolicy(ComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.variant_combo.setMinimumContentsLength(4)
+        self.variant_combo.setToolTip(
+            self.tr("Saved code variants for this team; pick one to switch instantly"))
+        self.variant_combo.currentIndexChanged.connect(self._variant_selected)
+        self.delete_variant_button = Button(self.tr("Delete"), icon="trash")
+        self.delete_variant_button.setToolTip(self.tr("Delete unused saved variants of this team"))
+        self.delete_variant_button.clicked.connect(self._delete_variants)
+        variant_layout.addWidget(self.variant_combo, 1)
+        variant_layout.addWidget(self.delete_variant_button)
+        left_layout.addLayout(variant_layout)
         self.switch_all_button = Button(translate_ui("Switch All to Built In Code"))
         self.switch_all_button.setToolTip(
             translate_ui("Switch every team between imported and built in code"))
@@ -1171,6 +1229,71 @@ class CharacterCodeTab(CustomTab):
         self.member_combo.blockSignals(False)
         self._set_editor_enabled(True)
         self._member_selected(member_index)
+        self._refresh_variants()
+
+    def _refresh_variants(self, team=None):
+        """重填存档下拉；第一项永远是生效中的那份。"""
+        team = self.current_team if team is None else team
+        variants = []
+        if team is not None:
+            try:
+                variants = list_variants(team)
+            except Exception as e:
+                self.logger.error(f"list team variants failed: {e}")
+        self.variant_combo.blockSignals(True)
+        self.variant_combo.clear()
+        for variant in variants:
+            self.variant_combo.addItem(variant["label"], userData=variant["id"])
+        self.variant_combo.setCurrentIndex(0 if variants else -1)
+        self.variant_combo.blockSignals(False)
+        has_team = team is not None
+        self.variant_combo.setEnabled(has_team and len(variants) > 1)
+        self.delete_variant_button.setEnabled(len(variants) > 1)
+
+    def _variant_selected(self, index):
+        if index <= 0 or self.current_team is None:
+            return
+        team = self.current_team
+        variant_id = self.variant_combo.itemData(index)
+        label = self.variant_combo.itemText(index)
+        if not self._guard_unsaved_changes():
+            self._refresh_variants()
+            return
+        try:
+            activate_variant(team, variant_id)
+        except Exception as e:
+            self.logger.error(f"switch team variant failed: {e}")
+            show_info_bar(self.window(), str(e), title=self.tr("Error"), error=True)
+            self._refresh_variants()
+            return
+        self._refresh_team_list(team)
+        reloaded = self._reload_live_team_code(team)
+        message = self.tr("Switched to saved variant {label}; the previous one was kept.").format(label=label)
+        if reloaded:
+            message += " " + self.tr("Current team reloaded.")
+        show_info_bar(self.window(), message, title=self.tr("Success"))
+
+    def _delete_variants(self):
+        if self.current_team is None:
+            return
+        team = self.current_team
+        stored = [variant for variant in list_variants(team) if not variant["active"]]
+        if not stored:
+            return
+        dialog = VariantDeleteDialog(stored, self.window())
+        if not dialog.exec():
+            return
+        deleted = 0
+        try:
+            for variant_id in dialog.selected_ids():
+                delete_variant(team, variant_id)
+                deleted += 1
+        except Exception as e:
+            show_info_bar(self.window(), str(e), title=self.tr("Error"), error=True)
+        self._refresh_variants()
+        if deleted:
+            show_info_bar(self.window(), self.tr("Deleted {count} saved variant(s).").format(count=deleted),
+                          title=self.tr("Success"))
 
     def _update_team_info_button(self):
         """The author's description belongs to the imported code, so it hides while built in code
@@ -1287,6 +1410,7 @@ class CharacterCodeTab(CustomTab):
             return
         try:
             delete_custom_team(team)
+            forget_active(team)
             self._reload_live_team_code(team)
             self.current_team = None
             self.current_char_cls = None
@@ -1726,12 +1850,15 @@ class CharacterCodeTab(CustomTab):
         if not self._guard_unsaved_changes():
             return False
         try:
-            import_custom_team(info)
+            variant_id, stashed = import_archive_as_active(info)
             self._refresh_team_list(info["team"])
             reloaded = self._reload_live_team_code(info["team"])
-            message = self.tr("Team imported.")
+            self._refresh_variants(normalize_team(info["team"]))
+            message = self.tr("Team imported as saved variant {variant}.").format(variant=variant_id)
+            if stashed:
+                message += " " + self.tr("The previous code was kept in the variants.")
             if reloaded:
-                message = self.tr("Team imported and reloaded for the matching team.")
+                message += " " + self.tr("Current team reloaded.")
             show_info_bar(self.window(), message, title=self.tr("Success"))
             return True
         except Exception as e:
