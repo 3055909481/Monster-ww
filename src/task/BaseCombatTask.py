@@ -1089,8 +1089,9 @@ class BaseCombatTask(CombatCheck):
 
         大招/变奏演出里不抛(演出本身会结束, 时停也已从计时里扣掉)。
         """
-        watch = self.perform_watch
-        if not watch or getattr(self, 'in_liberation', False) or not self._in_combat:
+        # 测试 fixture 常用 __new__ 构造、绕过 __init__，这些属性可能未初始化
+        watch = getattr(self, 'perform_watch', None)
+        if not watch or getattr(self, 'in_liberation', False) or not getattr(self, '_in_combat', False):
             return
         char, start, limit = watch
         elapsed = self.time_elapsed_accounting_for_freeze(start)
