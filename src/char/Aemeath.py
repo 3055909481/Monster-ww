@@ -69,6 +69,10 @@ class Aemeath(BaseChar):
 
     def perform_everything(self):
         start = time.time()
+        # 直接调用(未走 perform)时 last_perform 还是 0, field_time 会是 epoch 至今的巨大值。
+        # 这种情况视为刚上场, 否则总上限保护会把整套循环一帧都跑不起来。
+        if not getattr(self, 'last_perform', 0):
+            self.last_perform = start
         # 每放出一招 start 会重置, 另给一个总上限, 免得高亮一直亮着就永远不走
         while (self.time_elapsed_accounting_for_freeze(start) < 12
                and self.field_time() < self.PERFORM_TOTAL_TIME_OUT):

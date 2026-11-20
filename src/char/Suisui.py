@@ -91,8 +91,7 @@ class Suisui(BaseChar):
 
     def get_switch_priority(self, current_char=None, has_intro=False, target_low_con=False):
         since_last = self.time_elapsed_accounting_for_freeze(self.last_forte3_switch)
-        # 还没满协奏切出过(-1)时 since_last=10000, 不能当成「太久没上场」, 否则开局一直抢 MUST
-        if self.last_forte3_switch > 0 and since_last > 40:
+        if since_last > 40:
             return SwitchPriority.MUST
         elif since_last < self.FORTE3_SWITCH_LOCKOUT:
             return SwitchPriority.NO
