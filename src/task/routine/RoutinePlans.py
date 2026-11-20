@@ -25,29 +25,51 @@ PLAN_SELECTOR = 'Routine Plan'
 EDIT_PLANS = 'Configure Routine Plans'
 
 WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+ANY_DAY = '不限制'
 RUN_DAYS_KEY = '运行日'
+RUN_DAY_OPTIONS = WEEKDAYS + [ANY_DAY]
 
 
 def is_scheduled_today(params, today=None):
     """Whether a weekly step is allowed to run on ``today``.
 
-    ``运行日`` holds weekday labels (周一..周日). An empty or absent selection
-    means "no restriction" so clearing every checkbox cannot silently disable
-    the step forever.
+    ``运行日`` is a single choice: one of 周一..周日, or ``不限制`` (run daily).
+    A legacy multi-select list is still accepted: an empty / all-week list means
+    unrestricted, otherwise the day must be in it.
     """
-    days = params.get(RUN_DAYS_KEY) if isinstance(params, dict) else None
-    if not isinstance(days, list) or not days:
+    value = params.get(RUN_DAYS_KEY) if isinstance(params, dict) else None
+    if value is None or value == '' or value == ANY_DAY:
+        return True
+    if isinstance(value, list):
+        if not value or len(value) >= len(WEEKDAYS):
+            return True
+        days = value
+    else:
+        days = [value] if value in WEEKDAYS else []
+    if not days:
         return True
     if today is None:
         today = date.today()
     return WEEKDAYS[today.weekday()] in days
 
 
+def _normalize_run_days(value):
+    """Coerce a stored 运行日 value into a single valid option (drop-down)."""
+    if isinstance(value, str):
+        return value if value in RUN_DAY_OPTIONS else ANY_DAY
+    if isinstance(value, list):
+        valid = [day for day in value if day in WEEKDAYS]
+        if not valid or len(valid) >= len(WEEKDAYS):
+            return ANY_DAY
+        return valid[0]
+    return ANY_DAY
+
+
 def _run_days_schema():
-    return {RUN_DAYS_KEY: list(WEEKDAYS)}, {
-        RUN_DAYS_KEY: '仅在所选的星期执行；全选表示每天，全部取消表示不限制。',
+    return {RUN_DAYS_KEY: ANY_DAY}, {
+        RUN_DAYS_KEY: '只在所选星期执行；选「不限制」则每天都跑。',
     }, {
-        RUN_DAYS_KEY: {'type': 'multi_selection', 'options': list(WEEKDAYS)},
+        RUN_DAYS_KEY: {'type': 'drop_down', 'options': list(RUN_DAY_OPTIONS)},
     }
 
 
@@ -183,6 +205,8 @@ def normalize_items(items):
         if isinstance(item.get('params'), dict):
             params.update({key: value for key, value in item['params'].items()
                            if key in entry.default_config})
+        if RUN_DAYS_KEY in params:
+            params[RUN_DAYS_KEY] = _normalize_run_days(params[RUN_DAYS_KEY])
         uid = item.get('uid')
         if not isinstance(uid, str) or not uid:
             uid = uuid.uuid4().hex
