@@ -34,6 +34,7 @@ from src.char.CustomCharLoader import (
     team_code_state, write_team_manifest,
 )
 from src.char.Mortefi import Mortefi
+from src.char.Phrolova import Phrolova
 from src.char.Suisui import Suisui
 from src.char.Verina import Verina
 from src.char.YangYangSp import YangYangSp
@@ -1024,6 +1025,53 @@ class TestCharacterCodeTab(unittest.TestCase):
     def test_switch_all_teams_code_mode_ignores_unknown_mode(self):
         with self.assertRaises(ValueError):
             switch_all_teams_code_mode("nonsense")
+
+    def test_fetch_team_variants_pulls_offline_workshop_codes(self):
+        """拉取同队：从离线工坊把同队配置存成存档，不覆盖生效代码。"""
+        team = (Baizhi, Phrolova, Verina)
+        create_custom_team(team)
+        idx = json.load(open('workshop_bundle/teams.json', encoding='utf-8'))
+        team_entry = next(t for t in idx['teams'] if len(t.get('codes', [])) >= 2
+                          and set(t['members']) == {'Baizhi', 'Phrolova', 'Verina'})
+        codes = team_entry['codes'][:2]
+
+        tab = CharacterCodeTab()
+        try:
+            self.assertEqual(tab.current_team, normalize_team(team))
+            from src.char.TeamVariants import list_variants
+            before = len(list_variants(team))
+            with (patch("src.gui.CharacterCodeTab.fetch_workshop_codes", return_value=codes),
+                  patch("src.gui.CharacterCodeTab.show_info_bar") as info_bar):
+                tab._fetch_team_variants()
+            after = list_variants(team)
+            self.assertEqual(len(after), before + 2)
+            self.assertTrue(all(v["active"] == (i == 0) for i, v in enumerate(after)))
+            info_bar.assert_called_once()
+        finally:
+            tab.deleteLater()
+
+    def test_fetch_team_variants_rejects_wrong_team_archive(self):
+        """拉取同队：zip 里的队伍不匹配时跳过，不写入存档。"""
+        team = (Baizhi, Phrolova, Verina)
+        create_custom_team(team)
+        idx = json.load(open('workshop_bundle/teams.json', encoding='utf-8'))
+        team_entry = next(t for t in idx['teams'] if len(t.get('codes', [])) >= 2
+                          and set(t['members']) == {'Baizhi', 'Phrolova', 'Verina'})
+        code = team_entry['codes'][0]
+        wrong_info = {"team": ["Mortefi", "Chixia", "Verina"],
+                      "manifest": {"name": "wrong team"}, "codes": {}}
+
+        tab = CharacterCodeTab()
+        try:
+            from src.char.TeamVariants import list_variants
+            before = len(list_variants(team))
+            with (patch("src.gui.CharacterCodeTab.fetch_workshop_codes", return_value=[code]),
+                  patch("src.gui.CharacterCodeTab.inspect_team_archive", return_value=wrong_info),
+                  patch("src.gui.CharacterCodeTab.show_info_bar")):
+                tab._fetch_team_variants()
+            self.assertEqual(len(list_variants(team)), before)
+        finally:
+            tab.deleteLater()
 
 
 if __name__ == "__main__":

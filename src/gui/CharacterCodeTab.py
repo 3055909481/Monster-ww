@@ -28,7 +28,8 @@ from Mon.ui.qt.widget.CustomTab import CustomTab
 from src.gui import WorkshopSource
 from src.char import TeamVariants
 from src.char.TeamVariants import (
-    activate_variant, delete_variant, forget_active, import_archive_as_active, list_variants,
+    activate_variant, add_variant_from_archive, delete_variant, forget_active,
+    import_archive_as_active, list_variants,
 )
 from src.char.CharFactory import apply_team_char_classes, char_dict
 from src.char.CustomCharLoader import (
@@ -189,6 +190,17 @@ def translate_ui(message):
             "Saved code variants for this team; pick one to switch instantly":
                 "这支队伍存着的几份代码，选一份立刻换过去；现在这份会自动存起来",
             "Delete unused saved variants of this team": "删除这支队伍未生效的存档",
+            "Fetch Team Codes": "拉取同队配置",
+            "Saved": "存档",
+            "Pull this team's builds from the offline workshop into saved variants":
+                "从离线工坊把这支队伍的配置拉取为存档",
+            "Archive is for a different team": "压缩包不是这支队伍的",
+            "No workshop codes for this team.": "离线工坊里还没有这支队伍的配置。",
+            "Saved variants": "存档",
+            "Workshop has {total} build(s) for this team: {added} saved, {existing} already saved.":
+                "工坊里这支队伍有 {total} 份配置：新存了 {added} 份，已有 {existing} 份。",
+            "Failed: {names}": "失败：{names}",
+            "Pick one from the saved-code dropdown to switch.": "在存档下拉里选一份就能换。",
             "Switched to saved variant {label}; the previous one was kept.": "已换成「{label}」，原来那份已存进存档。",
             "Current team reloaded.": "当前队伍已重新加载。",
             "Team imported as saved variant {variant}.": "已导入为存档「{variant}」。",
@@ -1020,25 +1032,12 @@ class CharacterCodeTab(CustomTab):
         self.team_list.setItemDelegate(TeamListDelegate(self.team_list))
         self.team_list.currentRowChanged.connect(self._team_selected)
         left_layout.addWidget(self.team_list, 1)
-        # 同一支队伍的多份代码存档：选一份立即换过去
-        variant_layout = QHBoxLayout()
-        self.variant_combo = ComboBox(parent=left)
-        self.variant_combo.setSizeAdjustPolicy(ComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.variant_combo.setMinimumContentsLength(4)
-        self.variant_combo.setToolTip(
-            self.tr("Saved code variants for this team; pick one to switch instantly"))
-        self.variant_combo.currentIndexChanged.connect(self._variant_selected)
-        self.delete_variant_button = Button(self.tr("Delete"), icon="trash")
-        self.delete_variant_button.setToolTip(self.tr("Delete unused saved variants of this team"))
-        self.delete_variant_button.clicked.connect(self._delete_variants)
-        variant_layout.addWidget(self.variant_combo, 1)
-        variant_layout.addWidget(self.delete_variant_button)
-        left_layout.addLayout(variant_layout)
         self.switch_all_button = Button(translate_ui("Switch All to Built In Code"))
         self.switch_all_button.setToolTip(
             translate_ui("Switch every team between imported and built in code"))
         self.switch_all_button.clicked.connect(self._switch_all_code_mode)
         left_layout.addWidget(self.switch_all_button)
+        # 六个按钮排成 3 行 2 列的等宽格子, 宽度跟着左栏走
         team_buttons = QGridLayout()
         team_buttons.setColumnStretch(0, 1)
         team_buttons.setColumnStretch(1, 1)
@@ -1054,23 +1053,28 @@ class CharacterCodeTab(CustomTab):
         self.export_team_button.clicked.connect(self._export_team)
         self.upload_team_button = Button(self.tr("Upload Team"), icon="github")
         self.upload_team_button.clicked.connect(self._open_upload_team)
+        grid_buttons = (
+            self.create_team_button, self.delete_team_button,
+            self.workshop_button, self.import_team_button,
+            self.export_team_button, self.upload_team_button,
+        )
+        for index, button in enumerate(grid_buttons):
+            # 宽度不看各自字数, 只按格子平分, 六个才一样大
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            team_buttons.addWidget(button, 1 + index // 2, index % 2)
+        # 左栏至少留出两个最宽按钮的位置, 字不被截 (主题还没套上, 每个多留 12 余量)
+        widest = max(button.sizeHint().width() for button in grid_buttons) + 12
+        buttons_width = 2 * widest + max(team_buttons.horizontalSpacing(), 6)
+        self.team_list.setMinimumWidth(max(210, buttons_width))
+        self.team_list.setMaximumWidth(max(300, buttons_width))
+        self.switch_all_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.export_current_button = None
         if (getattr(og, "app", None) and getattr(og.app, "config", {}).get("debug", False)
                 and (Path.cwd() / ".git").is_dir()):
             self.export_current_button = Button(self.tr("Export Current"), icon="export")
             self.export_current_button.clicked.connect(self._export_current_team)
-            left_layout.addWidget(self.export_current_button)
+            team_buttons.addWidget(self.export_current_button, 0, 0, 1, 2)
         left_layout.addLayout(team_buttons)
-        button_width = 0
-        for index, button in enumerate((self.create_team_button, self.delete_team_button,
-                                        self.workshop_button, self.import_team_button,
-                                        self.export_team_button, self.upload_team_button)):
-            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            team_buttons.addWidget(button, index // 2, index % 2)
-            button.ensurePolished()
-            button_width = max(button_width, button.sizeHint().width())
-        team_buttons.setColumnMinimumWidth(0, button_width)
-        team_buttons.setColumnMinimumWidth(1, button_width)
 
         right = QWidget(splitter)
         right_layout = QVBoxLayout(right)
@@ -1080,17 +1084,38 @@ class CharacterCodeTab(CustomTab):
         self.char_image_label.setFixedSize(52, 52)
         self.char_image_label.setAlignment(Qt.AlignCenter)
         self.member_combo = ComboBox(parent=right)
-        self.member_combo.setMinimumWidth(190)
+        # 窗口缩到最小时这一行也要放得下: 两个下拉都允许被压窄, 不按内容撑宽
+        self.member_combo.setSizeAdjustPolicy(ComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.member_combo.setMinimumContentsLength(4)
+        self.member_combo.setMinimumWidth(120)
+        self.member_combo.setMaximumWidth(200)
         self.member_combo.currentIndexChanged.connect(self._member_selected)
         self.team_info_button = Button(self.tr("Team Info"), icon="info")
         self.team_info_button.clicked.connect(self._show_team_info)
         self.team_info_button.hide()
+        top.addWidget(self.char_image_label)
+        top.addWidget(self.member_combo)
+        # 顶栏: 选角色 / 选存档(占剩余宽度) / 删存档 / 拉取同队 / 队伍说明 / Ask AI
+        self.variant_combo = ComboBox(parent=right)
+        self.variant_combo.setSizeAdjustPolicy(ComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.variant_combo.setMinimumContentsLength(4)
+        self.variant_combo.setMinimumWidth(110)
+        self.variant_combo.setToolTip(
+            self.tr("Saved code variants for this team; pick one to switch instantly"))
+        self.variant_combo.currentIndexChanged.connect(self._variant_selected)
+        self.delete_variant_button = Button(self.tr("Delete"), icon="trash")
+        self.delete_variant_button.setToolTip(self.tr("Delete unused saved variants of this team"))
+        self.delete_variant_button.clicked.connect(self._delete_variants)
+        self.fetch_variant_button = Button(self.tr("Fetch Team Codes"), icon="download")
+        self.fetch_variant_button.setToolTip(
+            self.tr("Pull this team's builds from the offline workshop into saved variants"))
+        self.fetch_variant_button.clicked.connect(self._fetch_team_variants)
         self.ask_ai_button = Button(self.tr("Ask AI"), icon="chat")
         self.ask_ai_button.clicked.connect(self._copy_ask_ai_template)
-        top.addWidget(self.char_image_label)
-        top.addWidget(QLabel(self.tr("Character Code")))
-        top.addWidget(self.member_combo)
-        top.addStretch(1)
+        top.addWidget(QLabel(self.tr("Saved")))
+        top.addWidget(self.variant_combo, 1)
+        top.addWidget(self.delete_variant_button)
+        top.addWidget(self.fetch_variant_button)
         top.addWidget(self.team_info_button)
         top.addWidget(self.ask_ai_button)
         right_layout.addLayout(top)
@@ -1108,6 +1133,8 @@ class CharacterCodeTab(CustomTab):
 
         bottom = QHBoxLayout()
         self.status_label = QLabel("")
+        # 状态文字再长也不能把保存按钮挤出窗口
+        self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.reset_button = Button(self.tr("Reset to Built In"), icon="refresh")
         self.reset_button.clicked.connect(self._switch_code_mode)
         self.save_button = Button(self.tr("Save"), icon="check", variant="primary")
@@ -1249,6 +1276,7 @@ class CharacterCodeTab(CustomTab):
         has_team = team is not None
         self.variant_combo.setEnabled(has_team and len(variants) > 1)
         self.delete_variant_button.setEnabled(len(variants) > 1)
+        self.fetch_variant_button.setEnabled(has_team)
 
     def _variant_selected(self, index):
         if index <= 0 or self.current_team is None:
@@ -1294,6 +1322,47 @@ class CharacterCodeTab(CustomTab):
         if deleted:
             show_info_bar(self.window(), self.tr("Deleted {count} saved variant(s).").format(count=deleted),
                           title=self.tr("Success"))
+
+    def _fetch_team_variants(self):
+        """从离线工坊把当前队伍的所有配置存成存档（不覆盖生效代码）。
+
+        复用 fetch_workshop_codes 的同队过滤（按 members 排序比对），
+        每个配置从内置 zip 读出 info，校验队伍一致后 add_variant_from_archive 入库。
+        """
+        if self.current_team is None:
+            return
+        team = self.current_team
+        codes = fetch_workshop_codes(team)
+        added, existing, failed = 0, 0, []
+        for code in codes:
+            name = str(code.get("filename") or code.get("name") or "?")
+            try:
+                archive = _workshop_archive_for(code)
+                if archive is None:
+                    raise FileNotFoundError(name)
+                info = inspect_team_archive(archive)
+                if normalize_team(info["team"]) != tuple(team):
+                    raise ValueError(self.tr("Archive is for a different team"))
+                _, is_new = add_variant_from_archive(info)
+                if is_new:
+                    added += 1
+                else:
+                    existing += 1
+            except Exception as e:
+                self.logger.warning(f"fetch workshop variant {name} failed: {e}")
+                failed.append(name)
+        if team == self.current_team:
+            self._refresh_variants(team)
+        if not codes and not failed:
+            show_info_bar(self.window(), self.tr("No workshop codes for this team."), title=self.tr("Saved variants"))
+            return
+        message = self.tr("Workshop has {total} build(s) for this team: {added} saved, {existing} already saved.").format(
+            total=len(codes), added=added, existing=existing)
+        if failed:
+            message += " " + self.tr("Failed: {names}").format(names=", ".join(failed[:3]))
+        else:
+            message += " " + self.tr("Pick one from the saved-code dropdown to switch.")
+        show_info_bar(self.window(), message, title=self.tr("Saved variants"), error=bool(failed) and not added)
 
     def _update_team_info_button(self):
         """The author's description belongs to the imported code, so it hides while built in code
