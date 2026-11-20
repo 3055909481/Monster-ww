@@ -69,7 +69,9 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 self.click_relative(0.04, 0.4, after_sleep=1)
                 current, back_up, total = self.get_stamina()
             if total < self.stamina_once:
-                # Finite-count runs (from the routine) may wait once for natural recovery.
+                # Routine runs may wait once for natural recovery. An unlimited
+                # count is capped to one run after the wait so the task ends with
+                # stamina rather than burning it all again.
                 if (not stamina_waited and getattr(self, '_routine_wait_stamina', False)
                         and self.stamina_once):
                     stamina_waited = True
@@ -77,6 +79,9 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                     if self.wait_for_stamina_enough(self.stamina_once, gap):
                         current, back_up, total = self.get_stamina()
                         if total >= self.stamina_once:
+                            if (must_use == 0 and not max_runs
+                                    and getattr(self, '_routine_stamina_single_run', False)):
+                                max_runs = 1
                             continue
                 return self.not_enough_stamina()
 

@@ -70,11 +70,11 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             'text': '配置流水线',
             'callback': self.configure_plans,
         }
-        # 体力未满时，有限次数副本最后几次体力不够，可等待自然恢复补齐。
+        # 体力不足时可等待自然恢复；次数为 0 的副本等待后只刷一次即结束。
         self.default_config[WAIT_STAMINA_KEY] = False
         self.config_description[WAIT_STAMINA_KEY] = (
-            'Finite-count domains wait for stamina to recover before the last runs. '
-            'Unlimited (count=0) domains are never waited on.')
+            'Wait for stamina recovery when short by a small amount. For unlimited '
+            '(count=0) domains, one run is performed after the wait and then the domain ends.')
         self.default_config[STAMINA_GAP_KEY] = 10
         self.config_description[STAMINA_GAP_KEY] = (
             'Only wait when current stamina is short by at most this many points; '
@@ -261,14 +261,17 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             skipped=sum(status == 'skipped' for _, status, _ in self.results)), notify=True)
 
     def _configure_stamina_wait(self, task, max_runs):
-        """Tell a finite-count domain task to wait for stamina recovery if enabled.
+        """Tell a domain task whether to wait for stamina recovery when short.
 
-        Unlimited runs (max_runs=0) deliberately burn stamina to empty and must
-        never wait, otherwise they would stall the whole routine.
+        Finite counts (max_runs>0) wait so the configured runs can finish.
+        Unlimited counts (max_runs=0) also wait, but only for a single run: after
+        recovery one run is performed and the domain ends, so an idle account
+        still finishes with stamina instead of burning it all immediately.
         """
-        enabled = bool(self.config.get(WAIT_STAMINA_KEY, False)) and max_runs > 0
+        enabled = bool(self.config.get(WAIT_STAMINA_KEY, False))
         task._routine_wait_stamina = enabled
         task._routine_stamina_gap = int(self.config.get(STAMINA_GAP_KEY, 10) or 0)
+        task._routine_stamina_single_run = enabled and max_runs <= 0
 
     def _run_entry(self, entry_id, params):
         params = deepcopy(params)

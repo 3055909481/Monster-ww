@@ -65,13 +65,18 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
         while True:
             current, _, total = self.open_F2_book_and_get_stamina()
             if total < self.stamina_once or total < must_use or (must_use == 0 and current < self.stamina_once):
-                # Finite-count runs (from the routine) may wait once for natural
-                # stamina recovery to finish the configured count without waste.
+                # Routine runs may wait once for natural stamina recovery.
+                # With an unlimited configured count, cap the session to one run
+                # after recovery so the routine ends with stamina instead of
+                # immediately burning everything again.
                 if (not stamina_waited and getattr(self, '_routine_wait_stamina', False)
                         and self.stamina_once):
                     stamina_waited = True
                     gap = getattr(self, '_routine_stamina_gap', 10)
                     if self.wait_for_stamina_enough(self.stamina_once, gap):
+                        if (must_use == 0 and not max_runs
+                                and getattr(self, '_routine_stamina_single_run', False)):
+                            max_runs = 1
                         continue  # re-read stamina and proceed with the normal flow
                 self.log_info(self.tr('not enough stamina'), notify=True)
                 self.back()
