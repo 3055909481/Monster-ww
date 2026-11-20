@@ -723,7 +723,7 @@ class BaseCombatTask(CombatCheck):
     MAIN_DPS_MAX_WAIT = 25.0
 
     def _off_field_seconds(self, char):
-        since = max(char.last_switch_time, self.combat_start)
+        since = max(char.last_switch_time, getattr(self, 'combat_start', 0) or 0)
         if since <= 0:
             return 0
         return char.time_elapsed_accounting_for_freeze(since)
