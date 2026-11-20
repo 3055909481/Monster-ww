@@ -290,3 +290,59 @@ class PlanItemConfig(dict):
     def _notify(self):
         if self.on_change is not None:
             self.on_change(dict(self))
+
+
+class RoutinePlanAccountStore:
+    """Optional per-plan account binding, kept separate from the plans file.
+
+    Maps plan name -> multi-account ``account_key``. Storing this in its own
+    JSON means older RoutinePlans.json files stay byte-for-byte valid and a
+    plan with no entry here runs exactly as before (on the current account).
+    """
+
+    def __init__(self, folder='configs'):
+        self.path = Path(folder) / 'RoutinePlanAccounts.json'
+
+    def load(self):
+        if not self.path.exists():
+            return {}
+        try:
+            with self.path.open(encoding='utf-8') as stream:
+                document = json.load(stream)
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(document, dict):
+            return {}
+        return {str(name): str(key) for name, key in document.items()
+                if isinstance(name, str) and isinstance(key, str) and key.strip()}
+
+    def get(self, plan_name):
+        return self.load().get(str(plan_name))
+
+    def set(self, plan_name, account_key):
+        accounts = self.load()
+        if account_key is None or not str(account_key).strip():
+            accounts.pop(str(plan_name), None)
+        else:
+            accounts[str(plan_name)] = str(account_key).strip()
+        return self.save(accounts)
+
+    def save(self, accounts):
+        normalized = {str(name): str(key).strip() for name, key in accounts.items()
+                      if isinstance(name, str) and isinstance(key, str) and key.strip()}
+        content = json.dumps(normalized, ensure_ascii=False, indent=2, allow_nan=False)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.path.parent,
+                                             prefix='.RoutinePlanAccounts-', suffix='.tmp',
+                                             delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(content + '\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+        return normalized

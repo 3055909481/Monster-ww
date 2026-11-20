@@ -9,8 +9,12 @@ run. Multi-account users simply pick a different plan name per account.
 from copy import deepcopy
 from datetime import date
 
-from Mon import Logger, TaskDisabledException
+import win32api
 
+from Mon import Logger, PostMessageInteraction, TaskDisabledException
+from Mon.task.exceptions import WaitFailedException
+
+from src.task.BaseWWTask import LOGIN_TEXTS
 from src.task.BaseCombatTask import BaseCombatTask
 from src.task.DailyTask import DailyTask
 from src.task.FarmEchoTask import FarmEchoTask
@@ -23,11 +27,16 @@ from src.task.TrainingGuideTask import (
     CATEGORY_KEYS as GUIDE_CATEGORY_KEYS,
     TrainingGuideTask,
 )
+from src.task.MouseResetTask import MouseResetTask
+from src.task.MultiAccountDailyTask import (
+    combo_items, combo_selected_item, find_login_combo, select_combo_item,
+)
 from src.task.WWOneTimeTask import WWOneTimeTask
+from src.task.account.MultiAccountConfigStore import account_key_from_ocr, display_account
 from src.task.account.RuntimeTaskConfig import account_task_config
 from src.task.routine import RoutineCatalog as catalog
 from src.task.routine.RoutinePlans import (
-    DEFAULT_PLAN_NAME, EDIT_PLANS, PLAN_SELECTOR, RoutinePlanStore,
+    DEFAULT_PLAN_NAME, EDIT_PLANS, PLAN_SELECTOR, RoutinePlanAccountStore, RoutinePlanStore,
     is_scheduled_today, normalize_items,
 )
 from src.task.task_icons import task_icon
@@ -91,6 +100,106 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
     def plan_options(self):
         return list(RoutinePlanStore(self.executor.config_folder).load())
 
+    # ------------------------------------------------- optional account login
+    # These mirror MultiAccountConfigTask's login helpers but stay local so the
+    # routine task never depends on the multi-account task's private state.
+
+    def click(self, x=-1, y=-1, *args, **kwargs):
+        # Native login ComboBox needs a real cursor hover before background clicks.
+        if (getattr(self, '_login_cursor_active', False)
+                and isinstance(x, (int, float)) and isinstance(y, (int, float))
+                and x >= 1 and y >= 1
+                and isinstance(self.executor.interaction, PostMessageInteraction)):
+            position = self.executor.interaction.capture.get_abs_cords(x, y)
+            win32api.SetCursorPos((int(position[0]), int(position[1])))
+            self.sleep(0.2)
+        return super().click(x, y, *args, **kwargs)
+
+    def _login_combo(self):
+        return find_login_combo(self.hwnd.hwnd if self.hwnd else 0)
+
+    def _switch_to_login(self):
+        self.log_info(self.tr('Switching back to login screen'))
+        self.send_key('esc', after_sleep=1.5)
+        self.wait_feature('esc_setting')
+        self.click_relative(0.04, 0.96, after_sleep=1)
+        self.click_confirm(timeout=10)
+        self.wait_until(lambda: self._login_combo() or self._at_login_screen(),
+                        time_out=60, settle_time=2, raise_if_not_found=True)
+        self.log_info(self.tr('Back at login screen'))
+
+    def _at_login_screen(self):
+        texts = self.ocr()
+        if not self.find_boxes(texts, LOGIN_TEXTS):
+            return None
+        boxes = [box for box in texts if '*' in box.name or '@' in box.name]
+        return max(boxes, key=lambda box: box.y + box.height / 2) if boxes else None
+
+    def _select_target_account(self, account_key):
+        combo = self._login_combo()
+        if combo:
+            items = combo_items(combo)
+            matches = [index for index, text in enumerate(items)
+                       if account_key_from_ocr(text) == account_key]
+            if matches and select_combo_item(combo, matches[-1]):
+                self.sleep(1)
+                if account_key_from_ocr(combo_selected_item(combo)) == account_key:
+                    return
+            raise WaitFailedException(
+                self.tr('Account {account} not found in the login list').format(
+                    account=display_account(account_key)))
+        # OCR fallback for accounts that do not expose a native ComboBox.
+        previous = getattr(self, '_ocr_account_selection', False)
+        try:
+            self._ocr_account_selection = True
+            for attempt in range(5):
+                self.sleep(1)
+                box = self._at_login_screen()
+                if box is None:
+                    continue
+                self.click(box, after_sleep=2)
+                self.sleep(1)
+                matches = [b for b in self.ocr()
+                           if account_key_from_ocr(b.name) == account_key]
+                if matches:
+                    self.click(max(matches, key=lambda b: b.y + b.height / 2), after_sleep=2)
+                    self.sleep(1)
+                    return
+            raise WaitFailedException(
+                self.tr('Account {account} not found in the login list').format(
+                    account=display_account(account_key)))
+        finally:
+            self._ocr_account_selection = previous
+
+    def _login_target_account(self, account_key):
+        was_enabled = False
+        mouse_reset = self.executor.get_task_by_class(MouseResetTask)
+        if mouse_reset:
+            was_enabled = mouse_reset.enabled
+            if was_enabled:
+                mouse_reset.disable()
+        try:
+            self._select_target_account(account_key)
+            previous = getattr(self, '_login_cursor_active', False)
+            try:
+                self._login_cursor_active = True
+                self.sleep(4)
+                login = self.find_boxes(self.ocr(), boundary=self.box_of_screen(0.3, 0.3, 0.7, 0.8),
+                                        match=LOGIN_TEXTS)
+                if login:
+                    self.click(login, after_sleep=3)
+                else:
+                    self.click_relative(0.5, 0.568, hcenter=True, vcenter=True, after_sleep=3)
+                self.logged_in = False
+                self.ensure_main(time_out=180)
+                self.log_info(self.tr('{account} logged in successfully').format(
+                    account=display_account(account_key)))
+            finally:
+                self._login_cursor_active = previous
+        finally:
+            if was_enabled and mouse_reset:
+                mouse_reset.enable()
+
     # ------------------------------------------------------------------ run
     def run(self):
         WWOneTimeTask.run(self)
@@ -103,6 +212,14 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         if not selected:
             self.log_info(self.tr('流水线没有启用的步骤，无需执行。'), notify=True)
             return
+
+        # Optional per-plan account: log out and log into the configured account
+        # before running. No binding means the current account is used as before.
+        account_key = RoutinePlanAccountStore(self.executor.config_folder).get(self.plan_name)
+        if account_key:
+            self.info_set('执行账号', display_account(account_key))
+            self._switch_to_login()
+            self._login_target_account(account_key)
 
         self.ensure_main(time_out=180)
         today = date.today()
