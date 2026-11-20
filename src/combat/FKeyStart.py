@@ -74,10 +74,24 @@ class FKeyWatcher:
             self._thread = threading.Thread(target=self._watch, name='f_key_start_watch', daemon=True)
             self._thread.start()
 
+    @staticmethod
+    def _resolve_key_state():
+        """取读键函数句柄, 兼容被 self-F filter 包装过的情况。
+
+        包装函数是 Python 闭包, Cython 编译后变成 builtin_function_or_method,
+        不能设 restype/自定义属性。它内部调用的真 ctypes 函数已在
+        install_self_f_filter 里设过 restype=c_short, 返回值直接可用, 无需再设。
+        """
+        get_key_state = ctypes.windll.user32.GetAsyncKeyState
+        try:
+            get_key_state.restype = ctypes.c_short
+        except (AttributeError, TypeError):
+            pass
+        return get_key_state
+
     def _watch(self):
         try:
-            get_key_state = ctypes.windll.user32.GetAsyncKeyState
-            get_key_state.restype = ctypes.c_short
+            get_key_state = self._resolve_key_state()
         except Exception as e:
             logger.error(f'F 开始战斗: 读不了键盘 ({e}), 按 F 开打不可用')
             return

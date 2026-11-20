@@ -19,6 +19,15 @@ F_START_KEY = AutoCombatTask.F_START_KEY
 
 
 class TestFKeyWatcher(unittest.TestCase):
+    def test_resolve_key_state_survives_builtin_function(self):
+        """编译后 self-F filter 把 GetAsyncKeyState 换成 builtin，不能设 restype；
+        读键线程必须照样拿到句柄，不能因为 AttributeError 直接停掉。"""
+        import ctypes
+        builtin_like = abs  # 真 builtin，设 .restype 会 AttributeError
+        with patch("src.combat.FKeyStart.ctypes.windll.user32.GetAsyncKeyState", builtin_like):
+            resolved = FKeyWatcher._resolve_key_state()
+        self.assertIs(resolved, builtin_like)
+
     def test_only_rising_edge_counts(self):
         watcher = FKeyWatcher()
         watcher.is_game_foreground = lambda: True
