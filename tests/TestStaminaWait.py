@@ -98,9 +98,10 @@ class TestRoutineStaminaWaitConfig(unittest.TestCase):
 
 
 class TestUnlimitedRunCap(unittest.TestCase):
-    """次数为 0 时等待成功后只刷一次。"""
+    """次数为 0 时耗尽体力：等待恢复后补刷一轮，然后结束。"""
 
-    def test_domain_caps_to_one_run_after_wait(self):
+    def test_domain_waits_and_caps_to_one_run(self):
+        """进入时体力不足：等恢复后 max_runs=1，只补刷一轮。"""
         task = DomainTask.__new__(DomainTask)
         task.stamina_once = 60
         task._routine_wait_stamina = True
@@ -110,6 +111,7 @@ class TestUnlimitedRunCap(unittest.TestCase):
         task.tr = lambda msg, **kw: msg
         task.sleep = Mock()
         task.realm_entry_at_heal_point = False
+        # 55 不足一次 -> 等待成功后恢复为 60 -> 进入副本补刷
         readings = iter([(55, 0, 55), (60, 0, 60)])
         task.open_F2_book_and_get_stamina = Mock(
             side_effect=lambda: next(readings, (60, 0, 60)))
@@ -121,12 +123,39 @@ class TestUnlimitedRunCap(unittest.TestCase):
             return True, must_use
 
         task.farm_in_domain = Mock(side_effect=farm_in_domain)
-        task.farm_domain_with_recovery_loop(
-            0, Mock(), max_runs=0)
+        task.farm_domain_with_recovery_loop(0, Mock(), max_runs=0)
         self.assertEqual(seen['max_runs'], 1)
         task.wait_for_stamina_enough.assert_called_once_with(60, 10)
 
-    def test_tacet_caps_to_one_run_after_wait(self):
+    def test_domain_retries_when_stamina_drops_after_runs(self):
+        """刷几轮后体力不足：回顶层等待，再补刷一轮后结束。"""
+        task = DomainTask.__new__(DomainTask)
+        task.stamina_once = 60
+        task._routine_wait_stamina = True
+        task._routine_stamina_gap = 10
+        task._routine_stamina_single_run = True
+        task.log_info = Mock()
+        task.tr = lambda msg, **kw: msg
+        task.sleep = Mock()
+        task.realm_entry_at_heal_point = False
+        # 第一轮读体力充足(110) -> 刷完掉到 55 -> 等待恢复到 60 -> 补刷
+        readings = iter([(110, 0, 110), (55, 0, 55), (60, 0, 60)])
+        task.open_F2_book_and_get_stamina = Mock(
+            side_effect=lambda: next(readings, (60, 0, 60)))
+        task.wait_for_stamina_enough = Mock(return_value=True)
+        farm_calls = []
+
+        def farm_in_domain(must_use=0, max_runs=0):
+            farm_calls.append(max_runs)
+            return True, must_use
+
+        task.farm_in_domain = Mock(side_effect=farm_in_domain)
+        task.farm_domain_with_recovery_loop(0, Mock(), max_runs=0)
+        # 第一次不限次数刷, 补刷时限制为 1 轮
+        self.assertEqual(farm_calls, [0, 1])
+        task.wait_for_stamina_enough.assert_called_once_with(60, 10)
+
+    def test_tacet_waits_and_caps_to_one_run(self):
         task = TacetTask.__new__(TacetTask)
         task.stamina_once = 60
         task._routine_wait_stamina = True
@@ -156,6 +185,22 @@ class TestUnlimitedRunCap(unittest.TestCase):
         task.farm_tacet(max_runs=0)
         self.assertEqual(task.combat_once.call_count, 1)
         task.wait_for_stamina_enough.assert_called_once_with(60, 10)
+
+    def test_disabled_wait_stops_without_retry(self):
+        """未开启等待时，次数=0 刷到体力不足直接结束，不回顶层补刷。"""
+        task = DomainTask.__new__(DomainTask)
+        task.stamina_once = 60
+        task._routine_wait_stamina = False
+        task.log_info = Mock()
+        task.tr = lambda msg, **kw: msg
+        task.sleep = Mock()
+        task.realm_entry_at_heal_point = False
+        task.open_F2_book_and_get_stamina = Mock(return_value=(110, 0, 110))
+        task.wait_for_stamina_enough = Mock()
+        task.farm_in_domain = Mock(return_value=(True, 0))
+        task.farm_domain_with_recovery_loop(0, Mock(), max_runs=0)
+        task.farm_in_domain.assert_called_once()
+        task.wait_for_stamina_enough.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -70,11 +70,11 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             'text': '配置流水线',
             'callback': self.configure_plans,
         }
-        # 体力不足时可等待自然恢复；次数为 0 的副本等待后只刷一次即结束。
+        # 体力不足时可等待自然恢复，尽量耗尽当天体力；次数为 0 的副本等待后补刷一轮即结束。
         self.default_config[WAIT_STAMINA_KEY] = False
         self.config_description[WAIT_STAMINA_KEY] = (
-            'Wait for stamina recovery when short by a small amount. For unlimited '
-            '(count=0) domains, one run is performed after the wait and then the domain ends.')
+            'Wait for small natural stamina shortfalls to use up today\'s stamina. '
+            'For unlimited (count=0) domains, one more run is done after the wait and then the domain ends.')
         self.default_config[STAMINA_GAP_KEY] = 10
         self.config_description[STAMINA_GAP_KEY] = (
             'Only wait when current stamina is short by at most this many points; '

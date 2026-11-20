@@ -121,6 +121,17 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 if not can_continue:
                     self.click_relative(0.365, 0.853, hcenter=True)
                     self.wait_in_team_and_world(time_out=120)
+                    # 次数不限刷到体力不足时，若开了等待且还没等过，等恢复后
+                    # 补刷一轮再结束，尽量把当天恢复的体力耗尽。
+                    if (not max_runs and not stamina_waited
+                            and getattr(self, '_routine_wait_stamina', False)
+                            and getattr(self, '_routine_stamina_single_run', False)
+                            and self.stamina_once):
+                        stamina_waited = True
+                        gap = getattr(self, '_routine_stamina_gap', 10)
+                        if self.wait_for_stamina_enough(self.stamina_once, gap):
+                            max_runs = runs + 1  # 补刷一轮后由次数判断正常结束
+                            break  # 回外层重新进本
                     return None
                 else:
                     self.click_relative(0.640, 0.851, hcenter=True, after_sleep=0.2)

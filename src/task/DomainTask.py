@@ -61,6 +61,7 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
         """
         recovery_retries = 0
         stamina_waited = False
+        stamina_retry = False
         self.realm_entry_at_heal_point = False
         while True:
             current, _, total = self.open_F2_book_and_get_stamina()
@@ -85,6 +86,15 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
             self.sleep(1)
             finished, must_use = self.farm_in_domain(must_use=must_use, max_runs=max_runs)
             if finished:
+                # 次数不限时，farm_in_domain 只在体力不足(can_continue=False)时
+                # 才返回 finished。若开了等待且还没等过，回顶层让等待分支判断：
+                # 差一点就等恢复后补刷一轮，耗尽当天体力；缺口大则正常结束。
+                # stamina_retry 只是额外保险，保证这一步最多触发一次。
+                if (not max_runs and not stamina_waited and not stamina_retry
+                        and getattr(self, '_routine_wait_stamina', False)
+                        and getattr(self, '_routine_stamina_single_run', False)):
+                    stamina_retry = True
+                    continue
                 return
             recovery_retries += 1
             if recovery_retries >= max_recovery_retries:
