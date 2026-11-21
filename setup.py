@@ -69,6 +69,8 @@ setuptools.setup(
             "embedsignature": False,
             "binding": False,
         },
-        nthreads=0,
+        # Parallelize the .py -> .cpp translation stage. The C++ compilation
+        # stage is parallelized separately via build_ext --parallel in CI.
+        nthreads=int(os.environ.get("CYTHON_NTHREADS", "4")),
     ),
 )
