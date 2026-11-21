@@ -2218,3 +2218,36 @@ msgstr "为每个账号分别配置任务。关闭时执行原有多账号每日
 
 msgid "Edit account order, enabled accounts, tasks and task settings."
 msgstr "编辑账号顺序、启用状态、执行任务及任务配置。"
+
+msgid "Basic Options"
+msgstr "基础选项"
+
+msgid "Enable Adaptive Interval"
+msgstr "启用自适应触发间隔"
+
+msgid "Combat Interval Min (ms)"
+msgstr "战斗间隔下限（毫秒）"
+
+msgid "Combat Interval Max (ms)"
+msgstr "战斗间隔上限（毫秒）"
+
+msgid "Idle Interval Min (ms)"
+msgstr "空闲间隔下限（毫秒）"
+
+msgid "Idle Interval Max (ms)"
+msgstr "空闲间隔上限（毫秒）"
+
+msgid "开启后按下面的范围轮询；关闭则完全恢复框架默认行为"
+msgstr "开启后按下面的范围轮询；关闭则完全恢复框架默认行为"
+
+msgid "战斗轮询间隔下限（毫秒），默认 1ms 与框架原值一致，上下限相同即为固定值"
+msgstr "战斗轮询间隔下限（毫秒），默认 1ms 与框架原值一致，上下限相同即为固定值"
+
+msgid "战斗轮询间隔上限（毫秒），默认与下限相同保持固定节奏，不建议改小"
+msgstr "战斗轮询间隔上限（毫秒），默认与下限相同保持固定节奏，不建议改小"
+
+msgid "空闲轮询间隔下限（毫秒），越大越省资源，但启动任务的响应稍慢"
+msgstr "空闲轮询间隔下限（毫秒），越大越省资源，但启动任务的响应稍慢"
+
+msgid "空闲轮询间隔上限（毫秒），与下限拉开可打散CPU/GPU占用尖峰；填反会自动纠正"
+msgstr "空闲轮询间隔上限（毫秒），与下限拉开可打散CPU/GPU占用尖峰；填反会自动纠正"

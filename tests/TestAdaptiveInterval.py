@@ -183,6 +183,36 @@ class TestPatchedTriggerSleep(unittest.TestCase):
         ex.sleep.assert_called_once_with(0.009)
 
 
+class TestBasicOptionsIntegration(unittest.TestCase):
+
+    def test_config_name_is_basic_options(self):
+        """配置项已并入 Basic Options，patch 必须从那里读。"""
+        self.assertEqual(ai.CONFIG_NAME, 'Basic Options')
+
+    def test_resolves_from_real_basic_options_config(self):
+        """用真实的 config.py 构造 GlobalConfig，验证五个键可被读到。"""
+        from config import config as app_config
+        from Mon.util.GlobalConfig import GlobalConfig
+
+        gc = GlobalConfig(app_config['global_configs'])
+        ex = _executor(in_combat_scene=False)
+        ex.global_config = gc
+        enabled, ms = ai._resolve_interval_ms(ex)
+        self.assertTrue(enabled)
+        # 真实默认值：空闲 25~35ms
+        self.assertGreaterEqual(ms, 25.0)
+        self.assertLessEqual(ms, 35.0)
+
+    def test_basic_options_keys_grouped_under_tasks(self):
+        """五个键和 Trigger Interval 同处 Tasks 分组。"""
+        from config import config as app_config
+        option = next(o for o in app_config['global_configs'] if o.name == 'Basic Options')
+        for key in (ai.KEY_ENABLED, ai.KEY_COMBAT_MIN, ai.KEY_COMBAT_MAX,
+                    ai.KEY_IDLE_MIN, ai.KEY_IDLE_MAX):
+            self.assertEqual(option.config_type[key]['group'], 'Tasks')
+            self.assertIn(key, option.default_config)
+
+
 class TestInstall(unittest.TestCase):
 
     def test_install_is_idempotent(self):

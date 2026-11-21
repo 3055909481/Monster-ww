@@ -20,6 +20,13 @@ if __name__ == '__main__':
     except Exception:
         pass
 
+    # 顶部状态栏显示「识别到的当前队伍」：失败自动降级（顶部栏保持原样）
+    try:
+        from src.team_overlay import install as install_team_overlay
+        install_team_overlay()
+    except Exception:
+        pass
+
     config = config
     ok = OK(config)
     ok.start()

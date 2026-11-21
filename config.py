@@ -133,6 +133,29 @@ def blur_area(width, height):
 
 basic_config_option = create_basic_options(enable_blur=True)
 
+# 自适应触发间隔的五个键并入 Basic Options，和 Trigger Interval 同处 Tasks 分组。
+# key 保持英文以兼容已有配置存储；界面显示由 i18n/zh_CN 提供中文翻译。
+_ADAPTIVE_KEYS = {
+    'Enable Adaptive Interval': True,
+    'Combat Interval Min (ms)': 1,
+    'Combat Interval Max (ms)': 1,
+    'Idle Interval Min (ms)': 25,
+    'Idle Interval Max (ms)': 35,
+}
+basic_config_option.default_config.update(_ADAPTIVE_KEYS)
+_basic_type = basic_config_option.config_type or {}
+for _k in _ADAPTIVE_KEYS:
+    _basic_type[_k] = {'group': 'Tasks', **({'min': 0} if '(ms)' in _k else {})}
+basic_config_option.config_type = _basic_type
+_basic_desc = basic_config_option.config_description
+_basic_desc.update({
+    'Enable Adaptive Interval': '开启后按下面的范围轮询；关闭则完全恢复框架默认行为',
+    'Combat Interval Min (ms)': '战斗轮询间隔下限（毫秒），默认 1ms 与框架原值一致，上下限相同即为固定值',
+    'Combat Interval Max (ms)': '战斗轮询间隔上限（毫秒），默认与下限相同保持固定节奏，不建议改小',
+    'Idle Interval Min (ms)': '空闲轮询间隔下限（毫秒），越大越省资源，但启动任务的响应稍慢',
+    'Idle Interval Max (ms)': '空闲轮询间隔上限（毫秒），与下限拉开可打散CPU/GPU占用尖峰；填反会自动纠正',
+})
+
 key_config_option = ConfigOption('Game Hotkey', {
     'Echo Key': 'q',
     'Liberation Key': 'r',
@@ -162,27 +185,6 @@ monthly_card_config_option = ConfigOption('Monthly Card Config', {
     'Monthly Card Time': 'Your computer\'s local time when the monthly card will popup, hour in (1-24)'
 })
 
-# 自适应触发间隔：空闲时降低轮询占用，战斗时保持框架原节奏。
-# 详见 src/adaptive_interval.py。战斗间隔默认 1ms = 框架原值，零影响。
-adaptive_interval_config_option = ConfigOption('Adaptive Interval', {
-    'Enable Adaptive Interval': True,
-    'Combat Interval Min (ms)': 1,
-    'Combat Interval Max (ms)': 1,
-    'Idle Interval Min (ms)': 25,
-    'Idle Interval Max (ms)': 35,
-}, description='空闲时降低触发轮询占用；战斗中保持原节奏，不影响战斗效率。', config_description={
-    'Enable Adaptive Interval': '开启后按下面的范围轮询；关闭则完全恢复框架默认行为',
-    'Combat Interval Min (ms)': '战斗轮询间隔下限（毫秒），默认 1ms 与框架原值一致，上下限相同即为固定值',
-    'Combat Interval Max (ms)': '战斗轮询间隔上限（毫秒），默认与下限相同保持固定节奏，不建议改小',
-    'Idle Interval Min (ms)': '空闲轮询间隔下限（毫秒），越大越省资源，但启动任务的响应稍慢',
-    'Idle Interval Max (ms)': '空闲轮询间隔上限（毫秒），与下限拉开可打散固定节拍的CPU/GPU占用尖峰；填反会自动纠正',
-}, config_type={
-    'Combat Interval Min (ms)': {'min': 0},
-    'Combat Interval Max (ms)': {'min': 0},
-    'Idle Interval Min (ms)': {'min': 0},
-    'Idle Interval Max (ms)': {'min': 0},
-}, show_at_tab=True, icon=Icon.GAME)
-
 config = {
     'debug': False,  # Optional, default: False
     'custom_tasks': True,
@@ -206,7 +208,7 @@ config = {
     'config_folder': 'configs',
     'blur_area': blur_area,
     'gui_icon': 'icons/icon.png',
-    'global_configs': [basic_config_option, key_config_option, char_config_option, monthly_card_config_option, adaptive_interval_config_option],
+    'global_configs': [basic_config_option, key_config_option, char_config_option, monthly_card_config_option],
     # Team / character-code editor. Upstream unregistered this page (commits
     # 8979325e / aa543c43) but still ships its implementation, tests and i18n,
     # so re-enable it here for the Monster-ww build.

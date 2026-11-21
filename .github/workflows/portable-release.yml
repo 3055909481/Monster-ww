@@ -215,10 +215,10 @@ jobs:
       # distributed package carries no readable application logic. The slim tag
       # below ships the compiled modules instead of their .py sources. Python
       # 3.12 must match pyappify.yml's requires_python (the .pyd ABI tag is
-      # cp312). identity.py, schedule_patch.py, adaptive_interval.py and
-      # __init__.py stay as source: runtime monkeypatches need real Python
-      # descriptors (Cython-compiled functions won't bind self), the latter
-      # enables package discovery. char_sources/ snapshots keep built-in
+      # cp312). identity.py, schedule_patch.py, adaptive_interval.py,
+      # team_overlay.py and __init__.py stay as source: runtime monkeypatches
+      # need real Python descriptors (Cython-compiled functions won't bind
+      # self), the latter enables package discovery. char_sources/ snapshots keep built-in
       # character-code editing
       # working without importable .py files.
       - name: Set up Python 3.12 for native compilation
@@ -320,9 +320,9 @@ jobs:
               # SOURCE OBFUSCATION: replace every compiled .py with its .pyd in
               # the release tree, and drop the readable source from the index.
               # identity.py / schedule_patch.py / adaptive_interval.py /
-              # __init__.py / main.py are intentionally kept as source
-              # (see the compile step above for why).
-              $keepSource = @('identity.py', 'schedule_patch.py', 'adaptive_interval.py', '__init__.py')
+              # team_overlay.py / __init__.py / main.py are intentionally kept
+              # as source (see the compile step above for why).
+              $keepSource = @('identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', '__init__.py')
               $stripped = 0
               $pyFiles = @(Get-ChildItem -Recurse -Filter '*.py' -Path src -ErrorAction SilentlyContinue)
               foreach ($file in $pyFiles) {
@@ -369,6 +369,7 @@ jobs:
                 'src/identity.py', 'src/gui/CharacterCodeTab.cp312-win_amd64.pyd',
                 'char_sources/BaseChar.py',
                 'assets/echo_model/echo.onnx', 'assets/coco_annotations.json',
+                'assets/char_heads/Verina.png',
                 'icons/icon.png', 'i18n/zh_CN/LC_MESSAGES/ok.mo',
                 'workshop_bundle/teams.json'
               )
@@ -676,21 +677,22 @@ jobs:
           $required = @(
             'main.py', 'config.cp312-win_amd64.pyd', 'requirements.txt', 'pyappify.yml',
             'assets\echo_model\echo.onnx', 'icons\icon.png', 'src\identity.py',
-            'src\schedule_patch.py', 'src\adaptive_interval.py',
+            'src\schedule_patch.py', 'src\adaptive_interval.py', 'src\team_overlay.py',
             'src\task\BaseWWTask.cp312-win_amd64.pyd', 'char_sources\BaseChar.py',
             'workshop_bundle\teams.json'
           )
           # Obfuscation check: no readable application module may ship under
           # working\src\ (except identity.py / schedule_patch.py /
-          # adaptive_interval.py / __init__.py, kept as source by design because
-          # they monkeypatch framework classes).
+          # adaptive_interval.py / team_overlay.py / __init__.py, kept as source
+          # by design because they monkeypatch framework classes).
           # Root entry scripts and char_sources/ are intentionally readable and
           # are not part of this check.
           $srcPrefix = $prefix + 'src\'
           $sourceLeak = @($listing -split "`n" | Where-Object {
             $_ -match [regex]::Escape($srcPrefix) -and $_ -match '\.py\s*$' -and
             $_ -notmatch '\\identity\.py\s*$' -and $_ -notmatch '\\schedule_patch\.py\s*$' -and
-            $_ -notmatch '\\adaptive_interval\.py\s*$' -and $_ -notmatch '\\__init__\.py\s*$'
+            $_ -notmatch '\\adaptive_interval\.py\s*$' -and $_ -notmatch '\\team_overlay\.py\s*$' -and
+            $_ -notmatch '\\__init__\.py\s*$'
           })
           if ($sourceLeak.Count -gt 0) {
             throw "Readable app modules leaked into the obfuscated build: $($sourceLeak[0])."

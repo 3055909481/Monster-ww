@@ -12,7 +12,8 @@ main.py 启动早期 monkeypatch ``TaskExecutor.trigger_sleep``：
 战斗信号来自任务实例上的 ``_in_combat``（CombatCheck 切换战斗时维护，不受
 scene.reset() 清空影响），scene.in_combat() 只作为兜底。
 
-配置项 registration 在 config.py 的 ``adaptive_interval_config_option``。
+配置项已并入 config.py 的 ``basic_config_option``（Basic Options / Tasks 分组），
+与框架的 Trigger Interval 同处一页；界面中文由 i18n/zh_CN 提供。
 """
 
 import logging
@@ -20,7 +21,8 @@ import random
 
 logger = logging.getLogger(__name__)
 
-CONFIG_NAME = 'Adaptive Interval'
+# 配置项已并入 Basic Options 的 Tasks 分组（与 Trigger Interval 同处）。
+CONFIG_NAME = 'Basic Options'
 KEY_ENABLED = 'Enable Adaptive Interval'
 KEY_COMBAT_MIN = 'Combat Interval Min (ms)'
 KEY_COMBAT_MAX = 'Combat Interval Max (ms)'
