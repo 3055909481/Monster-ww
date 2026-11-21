@@ -86,6 +86,35 @@ class TestScheduleDialogVisibility(unittest.TestCase):
         self.assertEqual(dlg.schedule_account_combo.currentIndex(), 0)
         self.assertTrue(dlg.schedule_plan_combo.isHidden())
 
+    def test_hidden_dialog_never_adjusts_size(self):
+        """窗口未显示时切任务，不能调用 dialog.adjustSize()——它会把无 layout
+        的 dialog 收缩到极小 sizeHint，令 panel 错位、布局显得拥挤。"""
+        dlg = self._dialog([
+            FakeTask('日常一条龙', 'RoutineTask'),
+            FakeTask('噩梦巢穴任务', 'NightmareNestTask'),
+        ])
+        dialog = dlg.form.dialog
+        with mock_patch.object(dialog, 'isVisible', return_value=False), \
+             mock_patch.object(dialog, 'adjustSize') as adjust, \
+             mock_patch.object(dialog, '_fit') as fit:
+            self._sync(dlg, 1)
+        adjust.assert_not_called()
+        fit.assert_not_called()
+
+    def test_visible_dialog_uses_fit_not_adjust_size(self):
+        """窗口可见时切任务，改用框架的 _fit() 重新居中，且绝不 adjustSize。"""
+        dlg = self._dialog([
+            FakeTask('日常一条龙', 'RoutineTask'),
+            FakeTask('噩梦巢穴任务', 'NightmareNestTask'),
+        ])
+        dialog = dlg.form.dialog
+        with mock_patch.object(dialog, 'isVisible', return_value=True), \
+             mock_patch.object(dialog, 'adjustSize') as adjust, \
+             mock_patch.object(dialog, '_fit') as fit:
+            self._sync(dlg, 1)
+        fit.assert_called_once()
+        adjust.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

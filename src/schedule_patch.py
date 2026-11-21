@@ -108,7 +108,12 @@ def _patch_create_dialog():
                     self.schedule_plan_combo.setCurrentIndex(0)
                     self.schedule_account_combo.setCurrentIndex(0)
                 try:
-                    self.form.dialog.adjustSize()
+                    # 与框架 _on_trigger_type_changed 保持一致：只在窗口可见时
+                    # 用 _fit() 重新居中面板。dialog 本身铺满父窗口且没有 layout，
+                    # 直接 adjustSize() 会把它收缩到极小的 sizeHint，令 panel 错位、
+                    # 内容看起来被挤压（这正是动态显示隐藏引入拥挤感的原因）。
+                    if self.form.dialog.isVisible():
+                        self.form.dialog._fit()
                 except Exception:
                     pass
 
