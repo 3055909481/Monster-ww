@@ -49,8 +49,7 @@ class RoutineTab(CustomTab):
         layout = QVBoxLayout(card.widget)
 
         intro = QLabel(self.tr(
-            'Build an ordered pipeline of reward claims and stamina runs. '
-            'The plan is saved locally; multi-account users can pick a different plan for each account.'
+            '按顺序编排领奖与刷副本步骤。计划保存在本地，多账号可为每个账号选用不同计划。'
         ))
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -68,9 +67,8 @@ class RoutineTab(CustomTab):
         # Optional per-plan account: when set, the routine logs into that account first.
         self.account_combo = ComboBox()
         self.account_combo.setToolTip(self.tr(
-            'Leave as "Current Account" to run on whichever account is logged in; '
-            'pick one to log into it before this plan runs.'))
-        self.account_options = [('', self.tr('Current Account'))]
+            '选「当前账号」则用当前登录的账号运行；指定账号后会在本计划执行前先登录该账号。'))
+        self.account_options = [('', self.tr('当前账号'))]
         try:
             for account in MultiAccountConfigStore(self.executor.config_folder).load():
                 key = account.get('account_key')

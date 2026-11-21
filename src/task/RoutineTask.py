@@ -59,7 +59,7 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         self.description = '高度自定义的日常流水线，每个账号可选择自己的计划。'
         self.support_schedule_task = True
         self.default_config[PLAN_SELECTOR] = DEFAULT_PLAN_NAME
-        self.config_description[PLAN_SELECTOR] = 'Plan name saved in configs/RoutinePlans.json.'
+        self.config_description[PLAN_SELECTOR] = '计划名称，保存在 configs/RoutinePlans.json。'
         self.config_type[PLAN_SELECTOR] = {
             'type': 'drop_down',
             'options': list(RoutinePlanStore('configs').load()),
@@ -73,12 +73,10 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         # 体力不足时可等待自然恢复，尽量耗尽当天体力；次数为 0 的副本等待后补刷一轮即结束。
         self.default_config[WAIT_STAMINA_KEY] = False
         self.config_description[WAIT_STAMINA_KEY] = (
-            'Wait for small natural stamina shortfalls to use up today\'s stamina. '
-            'For unlimited (count=0) domains, one more run is done after the wait and then the domain ends.')
+            '体力只差一点就等自然恢复，尽量耗尽当天体力；次数为 0 的副本等恢复后补刷一轮即结束。')
         self.default_config[STAMINA_GAP_KEY] = 10
         self.config_description[STAMINA_GAP_KEY] = (
-            'Only wait when current stamina is short by at most this many points; '
-            'a larger shortfall is skipped to avoid long waits.')
+            '仅当体力差额不超过此值时才等待；差得太多则跳过，避免长时间挂机。')
         self.add_exit_after_config()
         self.plan_name = DEFAULT_PLAN_NAME
         self.results = []

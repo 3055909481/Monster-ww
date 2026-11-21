@@ -46,10 +46,10 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
             self.F_GRACE_KEY: 10.0,
         })
         self.config_description = {
-            'Auto Target': 'Turn off to enable auto combat only when manually target enemy using middle click',
-            'Use Liberation': 'Do not use Liberation in Open World to Save Time',
-            'Check Levitator': 'Toggle the levitator and verify if the character is floating',
-            'Switch to Healer before and after Combat': 'Better Chance to Keep Character Alive',
+            'Auto Target': '关闭后，只有用鼠标中键手动锁定目标才会开始自动战斗',
+            'Use Liberation': '在大世界不使用大招，以节省时间',
+            'Check Levitator': '切换滑翔并确认角色是否处于漂浮状态',
+            'Switch to Healer before and after Combat': '战斗前后切换到治疗角色，提高角色存活率',
             self.F_START_KEY: ('在挑战/副本里按下 F 后, 不等锁定目标或血条出现就直接开始自动战斗。'
                                '大世界里按的 F 会被忽略。仅建议在矩阵/深塔/海墟等高难战斗本中使用'),
             self.F_DELAY_KEY: '按下 F 到开始战斗之间等待的秒数, 用来对齐刷怪。0 = 按下就开始',
