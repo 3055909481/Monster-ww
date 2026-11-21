@@ -9,9 +9,8 @@ from Mon.ui.qt.widget.Card import Card
 from Mon.ui.qt.widget.CustomTab import CustomTab
 
 from src.task.RoutineTask import RoutineTask
-from src.task.account.MultiAccountConfigStore import MultiAccountConfigStore
 from src.task.routine.RoutinePlans import (
-    DEFAULT_PLAN_NAME, ENTRIES_BY_ID, PLAN_SELECTOR, RoutinePlanAccountStore, RoutinePlanStore,
+    DEFAULT_PLAN_NAME, ENTRIES_BY_ID, PLAN_SELECTOR, RoutinePlanStore,
 )
 
 
@@ -64,27 +63,6 @@ class RoutineTab(CustomTab):
         self.plan_combo.currentTextChanged.connect(self._plan_changed)
         plan_layout.addWidget(QLabel(self.tr('当前计划')), 0)
         plan_layout.addWidget(self.plan_combo, 1)
-        # Optional per-plan account: when set, the routine logs into that account first.
-        self.account_combo = ComboBox()
-        self.account_combo.setToolTip(self.tr(
-            '选「当前账号」则用当前登录的账号运行；指定账号后会在本计划执行前先登录该账号。'))
-        self.account_options = [('', self.tr('当前账号'))]
-        try:
-            for account in MultiAccountConfigStore(self.executor.config_folder).load():
-                key = account.get('account_key')
-                if key and all(key != existing for existing, _ in self.account_options):
-                    self.account_options.append((key, key))
-        except (OSError, ValueError):
-            pass
-        for key, label in self.account_options:
-            self.account_combo.addItem(label, userData=key)
-        self.bound_accounts = RoutinePlanAccountStore(self.executor.config_folder)
-        self.account_combo.setCurrentIndex(next(
-            (index for index, (key, _) in enumerate(self.account_options)
-             if key == self.bound_accounts.get(self.plan_combo.currentText())), 0))
-        self.account_combo.currentIndexChanged.connect(self._account_changed)
-        plan_layout.addWidget(QLabel(self.tr('执行账号')), 0)
-        plan_layout.addWidget(self.account_combo, 1)
         edit_button = Button(self.tr('编辑步骤'), icon='pen', parent=plan_row)
         edit_button.clicked.connect(self._edit_steps)
         plan_layout.addWidget(edit_button)
@@ -128,14 +106,4 @@ class RoutineTab(CustomTab):
         self.task.config[PLAN_SELECTOR] = name
         plans = RoutinePlanStore(self.executor.config_folder).load()
         self._fill_steps(plans.get(name, []))
-        bound = self.bound_accounts.get(name)
-        self.account_combo.blockSignals(True)
-        self.account_combo.setCurrentIndex(next(
-            (index for index, (key, _) in enumerate(self.account_options) if key == bound), 0))
-        self.account_combo.blockSignals(False)
         show_toast(self, self.tr('已切换计划'), tone='success')
-
-    def _account_changed(self, index):
-        key = self.account_combo.itemData(index) or ''
-        self.bound_accounts.set(self.plan_combo.currentText(), key or None)
-        show_toast(self, self.tr('执行账号已更新'), tone='success')

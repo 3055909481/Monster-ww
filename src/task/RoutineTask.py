@@ -232,18 +232,25 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
     def run(self):
         WWOneTimeTask.run(self)
         self.results = []
+        from src.schedule_runtime import scheduled_account, scheduled_plan
+
         store = RoutinePlanStore(self.executor.config_folder)
         plans = store.load()
-        self.plan_name = self.config.get(PLAN_SELECTOR, DEFAULT_PLAN_NAME)
+        # 定时任务可以在命令行指定计划配置和账号，优先于配置里的默认值。
+        scheduled = scheduled_plan()
+        if scheduled and scheduled in plans:
+            self.plan_name = scheduled
+        else:
+            self.plan_name = self.config.get(PLAN_SELECTOR, DEFAULT_PLAN_NAME)
         items = normalize_items(plans.get(self.plan_name, plans[DEFAULT_PLAN_NAME]))
         selected = [item for item in items if item['enabled']]
         if not selected:
             self.log_info(self.tr('流水线没有启用的步骤，无需执行。'), notify=True)
             return
 
-        # Optional per-plan account: log out and log into the configured account
-        # before running. No binding means the current account is used as before.
-        account_key = RoutinePlanAccountStore(self.executor.config_folder).get(self.plan_name)
+        # 执行账号：定时任务命令行指定优先；未指定时不切号（沿用当前登录账号）。
+        account_key = scheduled_account() or RoutinePlanAccountStore(
+            self.executor.config_folder).get(self.plan_name)
         if account_key:
             self.info_set('执行账号', display_account(account_key))
             self._switch_to_login()

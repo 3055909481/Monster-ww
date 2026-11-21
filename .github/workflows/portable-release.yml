@@ -315,9 +315,9 @@ jobs:
 
               # SOURCE OBFUSCATION: replace every compiled .py with its .pyd in
               # the release tree, and drop the readable source from the index.
-              # identity.py / __init__.py / main.py are intentionally kept as
-              # source (see the compile step above for why).
-              $keepSource = @('identity.py', '__init__.py')
+              # identity.py / schedule_patch.py / __init__.py / main.py are
+              # intentionally kept as source (see the compile step above for why).
+              $keepSource = @('identity.py', 'schedule_patch.py', '__init__.py')
               $stripped = 0
               $pyFiles = @(Get-ChildItem -Recurse -Filter '*.py' -Path src -ErrorAction SilentlyContinue)
               foreach ($file in $pyFiles) {

@@ -9,6 +9,8 @@ application logic. Two modules deliberately stay as source:
 * ``identity.py`` — its runtime monkeypatches assign nested ``def`` functions
   onto framework classes. Cython turns those into non-descriptor builtins that
   cannot bind ``self`` once assigned, so it must remain pure Python.
+* ``schedule_patch.py`` — same reason: it monkeypatches framework dialog/manager
+  methods with plain functions that must bind ``self`` as real descriptors.
 
 The build workflow strips every ``.py`` that has a matching ``.pyd`` from the
 slim release tree. See build_char_sources.py for the character-source snapshot
@@ -25,7 +27,7 @@ from setuptools import Extension
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
 ROOT = pathlib.Path(__file__).resolve().parent
-EXCLUDE_FILES = {"__init__.py", "identity.py"}
+EXCLUDE_FILES = {"__init__.py", "identity.py", "schedule_patch.py"}
 
 
 def collect_python_extensions(base_dir):
