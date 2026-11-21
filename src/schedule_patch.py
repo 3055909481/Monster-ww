@@ -81,27 +81,41 @@ def _patch_create_dialog():
         grid = self.form.grid
         row = getattr(self.form, '_row', 0)
         try:
+            # 计划配置 / 执行账号目前只对「日常一条龙」生效。整行做成动态
+            # 显示：选一条龙时出现，选其他任务时隐藏，避免误以为设置会生效。
+            self.schedule_plan_label = QLabel(_tr('计划配置'), self.panel)
             self.schedule_plan_combo = ComboBox(parent=self.panel)
             self.schedule_plan_combo.addItems([_tr('不限制（沿用计划默认）')] + _plans())
-            grid.addWidget(QLabel(_tr('计划配置'), self.panel), row, 0)
+            grid.addWidget(self.schedule_plan_label, row, 0)
             grid.addWidget(self.schedule_plan_combo, row, 1)
             row += 1
 
+            self.schedule_account_label = QLabel(_tr('执行账号'), self.panel)
             self.schedule_account_combo = ComboBox(parent=self.panel)
             self.schedule_account_combo.addItems([_tr('当前账号')] + _accounts())
-            grid.addWidget(QLabel(_tr('执行账号'), self.panel), row, 0)
+            grid.addWidget(self.schedule_account_label, row, 0)
             grid.addWidget(self.schedule_account_combo, row, 1)
             row += 1
             self.form._row = row
 
-            # 仅当选中「日常一条龙」时，计划配置下拉才有意义
-            def _sync_plan_visibility(index=None):
-                has = 0 <= index < len(self.tasks) and _is_routine_task(self.tasks[index])
-                if hasattr(self, 'schedule_plan_combo'):
-                    self.schedule_plan_combo.setEnabled(has)
+            def _sync_extras_visibility(index=None):
+                is_routine = 0 <= index < len(self.tasks) and _is_routine_task(self.tasks[index])
+                for widget in (self.schedule_plan_label, self.schedule_plan_combo,
+                               self.schedule_account_label, self.schedule_account_combo):
+                    widget.setVisible(is_routine)
+                if not is_routine:
+                    # 切走时清空，防止残留值被写进定时任务参数
+                    self.schedule_plan_combo.setCurrentIndex(0)
+                    self.schedule_account_combo.setCurrentIndex(0)
+                try:
+                    self.form.dialog.adjustSize()
+                except Exception:
+                    pass
+
+            self._sync_schedule_extras = _sync_extras_visibility
             try:
-                self.task_combo.currentIndexChanged.connect(_sync_plan_visibility)
-                _sync_plan_visibility(self.task_combo.currentIndex())
+                self.task_combo.currentIndexChanged.connect(_sync_extras_visibility)
+                _sync_extras_visibility(self.task_combo.currentIndex())
             except Exception:
                 pass
         except Exception:
@@ -113,10 +127,14 @@ def _patch_create_dialog():
 
     def patched_on_create(self):
         try:
-            _LAST_EXTRAS['plan'] = (self.schedule_plan_combo.currentText()
-                                    if hasattr(self, 'schedule_plan_combo') else '')
-            _LAST_EXTRAS['account'] = (self.schedule_account_combo.currentText()
-                                       if hasattr(self, 'schedule_account_combo') else '')
+            index = self.task_combo.currentIndex()
+            is_routine = 0 <= index < len(self.tasks) and _is_routine_task(self.tasks[index])
+            if is_routine and hasattr(self, 'schedule_plan_combo'):
+                _LAST_EXTRAS['plan'] = self.schedule_plan_combo.currentText()
+                _LAST_EXTRAS['account'] = self.schedule_account_combo.currentText()
+            else:
+                _LAST_EXTRAS['plan'] = ''
+                _LAST_EXTRAS['account'] = ''
         except Exception:
             _LAST_EXTRAS['plan'] = ''
             _LAST_EXTRAS['account'] = ''
