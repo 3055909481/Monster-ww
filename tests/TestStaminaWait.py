@@ -59,11 +59,64 @@ class TestWaitForStaminaEnough(unittest.TestCase):
         task.wait_for_stamina_enough(70, gap_limit)
         self.assertLessEqual(task.wait_until.call_args.kwargs['time_out'], BaseWWTask.STAMINA_WAIT_HARD_CAP)
 
-    def test_read_failure_skips(self):
+    def test_read_failure_retries_then_skips(self):
+        # OCR 偶发失败要重试，不是一次读不到就放弃
+        task = _stamina_task([-1, -1, 60])
+        task.sleep = Mock()
+        task.wait_until = Mock()
+        self.assertTrue(task.wait_for_stamina_enough(60, 10))
+        self.assertEqual(task.sleep.call_count, 2)
+        task.wait_until.assert_not_called()  # 读到的 60 已够，无需等待
+
+    def test_read_failure_all_retries_skips(self):
         task = _stamina_task([-1])
+        task.sleep = Mock()
         task.wait_until = Mock()
         self.assertFalse(task.wait_for_stamina_enough(60, 10))
+        self.assertEqual(task.sleep.call_count, 2)
         task.wait_until.assert_not_called()
+
+
+class TestUseStaminaContinuation(unittest.TestCase):
+    """can_continue 只看扣减前的自然体力，不看备用结晶/本地模拟扣减。"""
+
+    def _task(self, values):
+        task = BaseWWTask.__new__(BaseWWTask)
+        task.sleep = Mock()
+        it = iter(values)
+
+        def read():
+            return next(it, values[-1])
+
+        task.get_stamina = Mock(side_effect=read)
+        task.click_dialog_left_button = Mock(return_value=(100, 100))
+        task.click_dialog_right_button = Mock(return_value=(100, 100))
+        task.wait_feature = Mock(return_value=False)
+        return task
+
+    def test_119_single_then_wait(self):
+        # 119 不够双倍 → 单倍刷 60 → 剩 59 < 60 → 返回 False 让外层等恢复补刷
+        task = self._task([(119, 0, 119)])
+        can_continue, used = task.use_stamina(once=60, must_use=0)
+        self.assertEqual(used, 60)  # 单倍，不是双倍
+        self.assertFalse(can_continue)
+
+    def test_double_deduction_stops_when_drained(self):
+        # 120 够双倍 → 扣 120 剩 0 → False（外层缺口大，正常结束）
+        task = self._task([(120, 48, 168)])
+        can_continue, used = task.use_stamina(once=60, must_use=0)
+        self.assertEqual(used, 120)
+        self.assertFalse(can_continue)
+
+    def test_stops_only_when_current_below_once(self):
+        task = self._task([(50, 200, 250)])  # 备用很多，但自然体力 50 < 60
+        can_continue, _ = task.use_stamina(once=60, must_use=0)
+        self.assertFalse(can_continue)
+
+    def test_daily_must_use_completion_stops(self):
+        task = self._task([(120, 48, 168)])
+        can_continue, _ = task.use_stamina(once=60, must_use=120)
+        self.assertFalse(can_continue)  # 日常额度扣完
 
 
 class TestRoutineStaminaWaitConfig(unittest.TestCase):
@@ -95,6 +148,52 @@ class TestRoutineStaminaWaitConfig(unittest.TestCase):
         self._task({})._configure_stamina_wait(domain, 0)
         self.assertFalse(domain._routine_wait_stamina)
         self.assertFalse(domain._routine_stamina_single_run)
+
+
+class TestSingleThenWaitReplay(unittest.TestCase):
+    """119 体力：不够双倍→单倍刷→剩 59 缺口小→等恢复→补刷一次→结束。"""
+
+    def test_119_waits_one_point_then_replays_once(self):
+        task = TacetTask.__new__(TacetTask)
+        task.stamina_once = 60
+        task._routine_wait_stamina = True
+        task._routine_stamina_gap = 10
+        task._routine_stamina_single_run = True
+        task.config = {'Which Tacet Suppression to Farm': 1}
+        task.log_info = Mock()
+        task.tr = lambda msg, **kw: msg
+        task.info_incr = Mock()
+        task.realm_entry_at_heal_point = False
+        task.sleep = Mock()
+        task.openF2Book = Mock()
+        task.open_boss_book = Mock()
+        task.teleport_to_tacet = Mock()
+        task.click_team_challenge = Mock()
+        task.wait_in_team_and_world = Mock()
+        task.combat_once = Mock()
+        task.walk_to_treasure = Mock()
+        task.pick_f = Mock()
+        task.has_claim_stamina = Mock(return_value=True)
+        task.click_relative = Mock()
+        task.click_dialog_left_button = Mock()
+        task.click_dialog_right_button = Mock()
+        task.wait_feature = Mock(return_value=False)
+        task.back = Mock()
+
+        # 每次 get_stamina：外层进本读 119 → 领奖 use_stamina 读 119(单倍剩59)
+        # → 等待后外层读 60 → 补刷领奖读 60(单倍剩 0)
+        readings = iter([(119, 0, 119), (119, 0, 119), (60, 0, 60), (60, 0, 60)])
+        task.get_stamina = Mock(side_effect=lambda: next(readings, (0, 0, 0)))
+        waited = []
+        task.wait_for_stamina_enough = Mock(side_effect=lambda need, gap: (
+            waited.append((need, gap)) or True))
+
+        task.farm_tacet(max_runs=0)
+
+        # 打了两轮（首轮 + 补刷一轮），等待只触发一次，缺口阈值 10
+        self.assertEqual(task.combat_once.call_count, 2)
+        self.assertEqual(waited, [(60, 10)])
+        task.wait_for_stamina_enough.assert_called_once_with(60, 10)
 
 
 class TestUnlimitedRunCap(unittest.TestCase):

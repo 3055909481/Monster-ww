@@ -175,6 +175,17 @@ def realm_of(value):
     return m.group(2) if m else (value or '')
 
 
+def serial_target(category, serial):
+    """配置里的「从上往下第 N 个」(1-based) → 要找的列表名字；越界返回空串。
+
+    名字表按游戏里的顺序排列（学到的优先，再补种子），所以 serial 可以直接
+    换算成目标名。查找时优先按这个名字 OCR 匹配，避免「数第 N 行」在列表
+    分组折叠 / OCR 漏读时整体错位（2026-11-21 实机 serial=5 只读到 3 行）。
+    """
+    names = known_names(category)
+    return names[serial - 1] if 1 <= serial <= len(names) else ''
+
+
 def known_options(category):
     return [option_label(category, n) for n in known_names(category)]
 

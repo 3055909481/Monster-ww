@@ -450,19 +450,31 @@ class BaseWWTask(BaseTask):
     # 体力自然恢复约每 4 分钟 1 点（每天 360），等待估算与超时上限都基于它。
     STAMINA_RECOVER_SECONDS = 240
     STAMINA_WAIT_HARD_CAP = 3600  # 单缺口最长等 60 分钟，超时就放弃继续后面的步骤
+    STAMINA_READ_RETRIES = 3  # OCR 偶发读不到体力时重试次数
+    STAMINA_READ_RETRY_SLEEP = 1.0
+
+    def _read_stamina_reliable(self):
+        """读体力；OCR 偶发失败时重试，避免一次读不到就放弃整个等待。"""
+        for attempt in range(self.STAMINA_READ_RETRIES):
+            current, back_up, total = self.get_stamina()
+            if current >= 0:
+                return current, back_up, total
+            if attempt + 1 < self.STAMINA_READ_RETRIES:
+                self.sleep(self.STAMINA_READ_RETRY_SLEEP)
+        return -1, -1, -1
 
     def wait_for_stamina_enough(self, need, gap_limit=10):
         """有限次数副本体力不足时，等自然恢复到够本次所需。
 
-        Need "current" stamina (natural regeneration), not the spare crystal.
-        Only waits when the gap is small (<= gap_limit) so an abnormal large
-        shortfall can never stall the routine for hours. Caller must be on a
-        screen where get_stamina() works (e.g. F2 book).
+        只看当前自然体力，不算备用结晶。Only waits when the gap is small
+        (<= gap_limit) so an abnormal large shortfall can never stall the
+        routine for hours. Caller must be on a screen where get_stamina()
+        works (e.g. F2 book).
 
         Returns True if enough stamina is available now or after waiting,
         False if the gap is too large or the wait timed out.
         """
-        current, _, _ = self.get_stamina()
+        current, _, _ = self._read_stamina_reliable()
         if current < 0:
             return False
         if current >= need:
@@ -476,7 +488,7 @@ class BaseWWTask(BaseTask):
         self.log_info(self.tr('Stamina short by {gap}; waiting up to {minutes:.0f} min for recovery.').format(
             gap=gap, minutes=time_out / 60))
         result = self.wait_until(
-            lambda: (self.get_stamina()[0] >= need),
+            lambda: self._read_stamina_reliable()[0] >= need,
             time_out=time_out, settle_time=0, raise_if_not_found=False)
         if result:
             self.log_info(self.tr('Stamina recovered; continue.'))
@@ -510,15 +522,18 @@ class BaseWWTask(BaseTask):
             self.back(after_sleep=1)
             self.click(btn, after_sleep=1)
 
-        current -= used
+        # 只看当前自然体力，不算备用结晶。can_continue 用「扣掉本次消耗后的
+        # 自然体力」判断：119 体力单倍刷 60 后剩 59 < 60，返回 False 让外层
+        # 走等待分支（缺口 1 很小 → 等恢复后补刷一次），而不是直接重新挑战。
+        remaining = current - used
+        is_daily = must_use > 0  # must_use=0 表示次数不限/非日常，并非额度已用完
         must_use -= used
-        total -= used
-        if total < once:
-            logger.info(f"current stamina: {current} not enough to continue")
+        if remaining < once:
+            logger.info(f"current stamina: {remaining} not enough to continue")
             can_continue = False
-        elif must_use <= 0 and current < once:
+        elif is_daily and must_use <= 0:
             can_continue = False
-            logger.info(f"current stamina: {current} must_use completed, no need to use back_up")
+            logger.info(f"current stamina: {remaining} must_use completed, stop")
         else:
             can_continue = True
         return can_continue, used
@@ -1365,17 +1380,26 @@ class BaseWWTask(BaseTask):
 
     @staticmethod
     def _pick_book_row(rows, category, target, serial, seen, nests):
-        """本页能点的目标行 (名字, 按钮)，没有返回 None。"""
-        if target:
-            others = [n for n in BossBook.known_names(category) if not BossBook.same_name(n, target)]
+        """本页能点的目标行 (名字, 按钮)，没有返回 None。
+
+        target 非空按名字匹配；serial 模式下先用序号换算出的名字匹配（抗
+        OCR 漏读/乱序），匹配不到才回退到「数第 N 个有按钮的行」。
+        """
+        want_name = target or BossBook.serial_target(category, serial)
+        if want_name:
+            others = [n for n in BossBook.known_names(category) if not BossBook.same_name(n, want_name)]
             best = None
             for name, _, btn, _ in rows:
-                d = BossBook.match_distance(name, target)
+                d = BossBook.match_distance(name, want_name)
                 if d is None or (d > 0 and BossBook.nearer_to_other(name, d, others)):
                     continue
                 if best is None or d < best[0]:
                     best = (d, name, btn)
-            return (best[1], best[2]) if best and best[2] is not None else None
+            if best and best[2] is not None:
+                return best[1], best[2]
+            # 明确指定了名字就只认名字；serial 换算的名字没匹配到则回退数行
+            if target:
+                return None
         eligible = [s for s in seen if not (category == 'mengyan' and BossBook.norm(s) in nests)]
         if serial < 1 or len(eligible) < serial:
             return None
@@ -1396,7 +1420,8 @@ class BaseWWTask(BaseTask):
     def click_book_target_by_name(self, category, target='', serial=0, max_pages=30):
         """在已打开的素材获取分类里找 Boss，点它那一行的「直接挑战/前往」，返回点到的 OCR 名字。
 
-        target 非空按名字模糊匹配（容 OCR 错 1 个字）；为空时数第 serial 个有按钮的行。
+        target 非空按名字模糊匹配（容 OCR 错 1 个字）；为空时把 serial 换算成
+        序号对应的名字优先匹配，匹配不到再回退数第 serial 个有按钮的行。
         只用滚轮往下翻、每页 OCR，不依赖列表总数和滚动条位置，游戏新加 Boss 不会点歪。
         """
         self.sleep(0.5)

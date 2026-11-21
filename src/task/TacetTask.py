@@ -68,11 +68,11 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         while True:
             self.sleep(1)
             self.openF2Book("gray_book_boss")
-            current, back_up, total = self.get_stamina()
+            current, _, _ = self.get_stamina()
             if current == -1:
                 self.click_relative(0.04, 0.4, after_sleep=1)
-                current, back_up, total = self.get_stamina()
-            if total < self.stamina_once:
+                current, _, _ = self.get_stamina()
+            if current < self.stamina_once:
                 # Routine runs may wait once for natural recovery. An unlimited
                 # count is capped to one run after the wait so the task ends with
                 # stamina rather than burning it all again.
@@ -81,8 +81,8 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                     stamina_waited = True
                     gap = getattr(self, '_routine_stamina_gap', 10)
                     if self.wait_for_stamina_enough(self.stamina_once, gap):
-                        current, back_up, total = self.get_stamina()
-                        if total >= self.stamina_once:
+                        current, _, _ = self.get_stamina()
+                        if current >= self.stamina_once:
                             if (must_use == 0 and not max_runs
                                     and getattr(self, '_routine_stamina_single_run', False)):
                                 max_runs = 1

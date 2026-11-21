@@ -64,8 +64,8 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
         stamina_retry = False
         self.realm_entry_at_heal_point = False
         while True:
-            current, _, total = self.open_F2_book_and_get_stamina()
-            if total < self.stamina_once or total < must_use or (must_use == 0 and current < self.stamina_once):
+            current, _, _ = self.open_F2_book_and_get_stamina()
+            if current < self.stamina_once or current < must_use:
                 # Routine runs may wait once for natural stamina recovery.
                 # With an unlimited configured count, cap the session to one run
                 # after recovery so the routine ends with stamina instead of

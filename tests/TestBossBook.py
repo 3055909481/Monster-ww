@@ -14,6 +14,7 @@ if "Mon" not in sys.modules:
 from src.task.BossBook import (
     CATEGORY_OF_MODE, display_name, edit_distance, known_names, match_distance,
     merge_order, nearer_to_other, norm, option_label, realm_of, same_name, to_option,
+    serial_target,
 )
 
 
@@ -55,6 +56,17 @@ class TestBossBook(unittest.TestCase):
         names = known_names('zhange')
         self.assertIn('虚妄诞生之种', names)
         self.assertIn('定序诸理之律', names)
+
+    def test_serial_target_maps_weekly_order(self):
+        # 实机 bug：serial=5 只读到 3 行，目标却是列表第 5 个「烬夜天启之章」
+        self.assertEqual(serial_target('zhange', 5), '烬夜天启之章')
+        self.assertEqual(serial_target('zhange', 1), '定序诸理之律')
+        self.assertEqual(serial_target('zhange', 11), '昔日咏叹之钟')
+
+    def test_serial_target_out_of_range_is_empty(self):
+        self.assertEqual(serial_target('zhange', 0), '')
+        self.assertEqual(serial_target('zhange', 99), '')
+        self.assertEqual(serial_target('zhange', -1), '')
 
     def test_merge_order_inserts_new_name_before_anchor(self):
         known = ['无冠者', '飞廉之猩']
