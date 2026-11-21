@@ -93,8 +93,26 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             saved = dialog.exec()
         finally:
             dialog.deleteLater()
-        if saved and callable(on_saved):
+        if not saved:
+            return
+        if callable(on_saved):
             on_saved()
+        else:
+            # 任务设置页的「配置流水线」按钮会把 clicked 的 bool 传进来，
+            # on_saved 因此不可调用。此时主动刷新自定义页的下拉框，避免
+            # 删除/新建计划后外层仍显示旧列表。
+            self._refresh_routine_tabs()
+
+    @staticmethod
+    def _refresh_routine_tabs():
+        from PySide6.QtWidgets import QApplication
+        try:
+            from src.gui.RoutineTab import RoutineTab
+        except ImportError:
+            return
+        for widget in QApplication.allWidgets():
+            if isinstance(widget, RoutineTab) and hasattr(widget, '_render'):
+                widget._render()
 
     def configure_training_guide(self, on_saved=None):
         """Open the training-guide planner (material shortage -> runs)."""
