@@ -23,6 +23,23 @@ def account_key_from_ocr(text):
 
 
 def display_account(key):
+    """Mask an account identifier for UI labels and logs.
+
+    The raw key is still used internally for lookup/login; only the displayed
+    form is masked. Short display names are left untouched.
+    """
+    if not key:
+        return key
+    if '@' in key:
+        local, _, domain = key.partition('@')
+        if len(local) <= 2:
+            masked = local[0] + '*' * (len(local) - 1) if local else ''
+        else:
+            masked = local[:2] + '*' * (len(local) - 2)
+        return f'{masked}@{domain}'
+    if key.isdigit() and len(key) >= 7:
+        return key[:3] + '*' * max(1, len(key) - 7) + key[-4:]
+    # Alphabetic display names (e.g. "Some Name") are not identifiers; keep them.
     return key
 
 

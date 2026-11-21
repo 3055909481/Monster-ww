@@ -2,11 +2,17 @@ import os
 import re
 from pathlib import Path
 
+import pyappify
+
 from Mon import Box, ConfigOption, Icon
 from Mon.util.GlobalConfig import create_basic_options
 from src.game_launcher import get_game_launch_arguments
 from src.task.process_feature import process_feature
 from src.task.task_icons import task_icon
+
+# The framework enables its update card when this launcher API is callable.
+# Disable it so the portable build never probes the upstream update endpoint.
+pyappify.get_version_list = None
 
 version = "dev"
 

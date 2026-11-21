@@ -14,6 +14,28 @@ class Globals:
         self.mini_map_arrow = None
         self.logged_in = False
 
+    def on_show_main_window(self, window):
+        """Strip upstream project cards from the About page.
+
+        The framework adds project/link cards pointing at the upstream build.
+        They are irrelevant to this portable build and expose its identity, so
+        remove the whole section defensively — a framework layout change must
+        never prevent the main window from showing.
+        """
+        try:
+            from Mon.ui.qt.about.AboutTab import ProjectCard
+
+            about = getattr(window, 'about_tab', None)
+            if about is None:
+                return
+            for section in list(about.sections):
+                if section.findChildren(ProjectCard):
+                    about.vBoxLayout.removeWidget(section)
+                    about.sections.remove(section)
+                    section.deleteLater()
+        except Exception as e:
+            logger.warning(f'could not strip upstream about cards: {e}')
+
     @property
     def yolo_model(self):
         if self._yolo_model is None:

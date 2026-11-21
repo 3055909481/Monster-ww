@@ -216,7 +216,10 @@ class TestMultiAccountConfig(unittest.TestCase):
 
     def test_account_keys(self):
         self.assertEqual(account_key_from_ocr('123****1234'), '1231234')
-        self.assertEqual(display_account('1231234'), '1231234')
+        # 展示层脱敏，内部 key 仍是原值
+        self.assertEqual(display_account('1231234'), '123*1234')
+        self.assertEqual(display_account('Ab12@outlook.com'), 'Ab**@outlook.com')
+        self.assertEqual(display_account('Some Name'), 'Some Name')
         for value in ('', '***', '123*1234', ' name', 'name ', 'a\nb'):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_accounts([account(value)])
