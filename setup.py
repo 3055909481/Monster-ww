@@ -27,7 +27,7 @@ from setuptools import Extension
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
 ROOT = pathlib.Path(__file__).resolve().parent
-EXCLUDE_FILES = {"__init__.py", "identity.py", "schedule_patch.py"}
+EXCLUDE_FILES = {"__init__.py", "identity.py", "schedule_patch.py", "adaptive_interval.py"}
 
 
 def collect_python_extensions(base_dir):

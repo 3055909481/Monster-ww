@@ -13,6 +13,13 @@ if __name__ == '__main__':
     except Exception:
         pass
 
+    # 自适应触发间隔（空闲降占用 / 战斗保持原节奏）：失败自动降级为框架原行为
+    try:
+        from src.adaptive_interval import install as install_adaptive_interval
+        install_adaptive_interval()
+    except Exception:
+        pass
+
     config = config
     ok = OK(config)
     ok.start()
