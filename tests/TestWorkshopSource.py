@@ -21,6 +21,7 @@ from src.gui.WorkshopSource import (
     extract_difficulty,
     extract_scene,
     load_index_cache,
+    merge_indexes,
     parse_index,
     save_index_cache,
 )
@@ -90,6 +91,69 @@ class TestWorkshopSource(unittest.TestCase):
             self.assertIsNone(load_index_cache(path))
             path.write_text("{}", encoding="utf-8")
             self.assertIsNone(load_index_cache(path))
+
+    def test_merge_keeps_union_of_codes(self):
+        """刷新/升级后代码只增不减：两边独有都保留。"""
+        primary = _sample_index()  # a.zip, b.zip
+        supplemental = {
+            "teams": [{
+                "slug": "Baizhi_Verina_Phrolova", "team": "Baizhi, Verina, Phrolova",
+                "codes": [
+                    {"filename": "b.zip", "timestamp": 1},
+                    {"filename": "c.zip", "timestamp": 3},
+                ],
+            }]
+        }
+        merged = merge_indexes(primary, supplemental)
+        names = {c["filename"] for c in parse_index(merged)}
+        self.assertEqual(names, {"a.zip", "b.zip", "c.zip"})
+        self.assertEqual(merged["totalCodes"], 3)
+
+    def test_merge_newer_timestamp_wins(self):
+        """同 filename 取较新内容（在线更新 / 升级新版本）。"""
+        primary = _sample_index()  # a.zip timestamp=2
+        supplemental = {
+            "teams": [{
+                "slug": "Baizhi_Verina_Phrolova", "team": "Baizhi, Verina, Phrolova",
+                "codes": [{"filename": "a.zip", "name": "A-v3", "timestamp": 9}],
+            }]
+        }
+        merged = merge_indexes(primary, supplemental)
+        a = next(c for c in parse_index(merged) if c["filename"] == "a.zip")
+        self.assertEqual(a["name"], "A-v3")
+        self.assertEqual(merged["totalCodes"], 2)  # 去重，不重复计数
+
+    def test_merge_adds_new_team(self):
+        """补充方有新队伍时整队加入。"""
+        supplemental = {
+            "teams": [{
+                "slug": "NewTeam", "team": "A, B, C", "members": ["A", "B", "C"],
+                "codes": [{"filename": "n.zip", "timestamp": 5}],
+            }]
+        }
+        merged = merge_indexes(_sample_index(), supplemental)
+        self.assertEqual(merged["totalTeams"], 2)
+        self.assertEqual(merged["totalCodes"], 3)
+        self.assertIn("n.zip", {c["filename"] for c in parse_index(merged)})
+
+    def test_merge_upgrade_scenario(self):
+        """升级：旧缓存 + 新离线包，新代码增量进来且不缩水。"""
+        cached = {  # 旧版本缓存：只有 a.zip
+            "teams": [{
+                "slug": "Baizhi_Verina_Phrolova", "team": "Baizhi, Verina, Phrolova",
+                "codes": [{"filename": "a.zip", "timestamp": 2}],
+            }]
+        }
+        new_bundle = _sample_index()  # 新离线包：a.zip + b.zip (+ c.zip 更新版)
+        new_bundle["teams"][0]["codes"].append({"filename": "c.zip", "timestamp": 10})
+        merged = merge_indexes(cached, new_bundle)
+        names = {c["filename"] for c in parse_index(merged)}
+        self.assertEqual(names, {"a.zip", "b.zip", "c.zip"})
+
+    def test_merge_invalid_payloads(self):
+        good = _sample_index()
+        self.assertEqual(merge_indexes({}, good), good)
+        self.assertEqual(merge_indexes(good, {}), good)
 
     def test_download_archive_validates_zip_magic_and_caches(self):
         class _Resp:

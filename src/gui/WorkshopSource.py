@@ -85,6 +85,94 @@ def parse_index(payload):
     return sorted(codes, key=lambda code: int(code.get("timestamp") or 0), reverse=True)
 
 
+def merge_indexes(primary, supplemental):
+    """合并两份 teams.json 索引，只增不减。
+
+    ``primary`` 决定队伍顺序与整体元信息（含顶层 URL），``supplemental`` 只
+    补充缺失的队伍/代码。队伍按 ``slug``（缺失时按 ``team``）匹配，代码按
+    ``filename`` 去重；同 filename 取 ``timestamp`` 较新者，这样在线刷新拿
+    到的更新、以及升级后离线包里的新版本，都能覆盖旧内容。
+
+    用于两个场景：
+    - 在线刷新：在线索引为主，补充内置快照里上游没有的代码；
+    - 应用升级：本地缓存为主，补充新版本离线包里新增的代码。
+    """
+    if not _valid_index(primary):
+        return supplemental
+    if not _valid_index(supplemental):
+        return primary
+
+    result = {
+        key: value for key, value in primary.items()
+        if key not in ("teams", "totalTeams", "totalCodes")
+    }
+    result["teams"] = [dict(team) for team in primary["teams"] if isinstance(team, dict)]
+
+    # Index by both slug and team name: the two payloads may use different
+    # keys (e.g. one has slug, the other only team), and we must still match
+    # the same team instead of adding it twice.
+    team_by_key = {}
+    for team in result["teams"]:
+        for key in (team.get("slug"), team.get("team")):
+            if key:
+                team_by_key.setdefault(key, team)
+
+    def code_time(code):
+        try:
+            return int(code.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    added_teams = 0
+    added_codes = 0
+    for team in supplemental.get("teams", []):
+        if not isinstance(team, dict):
+            continue
+        target = None
+        for key in (team.get("slug"), team.get("team")):
+            if key and key in team_by_key:
+                target = team_by_key[key]
+                break
+        if target is None:
+            target = dict(team)
+            target["codes"] = [dict(c) for c in team.get("codes", []) if isinstance(c, dict)]
+            result["teams"].append(target)
+            for key in (target.get("slug"), target.get("team")):
+                if key:
+                    team_by_key.setdefault(key, target)
+            added_teams += 1
+            added_codes += len(target["codes"])
+            continue
+
+        codes = target.setdefault("codes", [])
+        existing = {}
+        for index, code in enumerate(codes):
+            if isinstance(code, dict) and code.get("filename"):
+                existing[code["filename"]] = index
+        for code in team.get("codes", []):
+            if not isinstance(code, dict):
+                continue
+            filename = code.get("filename")
+            if not filename:
+                codes.append(dict(code))
+                added_codes += 1
+                continue
+            index = existing.get(filename)
+            if index is None:
+                existing[filename] = len(codes)
+                codes.append(dict(code))
+                added_codes += 1
+            elif code_time(code) > code_time(codes[index]):
+                codes[index] = dict(code)
+
+    result["totalTeams"] = len(result["teams"])
+    result["totalCodes"] = sum(len(team.get("codes", [])) for team in result["teams"])
+    for team in result["teams"]:
+        team["totalCodes"] = len(team.get("codes", []))
+    result["_mergeStats"] = {"addedTeams": added_teams, "addedCodes": added_codes}
+    return result
+
+
 def fetch_latest_codes(index_url=INDEX_URL, mirror_url=MIRROR_INDEX_URL):
     """Fetch and parse the newest index. Falls back to the mirror. Raises on total failure."""
     errors = []

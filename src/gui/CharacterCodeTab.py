@@ -1897,11 +1897,22 @@ class CharacterCodeTab(CustomTab):
         dialog.exec()
 
     def _load_workshop_codes(self):
-        """Cached online index when available, otherwise the bundled snapshot."""
+        """Merge cached and bundled indexes so refresh/upgrades never shrink the list.
+
+        The cache survives app upgrades, so a stale cache would otherwise hide
+        newer bundled codes; conversely an older upstream index would hide the
+        richer bundle. Merging keeps the union of both.
+        """
+        bundled = None
+        try:
+            bundled = _load_workshop_index()
+        except ValueError:
+            pass
         cached = WorkshopSource.load_index_cache(WORKSHOP_CACHE_INDEX)
         if cached is not None:
             try:
-                return WorkshopSource.parse_index(cached)
+                merged = WorkshopSource.merge_indexes(cached, bundled) if bundled else cached
+                return WorkshopSource.parse_index(merged)
             except ValueError:
                 pass
         try:
@@ -1923,6 +1934,14 @@ class CharacterCodeTab(CustomTab):
         finally:
             if app is not None:
                 app.restoreOverrideCursor()
+        # Merge with the bundled snapshot so an older upstream index can never
+        # drop locally available codes; cache the merged result for next launch.
+        try:
+            bundled = _load_workshop_index()
+            payload = WorkshopSource.merge_indexes(payload, bundled)
+            codes = WorkshopSource.parse_index(payload)
+        except ValueError:
+            pass
         try:
             WorkshopSource.save_index_cache(payload, WORKSHOP_CACHE_INDEX)
         except OSError:
