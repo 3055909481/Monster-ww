@@ -2,6 +2,14 @@
 
 Release history starts at v3.0.0.
 
+## v3.8.2 (2026-11-21)
+
+- Upgraded the bundled framework to Mon-script 3.0.7-mon1 (ok-script 3.0.7) and switched OCR from PP-OCRv5 to PP-OCRv6.
+- Restored cloud-game support with Edge/Chrome priority at 1080p, gold-ring target lock detection, and automatic re-login on disconnect.
+- Fixed revive teleport getting stuck when the nearest waypoint icon overlaps another icon; now tries candidates by distance.
+- Fixed Tacet Suppression misjudging the end of combat when the reward pick is unavailable while enemies remain.
+- Added a dedicated "Version Events" group with the 3.8 GalGame and Rahai Blocks automations.
+
 ## v3.8.1 (2026-11-14)
 
 - Fixed tasks started from the command line (`-t`/`-e`) not running after the game launches.

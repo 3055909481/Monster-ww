@@ -976,7 +976,7 @@ jobs:
             - **本版使用精简发布 tag**：发布 tag 只包含运行时文件，不含 `templates_src/`（894 MB 测试截图）、`tests/`、`docs/` 和构建脚本。PyAppify 会把 tag 同时打包成 git 对象库和 `working/` 检出目录，两份一起缩小，因此压缩包从原来的 2.2 GiB 降到约 205 MB（v22.0.22 实测 205.6 MB），且**增量更新能力完全保留**。运行时只读 `assets/`、`icons/`、`i18n/`、`src/` 和根目录的 Python 文件，功能不受影响
             - **队伍创意工坊已完全离线**：`workshop_bundle/` 内置 49 个队伍、69 个共享配置（约 3 MB），浏览和导入工坊配置不再访问外部 CDN；也可继续用「导入队伍」导入本地 ZIP
             - **自定义脚本目录改用框架规范名**：`ok_tasks/` 与 `ok_import/`。旧版 `Monster-ww_scripts/`、`Monster-ww_drop/` 会在首次启动时自动迁移；若同名文件内容不同，启动会中止并提示手动处理，绝不覆盖用户文件
-            - 内置框架升级到 Mon-script 3.0.5b8-mon1（对应上游 v3.8.1：修复 `-t`/`-e` 命令行任务不执行、下拉菜单与任务筛选更流畅）；`requirements.txt` 变化会触发 PyAppify 重装依赖，增量更新同样生效
+            - 内置框架升级到 Mon-script 3.0.7-mon1（对应 ok-script 3.0.7）：OCR 升级到 PP-OCRv6、恢复云游戏支持；`requirements.txt` 变化会触发 PyAppify 重装依赖，增量更新同样生效
             - 从旧版（`templates_src/` 尚在包内）通过 updater 升级时，切换 tag 会自动移除 `working/` 里的开发素材，`configs/`、日志和自定义脚本目录不受影响；但旧包已有的 git 对象库不会自动回收，想彻底减小磁盘占用建议下载本包全新解压
             - `cmd-only` 模式：`Monster-ww.exe` 只是带图标和管理员权限清单的轻量包装器，不含更新或联网逻辑
             - `Monster-ww.cmd` 设置了 `PYAPPIFY_UPGRADEABLE=0`，适合命令行参数或完全离线启动

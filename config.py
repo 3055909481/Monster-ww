@@ -174,6 +174,7 @@ config = {
         'group:Daily Activities': {'light': '#2668AA', 'dark': '#8ABCF0'},
         'group:Echo Management': {'light': '#8C651A', 'dark': '#E8C27C'},
         'group:Multi-account': {'light': '#7650A5', 'dark': '#C2A3EA'},
+        'group:版本活动': {'light': '#B4682A', 'dark': '#F0AE72'},
     },
     'config_folder': 'configs',
     'blur_area': blur_area,
@@ -238,6 +239,14 @@ config = {
         'check_night_light': True,
         'force_no_night_light': False,
     },
+    # 云游戏（需要 Win11 并安装 Chrome 或 Edge）。框架的 browser 设备据此启用。
+    'browser': {
+        'url': 'https://mc.kurogames.com/cloud/#/',
+        'resolution': (1920, 1080),
+        'channels': ['msedge', 'chrome', 'chromium'],
+        'args': ['--webrtc-ip-handling-policy=default', '--force-color-profile=srgb'],
+        'nick': '云游戏(需要Win11并安装Chrome或Edge)',
+    },
     'window_size': {
         'width': 1200,
         'height': 800,
@@ -297,6 +306,9 @@ config = {
         ["src.task.TacetEliminationTask", "TacetEliminationTask"],
         ["src.task.RoutineTask", "RoutineTask"],
         ["src.task.TrainingGuideTask", "TrainingGuideTask"],
+        # 版本活动（3.8）：单列分组，不并入日常活动
+        ["src.task.GalGameTask", "GalGameTask"],
+        ["src.task.RahaiBlocksTask", "RahaiBlocksTask"],
         # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],
