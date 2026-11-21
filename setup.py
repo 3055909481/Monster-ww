@@ -45,30 +45,40 @@ def collect_python_extensions(base_dir):
     return extensions
 
 
-extensions = collect_python_extensions("src")
+def main():
+    extensions = collect_python_extensions("src")
 
-setuptools.setup(
-    name="Monster-ww",
-    version="0.0.1",
-    author="Monster-ww maintainers",
-    author_email="",
-    description="Monster-ww automation runtime",
-    url="https://github.com/3055909481/Monster-ww",
-    packages=setuptools.find_packages(),
-    include_package_data=True,
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: Microsoft :: Windows",
-    ],
-    ext_modules=cythonize(
-        extensions,
-        compiler_directives={
-            "language_level": "3",
-            "embedsignature": False,
-            "binding": False,
-        },
-        nthreads=0,
-    ),
-)
+    # Cython's nthreads uses multiprocessing. On Windows the spawned workers
+    # re-import this file, so setup() must be guarded by __main__ or the
+    # workers recursively start new build pools (RuntimeError: bootstrapping).
+    setuptools.setup(
+        name="Monster-ww",
+        version="0.0.1",
+        author="Monster-ww maintainers",
+        author_email="",
+        description="Monster-ww automation runtime",
+        url="https://github.com/3055909481/Monster-ww",
+        packages=setuptools.find_packages(),
+        include_package_data=True,
+        classifiers=[
+            "Programming Language :: Python :: 3",
+            "Intended Audience :: Developers",
+            "License :: OSI Approved :: MIT License",
+            "Operating System :: Microsoft :: Windows",
+        ],
+        ext_modules=cythonize(
+            extensions,
+            compiler_directives={
+                "language_level": "3",
+                "embedsignature": False,
+                "binding": False,
+            },
+            # Parallelize the .py -> .cpp translation stage. The C++ compilation
+            # stage is parallelized separately via build_ext --parallel in CI.
+            nthreads=int(os.environ.get("CYTHON_NTHREADS", "4")),
+        ),
+    )
+
+
+if __name__ == "__main__":
+    main()
