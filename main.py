@@ -27,6 +27,13 @@ if __name__ == '__main__':
     except Exception:
         pass
 
+    # 点击坐标微抖动（提升按钮命中率）：失败自动降级为框架原行为
+    try:
+        from src.click_jitter import install as install_click_jitter
+        install_click_jitter()
+    except Exception:
+        pass
+
     config = config
     ok = OK(config)
     ok.start()

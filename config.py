@@ -156,6 +156,19 @@ _basic_desc.update({
     'Idle Interval Max (ms)': '空闲轮询间隔上限（毫秒），与下限拉开可打散CPU/GPU占用尖峰；填反会自动纠正',
 })
 
+# 点击坐标微抖动：提升按钮命中率（功能稳定性，非反检测）。并入 Basic Options。
+_CLICK_JITTER_KEYS = {
+    'Enable Click Jitter': True,
+    'Click Jitter Radius (px)': 2,
+}
+basic_config_option.default_config.update(_CLICK_JITTER_KEYS)
+for _k in _CLICK_JITTER_KEYS:
+    _basic_type[_k] = {'group': 'Tasks', 'min': 0}
+_basic_desc.update({
+    'Enable Click Jitter': '开启后点击坐标在极小范围内抖动，提升按钮命中率；关闭则恢复固定坐标',
+    'Click Jitter Radius (px)': '抖动半径（像素），默认 2，最大 8；中心仍是原坐标，不会系统性偏移',
+})
+
 key_config_option = ConfigOption('Game Hotkey', {
     'Echo Key': 'q',
     'Liberation Key': 'r',
