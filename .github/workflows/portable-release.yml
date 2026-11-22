@@ -201,7 +201,7 @@ jobs:
         # function-level `import py7zr`. Fail if the explicit collection was
         # lost, instead of shipping an updater that always errors at runtime.
         run: |
-          $out = python -m PyInstaller.utils.cliutils.archive_viewer -l -b dist/Monster-ww/Monster-ww.exe 2>&1 | Out-String
+          $out = python -m PyInstaller.utils.cliutils.archive_viewer -r -b dist/Monster-ww/Monster-ww.exe 2>&1 | Out-String
           if ($out -notmatch 'py7zr') { throw 'py7zr missing from PyInstaller archive; in-app update extraction would fail.' }
           Write-Host 'py7zr found in PyInstaller archive.'
 
