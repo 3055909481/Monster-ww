@@ -112,12 +112,12 @@ class Ciaccona(BaseChar):
         from src.char.Cartethyia import Cartethyia
         for i, char in enumerate(self.task.chars):
             self.logger.debug(f'ciaccona teammate char: {char.char_name}')
-            if isinstance(char, (Cartethyia)):
+            if char is not None and char.is_character(Cartethyia):
                 self.logger.debug('ciaccona set attribute: wind dot')
                 self.cartethyia = char
                 self.attribute = 3
                 return
-            if isinstance(char, (Phoebe, Zani)):
+            if char is not None and char.is_character((Phoebe, Zani)):
                 self.logger.debug('ciaccona set attribute: light dot')
                 self.attribute = 2
                 return

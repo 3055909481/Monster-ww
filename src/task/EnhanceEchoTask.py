@@ -159,15 +159,29 @@ class EnhanceEchoTask(BaseWWTask, FindFeature):
         self.fail_reason = ""
         invalid_count = 0
 
+        # 在任何丢弃动作前先校验整份 OCR 结果：漏识/错位时安全停止，
+        # 避免把好声骸误判为垃圾（xjtu 1.2.0 review fix）。
+        if not properties or len(properties) != len(values) or len(properties) > 5:
+            raise ValueError(self.tr('Cannot find the current main stat!'))
         paired_stats = []
         unmatched_values = values.copy()
-        for prop in properties:
-            matched_val_text = "0"
-            if unmatched_values:
-                closest_val = min(unmatched_values, key=lambda v: abs(prop.y - v.y))
-                matched_val_text = closest_val.name
-                unmatched_values.remove(closest_val)
-            paired_stats.append((prop.name, matched_val_text))
+        known_properties = {'暴击', '暴击伤害', '攻击', '生命', '防御', '共鸣效率',
+                            '普攻伤害加成', '重击伤害加成', '共鸣解放伤害加成', '共鸣技能伤害加成'}
+        for prop in sorted(properties, key=lambda box: box.y):
+            if prop.name not in known_properties:
+                raise ValueError(self.tr('Cannot find the current main stat!'))
+            candidates = [value for value in unmatched_values
+                          if abs((prop.y + prop.height / 2) - (value.y + value.height / 2))
+                          <= max(prop.height, value.height) / 2]
+            if len(candidates) != 1:
+                raise ValueError(self.tr('Cannot find the current main stat!'))
+            value = candidates[0]
+            try:
+                parse_number(value.name)
+            except ValueError as error:
+                raise ValueError(self.tr('Cannot find the current main stat!')) from error
+            unmatched_values.remove(value)
+            paired_stats.append((prop.name, value.name))
 
         total_count = len(paired_stats)
 
@@ -183,26 +197,9 @@ class EnhanceEchoTask(BaseWWTask, FindFeature):
 
         for p_raw, v_str in paired_stats:
             p = p_raw
-            if '暴击伤害' in p:
-                p = '暴击伤害'
-            elif '暴击' in p:
-                p = '暴击'
-            elif '攻击' in p:
-                p = '攻击' + ('百分比' if '%' in v_str or '％' in v_str else '')
-            elif '生命' in p:
-                p = '生命' + ('百分比' if '%' in v_str or '％' in v_str else '')
-            elif '防御' in p:
-                p = '防御' + ('百分比' if '%' in v_str or '％' in v_str else '')
-            elif '效率' in p:
-                p = '共鸣效率'
-            elif '普攻' in p:
-                p = '普攻伤害加成'
-            elif '重击' in p:
-                p = '重击伤害加成'
-            elif '解放' in p:
-                p = '共鸣解放伤害加成'
-            elif '技能' in p:
-                p = '共鸣技能伤害加成'
+            # 属性名已经过白名单校验，只有攻击/生命/防御需要按数值区分百分比
+            if p in ('攻击', '生命', '防御'):
+                p += '百分比' if '%' in v_str or '％' in v_str else ''
 
             v = parse_number(v_str)
 
@@ -348,7 +345,7 @@ class EnhanceEchoTask(BaseWWTask, FindFeature):
 
 
 def parse_number(text):
-    try:
-        return float(text.replace('％', '%').split('%')[0])
-    except (ValueError, IndexError):
-        return 0.0
+    normalized = text.replace('％', '%').strip()
+    if not re.fullmatch(r'\d+(?:\.\d+)?\s*%?', normalized):
+        raise ValueError(text)
+    return float(normalized.rstrip('%').strip())

@@ -100,7 +100,13 @@ class GardenTask(WWOneTimeTask, BaseWWTask):
 
     def is_garden_done(self, texts):
         text = " ".join(str(getattr(box, "name", box)) for box in texts)
-        return text.count(self.GARDEN_TARGET_POINTS.pattern) != 1
+        # 分数缺失是未知，不是"已达上限"：旧逻辑用出现次数!=1 判定会在
+        # OCR 漏读分数时误判已完成而漏做周常（xjtu 1.2.0 review fix）。
+        scores = re.findall(r'(?<!\d)(\d+)\s*[/／]\s*6000(?!\d)', text)
+        if scores:
+            return any(int(score) >= 6000 for score in scores)
+        # OCR 可能把当前分数与上限拆到不同框里
+        return len(re.findall(r'(?<!\d)6000(?!\d)', text)) >= 2
 
     def find_best_garden_feature(self):
         matches = []

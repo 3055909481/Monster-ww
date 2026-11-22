@@ -156,24 +156,32 @@ class Zani(BaseChar):
         return State.DONE
 
     def click_liber2(self):
+        if not self.task.use_liberation:
+            return
         start = time.time()
+        previous_liberation = self.task.in_liberation
         self.task.in_liberation = True
         send_key = True
         not_liber_box = self.task.box_of_screen_scaled(2560, 1440, 1909, 1274, 1957, 1322, name='zani_not_liber_box', hcenter=True)
         overall = time.time()
-        while not self.task.find_one('target_enemy_long_inner', box=not_liber_box, threshold=0.75):
-            if time.time() - start > 6 or time.time() - overall > 9:
-                self.task.in_liberation = False
-                if not self.check_liber():
-                    self.update_blazes()
-                return
-            if self.current_resonance() == 0:
-                start = time.time()
-            elif time.time() - start > 1.5:
-                send_key = False
-            if send_key:
-                self.send_liberation_key()
-            self.task.next_frame()
+        try:
+            while not self.task.find_one('target_enemy_long_inner', box=not_liber_box, threshold=0.75):
+                if time.time() - start > 6 or time.time() - overall > 9:
+                    self.task.in_liberation = False
+                    if not self.check_liber():
+                        self.update_blazes()
+                    return
+                if self.current_resonance() == 0:
+                    start = time.time()
+                elif time.time() - start > 1.5:
+                    send_key = False
+                if send_key:
+                    self.send_liberation_key()
+                self.task.next_frame()
+        except Exception:
+            # 异常时恢复 in_liberation，避免状态泄漏（xjtu 1.2.0 fix）
+            self.task.in_liberation = previous_liberation
+            raise
         self.task.in_liberation = False
         current = time.time()
         duration = 2.25

@@ -8,7 +8,8 @@ Mon-script framework writes or registers:
 * every log record, including exception text and formatted arguments,
 * the Log page's default file and placeholder text,
 * legacy custom-script folders (migrated to the framework's canonical names),
-* Win32 overlay window classes and the notification AppUserModelID.
+* Win32 overlay window classes and the notification AppUserModelID,
+* the single-instance marker filename (product prefix, not the framework's).
 
 It patches the *installed* Mon-script package at runtime instead of forking the
 dependency again, so an incremental PyAppify update can pick it up without a
@@ -37,6 +38,10 @@ LEGACY_SCRIPTS_FOLDER = "Monster-ww_scripts"
 LEGACY_IMPORT_FOLDER = "Monster-ww_drop"
 OVERLAY_WINDOW_CLASS = "Monster-ww.Overlay"
 NOTIFIER_APP_USER_MODEL_ID = "Monster-ww.Shell"
+# 单实例标记：框架默认写 Mon-script-<digest>.pid，重定向为产品自有前缀，
+# 避免与同机的其他 Mon 框架产品互杀。前缀只匹配框架名，绝不含上游 ok-ww 标识。
+FRAMEWORK_MUTEX_PREFIX = "Mon-script-"
+MUTEX_MARKER_PREFIX = "Monster-ww-script-"
 
 # Every spelling that identifies the upstream distribution. Longest matches
 # win because the regex alternation is ordered by length.
@@ -216,14 +221,130 @@ def _patch_log_page():
     page._t = _t
 
 
+def _patch_process_app_user_model_id():
+    """让 Windows 按应用身份分组任务栏，而不是归到 pythonw.exe / Python。
+
+    便携包的 GUI 进程是 pythonw.exe，若不显式设置进程 AUMID，Windows 会用
+    pythonw 的默认身份（显示「Python」+ Python 图标）分组任务栏窗口。必须在
+    QApplication / 任何 UI 创建之前调用，因此放在 apply() 最开头。
+    """
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            NOTIFIER_APP_USER_MODEL_ID
+        )
+        logging.getLogger("Mon").info(
+            "identity: process AUMID set to %s", NOTIFIER_APP_USER_MODEL_ID
+        )
+    except Exception as exc:
+        logging.getLogger("Mon").warning(
+            "identity: SetCurrentProcessExplicitAppUserModelID skipped: %s", exc
+        )
+
+
+def _register_aumid_display():
+    """在 HKCU 注册 AUMID 的显示名与图标，稳定任务栏分组标题。"""
+    if os.name != "nt":
+        return
+    try:
+        import winreg
+        icon = str(Path.cwd() / "icons" / "icon.ico")
+        key = winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER,
+            rf"Software\Classes\AppUserModelId\{NOTIFIER_APP_USER_MODEL_ID}",
+        )
+        with key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, APP_TITLE)
+            if Path(icon).is_file():
+                winreg.SetValueEx(key, "IconLocation", 0, winreg.REG_SZ, f"{icon},0")
+    except Exception as exc:
+        logging.getLogger("Mon").warning(
+            "identity: AUMID display registration skipped: %s", exc
+        )
+
+
+def _alias_ok_package(mon_package):
+    """让上游 ok-* 的角色代码在 Mon 框架上可导入（No module named 'ok'）。
+
+    工坊离线包里有第三方角色代码沿用 ``from ok import Box/Logger/...`` 与
+    ``from ok.task.exceptions import ...``。本项目框架是 Mon 包，不改写第三方
+    代码（会破坏其 sha256），改为在 sys.modules 注册 ok -> Mon 别名，保持
+    Unicode 路径与校验不变。只补 Mon 里确实存在的子模块，缺失的交给原解析。
+    """
+    import sys
+    try:
+        sys.modules.setdefault("ok", mon_package)
+        for submodule in (
+            "task", "task.exceptions", "device", "device.interaction_methods",
+            "device.interaction_methods.keys", "util", "ocr", "feature",
+        ):
+            mon_name = f"Mon.{submodule}"
+            if mon_name in sys.modules:
+                sys.modules.setdefault(f"ok.{submodule}", sys.modules[mon_name])
+    except Exception as exc:
+        logging.getLogger("Mon").warning("identity ok-alias skipped: %s", exc)
+
+
+def _mutex_owner_file(path):
+    """框架 marker 路径 -> 产品自有 marker 路径；非 marker 路径原样返回。"""
+    if not isinstance(path, str):
+        return path
+    name = os.path.basename(path)
+    if not name.startswith(FRAMEWORK_MUTEX_PREFIX) or not name.endswith(".pid"):
+        return path
+    digest = name[len(FRAMEWORK_MUTEX_PREFIX):-len(".pid")]
+    return os.path.join(os.path.dirname(path), f"{MUTEX_MARKER_PREFIX}{digest}.pid")
+
+
+def _patch_mutex_owner_file():
+    """重定向单实例标记文件名，与其他 Mon 框架产品隔离。
+
+    只包装 Mon.util.process 里接收 owner_file 的两个函数，不替换全局
+    os.path.join——xjtu 那种写法改的是共享的 os.path 模块对象，会波及
+    无关代码。互斥量名本身（工作目录的 md5）保持不变，跨版本仍能检测
+    已有实例；升级期若新标记尚不存在，接管时回退读取框架旧标记。
+    """
+    from Mon.util import process as mon_process
+
+    if getattr(mon_process, "_monster_ww_mutex_patched", False):
+        return False
+
+    original_retain = mon_process._retain_mutex
+    original_terminate = mon_process._terminate_previous_instances
+
+    def retain(handle, owner_file, gui=False, _original=original_retain):
+        return _original(handle, _mutex_owner_file(owner_file), gui=gui)
+
+    def terminate(owner_file, replace_console=False, _original=original_terminate):
+        target = _mutex_owner_file(owner_file)
+        if not os.path.exists(target) and os.path.exists(owner_file):
+            # 升级期兼容：旧版本实例留下的是框架名 marker，仍要能识别并接管。
+            target = owner_file
+        return _original(target, replace_console=replace_console)
+
+    mon_process._retain_mutex = retain
+    mon_process._terminate_previous_instances = terminate
+    mon_process._monster_ww_mutex_patched = True
+    return True
+
+
 def apply():
     """Migrate legacy folders and apply runtime identity patches. Idempotent."""
+    # 进程级 AUMID 必须最先设置（早于任何 Mon 导入 / QApplication），否则
+    # 任务栏窗口会按 pythonw.exe 归到「Python」分组。
+    _patch_process_app_user_model_id()
+    _register_aumid_display()
     # Run before importing Mon: the framework creates ok_tasks/ok_import on
     # import, which would make a later migration look like a conflict.
     _migrate_script_folders()
     _patch_logging()
 
     import Mon as mon_package
+
+    # ok -> Mon 别名必须早于任何工坊角色代码导入（CustomCharLoader 在任务运行时用）
+    _alias_ok_package(mon_package)
 
     if getattr(mon_package, "_monster_ww_identity_applied", False):
         return False
@@ -232,6 +353,7 @@ def apply():
     patched_config_logger = None
     for patch in (
         _patch_logger_file,
+        _patch_mutex_owner_file,
         _patch_window_classes,
         _patch_notifications,
         _patch_log_page,

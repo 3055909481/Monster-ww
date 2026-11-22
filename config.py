@@ -303,12 +303,10 @@ config = {
     'links': {
         'default': {
             'github': 'https://github.com/3055909481/Monster-ww',
-            'discord': 'https://discord.gg/vVyCatEBgA',
             'faq': 'https://github.com/3055909481/Monster-ww'
         },
         'zh_CN': {
             'github': 'https://github.com/3055909481/Monster-ww',
-            'discord': 'https://discord.gg/vVyCatEBgA',
             'faq': 'https://github.com/3055909481/Monster-ww',
         },
     },
