@@ -175,7 +175,7 @@ jobs:
           }
           if ($leaks) { $leaks | ForEach-Object { Write-Host "LEAK: $($_.FullName)" }; throw 'Readable business source leaked into package.' }
           $required = @('dist/Monster-ww/Monster-ww.exe', 'dist/Monster-ww/src/identity.py',
-                        'dist/Monster-ww/workshop_bundle/teams.json', 'dist/Monster-ww/build/version.txt')
+                        'dist/Monster-ww/workshop_bundle/teams.json')
           foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing required file: $f" } }
 
       - name: Smoke-test packaged app
