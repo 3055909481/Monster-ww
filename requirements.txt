@@ -90,6 +90,9 @@ psutil==7.2.2
     # via
     #   Mon-script
     #   pycaw
+py7zr==1.1.4
+    # via
+    #   src.updater (in-app full-package update: extract .7z releases)
 pyappify[standalone]==1.0.20
     # via
     #   Mon-script

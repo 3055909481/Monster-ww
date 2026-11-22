@@ -159,6 +159,19 @@ jobs:
       - name: Build portable app with PyInstaller
         run: python -m PyInstaller --noconfirm Monster-ww.spec
 
+      - name: Drop runtime caches from the package
+        # OpenVINO writes compiled .blob caches at runtime. collect_all() may
+        # pick up a cache/ folder from the build machine; it is regenerated on
+        # first launch and must not ship (31 MB in v1.0.27).
+        run: |
+          $cache = 'dist/Monster-ww/cache'
+          if (Test-Path $cache) {
+            $size = (Get-ChildItem $cache -Recurse -File | Measure-Object Length -Sum).Sum
+            Write-Host "Removing bundled runtime cache ($([math]::Round($size/1MB,1)) MB)"
+            Remove-Item $cache -Recurse -Force
+          }
+          Get-ChildItem -Recurse -Filter '__pycache__' 'dist/Monster-ww' | Remove-Item -Recurse -Force
+
       - name: Verify executable metadata
         run: |
           $exe = 'dist/Monster-ww/Monster-ww.exe'
@@ -214,12 +227,22 @@ jobs:
             python = (python --version)
           }
           $metadata | ConvertTo-Json | Set-Content 'dist/Monster-ww/build-info.json' -Encoding utf8
-          $archive = "dist/Monster-ww-$env:APP_VERSION-windows-x64.zip"
-          python -m zipfile -c $archive dist/Monster-ww
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # version.txt is read by src/updater.py to know the running version.
+          $env:APP_VERSION | Set-Content 'dist/Monster-ww/version.txt' -Encoding ascii -NoNewline
+          # 7z solid LZMA2 is ~25% smaller than zip (244MB vs 324MB measured).
+          $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+          if (-not $seven) { $seven = Join-Path $env:ProgramFiles '7-Zip/7z.exe' }
+          if (-not (Test-Path $seven)) { throw '7-Zip is required to build the portable archive.' }
+          $archiveName = "Monster-ww-$env:APP_VERSION-windows-x64.7z"
+          $archive = Join-Path (Get-Location) "dist/$archiveName"
+          # Compress from inside dist/ so the archive root is Monster-ww/.
+          Push-Location 'dist'
+          & $seven a -t7z -mx=5 -ms=on $archive 'Monster-ww' | Out-Null
+          Pop-Location
+          if ($LASTEXITCODE -ne 0) { throw '7z compression failed.' }
           $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $([System.IO.Path]::GetFileName($archive))" | Set-Content "$archive.sha256" -Encoding ascii
-          @("Version: $env:APP_VERSION", "Package: $([System.IO.Path]::GetFileName($archive))", "SHA-256: $hash") -join "`n`n" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "$hash  $archiveName" | Set-Content "$archive.sha256" -Encoding ascii
+          @("Version: $env:APP_VERSION", "Package: $archiveName", "SHA-256: $hash") -join "`n`n" | Add-Content $env:GITHUB_STEP_SUMMARY
           "archive=$archive" >> $env:GITHUB_OUTPUT
 
       - name: Upload portable archive
@@ -227,8 +250,8 @@ jobs:
         with:
           name: Monster-ww-portable-${{ steps.version.outputs.number }}
           path: |
-            dist/Monster-ww-*.zip
-            dist/Monster-ww-*.zip.sha256
+            dist/Monster-ww-*.7z
+            dist/Monster-ww-*.7z.sha256
 
       - name: Publish GitHub release
         if: ${{ inputs.publish_release }}
@@ -246,13 +269,14 @@ jobs:
             - **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组
             - **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应
             - **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去
-            - **每次升级是全量替换**：下载新 zip 解压覆盖程序目录即可，配置不受影响
+            - **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响
             - **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN
             - **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码
             - Python 环境与依赖已随包提供，首次运行无需联网下载
+            - 7z 请用 7-Zip 或 Windows 11 23H2+ 解压
             - 由手动触发的 `Monster-ww Portable Release` 工作流构建
           files: |
-            dist/Monster-ww-*.zip
-            dist/Monster-ww-*.zip.sha256
+            dist/Monster-ww-*.7z
+            dist/Monster-ww-*.7z.sha256
         env:
           GITHUB_TOKEN: ${{ github.token }}

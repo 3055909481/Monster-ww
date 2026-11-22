@@ -11,8 +11,16 @@ from src.task.process_feature import process_feature
 from src.task.task_icons import task_icon
 
 # The framework enables its update card when this launcher API is callable.
-# Disable it so the portable build never probes the upstream update endpoint.
-pyappify.get_version_list = None
+# Install our GitHub-release-backed updater so the existing update UI works:
+# check button, version picker, automatic startup check and update-then-restart.
+# Pure runtime use (workshop, tasks) stays offline; only an explicit update
+# check or the framework's startup check touches the network.
+try:
+    from src import updater as _updater
+    _updater.install()
+except Exception:
+    # Never let an updater problem prevent the application from starting.
+    pyappify.get_version_list = None
 
 version = "dev"
 
