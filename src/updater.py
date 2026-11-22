@@ -319,12 +319,17 @@ def _download(url, destination, expected_sha256=None):
 def _extract(archive, target):
     suffix = archive.suffix.lower()
     if suffix == ".7z":
+        missing = (
+            "缺少 7z 解压组件 py7zr，请重新下载完整安装包后解压覆盖，不要在原目录上修补"
+        )
         try:
             import py7zr
         except ImportError as error:
-            raise RuntimeError(
-                "缺少 7z 解压组件 py7zr，请重新下载完整安装包后解压覆盖，不要在原目录上修补"
-            ) from error
+            raise RuntimeError(missing) from error
+        # Cython-compiled __import__ returns None instead of raising when a
+        # module is missing; cover that path too so source and .pyd agree.
+        if py7zr is None:
+            raise RuntimeError(missing)
         with py7zr.SevenZipFile(archive, mode="r") as zf:
             zf.extractall(path=target)
     elif suffix == ".zip":
