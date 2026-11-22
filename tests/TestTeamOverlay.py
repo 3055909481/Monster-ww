@@ -1,6 +1,11 @@
 """顶部队伍条测试：识别逻辑、中文名映射、patch 幂等（纯逻辑，不实例化 Qt）。"""
+import os
 import unittest
 from unittest.mock import Mock, patch as mock_patch
+
+# CI 无显示会话下创建 QWidget/QPixmap 会在解释器退出时触发 Qt 析构 access
+# violation（即使测试本身全过）。必须在 import PySide6 之前强制 offscreen。
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from src import team_overlay as to
 from src.char.CharFactory import char_dict
