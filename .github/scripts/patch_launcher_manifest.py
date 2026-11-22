@@ -112,13 +112,38 @@ def read_embedded_manifests(path: Path):
     return found
 
 
+def verify_manifest(exe: Path) -> int:
+    """Check that the exe itself carries a requireAdministrator manifest."""
+    if not exe.is_file():
+        print(f"ERROR: executable not found: {exe}", file=sys.stderr)
+        return 1
+    # PyInstaller writes the manifest with language 0; patched launchers use
+    # 1033. Either is valid for Windows, so only match the resource id.
+    patched = [
+        raw for resource_id, _language, raw in read_embedded_manifests(exe)
+        if resource_id == CREATEPROCESS_MANIFEST_RESOURCE_ID
+    ]
+    if not patched or not any(b'level="requireAdministrator"' in raw for raw in patched):
+        print("ERROR: executable is not marked requireAdministrator", file=sys.stderr)
+        return 1
+    print(f"{exe.name} manifest verified: requireAdministrator")
+    return 0
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    if args and args[0] in ("--verify", "-v"):
+        if len(args) != 2:
+            print("usage: patch_launcher_manifest.py --verify <exe>", file=sys.stderr)
+            return 2
+        return verify_manifest(Path(args[1]).resolve())
+
+    if len(args) != 2:
         print("usage: patch_launcher_manifest.py <exe> <manifest.xml>", file=sys.stderr)
         return 2
 
-    exe = Path(sys.argv[1]).resolve()
-    manifest_path = Path(sys.argv[2]).resolve()
+    exe = Path(args[0]).resolve()
+    manifest_path = Path(args[1]).resolve()
     if not exe.is_file():
         print(f"ERROR: executable not found: {exe}", file=sys.stderr)
         return 1

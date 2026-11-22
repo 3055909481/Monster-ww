@@ -127,6 +127,11 @@ exe = EXE(
          else str(root / 'icons' / 'icon.png'),
     version=version_info,
     manifest=str(root / '.github' / 'scripts' / 'MonsterLauncher.manifest.xml'),
+    # PyInstaller 6 rewrites requestedExecutionLevel from this flag (default
+    # asInvoker), ignoring the level in the manifest file above. Without it
+    # the app runs at medium integrity and PostMessage to the elevated game
+    # is blocked by UIPI. Keep both in sync.
+    uac_admin=True,
     contents_directory='.',
 )
 coll = COLLECT(
