@@ -50,7 +50,8 @@ class Suisui(BaseChar):
             self.cycle_start()
             if not self.has_intro:
                 if self.try_e():
-                    return self.switch_next_char()
+                    # try_e 已处理技能，不再提前切人（xjtu 1.2.0 fix）
+                    return
             self.click()
             self.cycle_sleep(self.ATTACK_INTERVAL)
         else:

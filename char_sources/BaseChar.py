@@ -123,6 +123,22 @@ class BaseChar:
         self.cycle_intro_time = 1.2
         self.target_box_short_combat_check = False
 
+    def is_character(self, character_cls):
+        """按游戏身份匹配角色，不受自定义轮转继承关系影响。
+
+        工坊自定义角色代码会继承内置角色类，用 isinstance 会把自定义角色
+        误判成内置角色；这里以 char_dict 注册的 cls 为准（xjtu 1.2.0 fix）。
+        """
+        name = getattr(self, 'char_name', None)
+        if not name:
+            return isinstance(self, character_cls)
+        try:
+            from src.char.CharFactory import char_dict
+            info = char_dict.get(name)
+            return info is not None and issubclass(info['cls'], character_cls)
+        except Exception:
+            return isinstance(self, character_cls)
+
     def set_char_type(self, char_type=CharType.MAIN_DPS):
         """设置角色定位，默认为主输出。"""
         self._char_type = CharType(char_type or CharType.MAIN_DPS)
@@ -622,8 +638,11 @@ class BaseChar:
             check_fun = self.is_forte_full
         if check_fun():
             self.task.mouse_down()
-            success = self.task.wait_until(lambda: not check_fun(), time_out=2)
-            self.task.mouse_up()
+            try:
+                success = self.task.wait_until(lambda: not check_fun(), time_out=2)
+            finally:
+                # wait_until 异常时也必须释放鼠标，避免持续按住（xjtu 1.2.0 fix）
+                self.task.mouse_up()
             self.sleep(0.05)
             return success
 

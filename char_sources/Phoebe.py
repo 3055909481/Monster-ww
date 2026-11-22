@@ -483,7 +483,7 @@ class Phoebe(BaseChar):
     def shorekeeper_auto_dodge(self):
         from src.char.ShoreKeeper import ShoreKeeper
         for i, char in enumerate(self.task.chars):
-            if isinstance(char, ShoreKeeper):
+            if char is not None and char.is_character(ShoreKeeper):
                 return char.auto_dodge(condition = self.flying)
 
 phoebe_blue_color = {
