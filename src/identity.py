@@ -113,6 +113,42 @@ def _patch_logger_file():
     return config_logger
 
 
+def _migrate_user_config_to_appdata():
+    """Copy legacy in-app configs/ into %APPDATA%/Monster-ww/configs on first run.
+
+    The full-update portable build ships no configs/ and config.py now points
+    at the APPDATA copy, so existing users' accounts/schedules/history would
+    otherwise be invisible. Copy (never move or delete) so the old data stays
+    as a fallback; only copy files that do not yet exist in the destination.
+    """
+    try:
+        base = os.environ.get("APPDATA")
+        if not base:
+            return
+        dest = Path(base) / "Monster-ww" / "configs"
+        source = Path.cwd() / "configs"
+        if not source.is_dir():
+            return
+        dest.mkdir(parents=True, exist_ok=True)
+        copied = 0
+        for old in source.rglob("*"):
+            if not old.is_file():
+                continue
+            target = dest / old.relative_to(source)
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy2(old, target)
+            copied += 1
+        if copied:
+            logging.getLogger("Mon").info(
+                "identity: migrated %d config file(s) to %s", copied, dest
+            )
+    except Exception as exc:
+        logging.getLogger("Mon").warning("identity config migration skipped: %s", exc)
+
+
 def _migrate_script_folders():
     """Move legacy custom-script folders to the canonical framework names.
 
@@ -338,6 +374,7 @@ def apply():
     _register_aumid_display()
     # Run before importing Mon: the framework creates ok_tasks/ok_import on
     # import, which would make a later migration look like a conflict.
+    _migrate_user_config_to_appdata()
     _migrate_script_folders()
     _patch_logging()
 

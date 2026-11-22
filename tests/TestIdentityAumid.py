@@ -180,5 +180,54 @@ class TestMutexOwnerFile(unittest.TestCase):
         self.assertIs(self.mp._retain_mutex, retain_fn)
 
 
+class TestConfigMigration(unittest.TestCase):
+    """全量更新前，旧 configs/ 自动复制到 APPDATA，不覆盖已存在的。"""
+
+    def test_copies_legacy_configs_to_appdata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            appdata = os.path.join(tmp, 'AppData')
+            workdir = os.path.join(tmp, 'working')
+            legacy = os.path.join(workdir, 'configs')
+            os.makedirs(os.path.join(legacy, 'accounts'))
+            with open(os.path.join(legacy, 'accounts', 'main.json'), 'w') as f:
+                f.write('{"account": "test"}')
+            with open(os.path.join(legacy, 'global.json'), 'w') as f:
+                f.write('{}')
+            with mock_patch.dict(os.environ, {'APPDATA': appdata}), \
+                 mock_patch.object(ident.Path, 'cwd', return_value=__import__('pathlib').Path(workdir)):
+                ident._migrate_user_config_to_appdata()
+            dest = os.path.join(appdata, 'Monster-ww', 'configs')
+            self.assertTrue(os.path.isfile(os.path.join(dest, 'accounts', 'main.json')))
+            self.assertTrue(os.path.isfile(os.path.join(dest, 'global.json')))
+
+    def test_does_not_overwrite_existing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            appdata = os.path.join(tmp, 'AppData')
+            workdir = os.path.join(tmp, 'working')
+            legacy = os.path.join(workdir, 'configs')
+            os.makedirs(legacy)
+            with open(os.path.join(legacy, 'global.json'), 'w') as f:
+                f.write('old')
+            dest = os.path.join(appdata, 'Monster-ww', 'configs')
+            os.makedirs(dest)
+            with open(os.path.join(dest, 'global.json'), 'w') as f:
+                f.write('new')
+            with mock_patch.dict(os.environ, {'APPDATA': appdata}), \
+                 mock_patch.object(ident.Path, 'cwd', return_value=__import__('pathlib').Path(workdir)):
+                ident._migrate_user_config_to_appdata()
+            with open(os.path.join(dest, 'global.json')) as f:
+                self.assertEqual(f.read(), 'new')
+
+    def test_no_legacy_configs_is_noop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            appdata = os.path.join(tmp, 'AppData')
+            workdir = os.path.join(tmp, 'working')
+            os.makedirs(workdir)
+            with mock_patch.dict(os.environ, {'APPDATA': appdata}), \
+                 mock_patch.object(ident.Path, 'cwd', return_value=__import__('pathlib').Path(workdir)):
+                ident._migrate_user_config_to_appdata()  # 不抛异常即可
+            self.assertFalse(os.path.exists(os.path.join(appdata, 'Monster-ww')))
+
+
 if __name__ == '__main__':
     unittest.main()

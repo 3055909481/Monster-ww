@@ -1,51 +1,18 @@
-# Manually triggered, portable-archive-only release for Monster-ww.
+# Monster-ww portable build (PyInstaller, full-update).
 #
-# Compared with build.yml this workflow deliberately drops:
-#   * repository synchronisation (CNB / upstream update repos),
-#   * exe signing (SignPath),
-#   * NSIS installers and the online installer,
-#   * MirrorChyan / release-note distribution.
-# The only published artifact is a self-contained portable archive.
+# The GUI window belongs to Monster-ww.exe itself, whose VERSIONINFO says
+# ProductName=Monster-ww. Windows taskbar therefore groups it under
+# "Monster-ww" instead of "Python" (the old pyappify layout hosted the window
+# in pythonw.exe, whose version resource says "Python").
 #
-# SLIM RELEASE TAG (why the archive is small):
-#   PyAppify bundles the checked-out release tag TWICE: as the bare git object
-#   database (data/apps/Monster-ww/repo/objects) and as the checkout
-#   (data/apps/Monster-ww/working). A normal master tag contains 894 MB of
-#   templates_src screenshots and 124 MB of tests, so BOTH copies are ~1.1 GB
-#   and the 7z ends up at 2.2 GiB. None of those files are read at runtime
-#   (deploy.txt does not list them; only tests/ and docs/ reference them).
-#   The "Create slim release tag" step therefore builds a dedicated release
-#   commit whose tree omits the development-only directories, and publishes
-#   THAT commit under the version tag. Its tree is ~41 MB, so both copies
-#   shrink together and the archive drops to roughly 205 MB (measured 205.6 MB), dominated by
-#   the bundled Python environment. The commit lives on the "portable" branch
-#   and every release extends that slim history, so the launcher's depth-100
-#   shallow fetch can never pull the big screenshots back in through history.
+# Distribution is a full zip: every release replaces the program directory.
+# User data (accounts, schedules, history) lives in %APPDATA%/Monster-ww/configs
+# and is copied there from a legacy in-app configs/ on first run, so it
+# survives a full package replacement.
 #
-# OFFLINE WORKSHOP:
-#   workshop_bundle/ carries the team index and every team ZIP, so the
-#   character-code tab reads local files instead of any external CDN.
-#   It is runtime data and therefore stays in the slim release tree.
-#
-# Updating WITHOUT re-downloading the whole archive:
-#   pyappify-action always emits a launcher-only "<App>-win32.zip" next to the
-#   portable archive. That zip contains PyAppify's real Tauri launcher. In
-#   "updater" mode this workflow extracts it and puts it back into the archive
-#   as Monster-ww/Monster-ww.exe. The launcher reads data/apps/Monster-ww/app.json,
-#   fetches only NEW release tags from pyappify.yml's git_url (our own fork),
-#   and checks them out into data/apps/Monster-ww/working. Python, pip packages
-#   and configs/ are NOT tracked by that repository, so they survive every
-#   update. Only changed source files are transferred.
-#   In "cmd-only" mode a tiny icon-only exe wrapper is shipped instead, with no
-#   network/update logic at all, for users who prefer a fully offline package.
-#
-#   BOTH entry points must run elevated. PyAppify v1.2.7 builds the Tauri
-#   launcher with UAC disabled (src-tauri/build.rs: "const UAC: bool = false"),
-#   so an unpatched Monster-ww.exe runs pythonw at MEDIUM integrity while Wuthering
-#   Waves runs at HIGH. UIPI then blocks PostMessage with Win32 error 5
-#   ("Access is denied") and the script cannot click or press keys. Monster-ww.cmd
-#   already self-elevates via fltmc + RunAs; the "Require administrator for the
-#   updater launcher" step patches the extracted exe's RT_MANIFEST the same way.
+# Source obfuscation: every runtime module is Cython-compiled to .pyd; the
+# patch modules that install runtime monkeypatches stay as source because
+# Cython functions cannot bind self when assigned onto framework classes.
 
 name: Monster-ww Portable Release
 run-name: Monster-ww portable · ${{ inputs.version || format('auto run {0}', github.run_number) }}
@@ -54,33 +21,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag, e.g. v3.8.1 or v3.8.1-beta.1. Leave empty to auto-generate. PyAppify only accepts the newest release tag, so a version older than the newest existing one is automatically raised to the next major version.'
-        required: false
-        default: ''
-        type: string
-      package_format:
-        description: 'Archive format. 7z is the default: solid LZMA2 gives the smallest archive. With the slim release tag the package is ~205 MB (measured 205.6 MB), well under GitHub''s 2 GiB per-asset limit, so a single asset is published. Open 7z with 7-Zip or Windows 11 23H2+.'
-        required: true
-        default: '7z'
-        type: choice
-        options:
-          - 7z
-          - zip
-      launcher:
-        description: 'updater = ship PyAppify''s real launcher (incremental updates, configs/ preserved, needs network for updates). cmd-only = ship the offline icon-only wrapper around Monster-ww.cmd, no update logic.'
-        required: true
-        default: 'updater'
-        type: choice
-        options:
-          - updater
-          - cmd-only
-      update_repo:
-        description: 'UPDATE SOURCE: git URL the launcher pulls new versions from. Leave empty to use this fork (your own slim release tags). For another repository, enter a version tag manually in "version" and publish the SAME tag there first, with the same runtime-only files and a pyappify.yml whose git_url points back to that repo; the slim tag created here is only pushed to this repository.'
+        description: 'Version tag, e.g. v3.8.1. Leave empty to auto-generate the next patch version.'
         required: false
         default: ''
         type: string
       publish_release:
-        description: 'Also create a GitHub Release with the archive. When off, only the Actions artifact is uploaded.'
+        description: 'Also create a GitHub Release with the archive.'
         required: false
         default: true
         type: boolean
@@ -92,16 +38,15 @@ concurrency:
   group: monster-portable-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  PYTHONIOENCODING: 'utf-8'
+  PYTHONLEGACYWINDOWSSTDIO: 'utf-8'
+
 jobs:
   build:
     name: Build portable archive
-    runs-on: windows-latest
-    env:
-      # Injected into every git / libgit2 process in this job, including the
-      # repository PyAppify clones, so paths beyond MAX_PATH are accepted.
-      GIT_CONFIG_COUNT: '1'
-      GIT_CONFIG_KEY_0: 'core.longpaths'
-      GIT_CONFIG_VALUE_0: 'true'
+    runs-on: windows-2025
+    timeout-minutes: 45
     defaults:
       run:
         shell: pwsh
@@ -115,28 +60,6 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
 
-      - name: Enable Windows long paths for the packaging checkout
-        run: |
-          # PyAppify checks out the application repository with libgit2. Several
-          # templates_src/*.jpg names are ~170 characters; combined with the deep
-          # runner path (D:\a\<repo>\<repo>\pyappify_dist\Monster-ww\data\apps\
-          # Monster-ww\working\...) they exceed MAX_PATH (260) and libgit2 aborts
-          # the checkout with "path too long: ...; class=Filesystem (30)".
-          # libgit2 honours core.longpaths; the registry flag helps Win32 APIs
-          # that do not use the \\?\ prefix.
-          git config --global core.longpaths true
-          try {
-            New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' `
-              -Name 'LongPathsEnabled' -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
-            Write-Host 'Windows LongPathsEnabled registry flag set.'
-          } catch {
-            Write-Host "Could not set LongPathsEnabled (non-fatal): $($_.Exception.Message)"
-          }
-          $value = (& git config --get core.longpaths | Out-String).Trim()
-          $reg = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled
-          Write-Host "core.longpaths = $value ; HKLM LongPathsEnabled = $reg"
-          if ($value -ne 'true') { throw 'Failed to enable core.longpaths.' }
-
       - name: Check out source
         uses: actions/checkout@v4
         with:
@@ -149,18 +72,10 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           $tag = "$env:INPUT_VERSION".Trim()
-
-          # Versions follow SemVer starting at v1.0.0. Old upstream tags were
-          # purged when this project restarted its own release line; if any
-          # remain (hand-pushed tags), we still must stay newer than the newest
-          # because PyAppify rejects a --setup-version that is not among the
-          # newest release tags ("Setup version ... is no longer available").
           $maxMajor = 0; $maxMinor = 0; $maxPatch = 0
           $rawTags = (& git tag -l "v*" | Out-String).Trim()
           foreach ($existingTag in ($rawTags -split "`n")) {
             if ($existingTag.Trim() -match '^v?(\d+)\.(\d+)\.(\d+)$') {
-              # PowerShell variable names are case-insensitive: use distinct
-              # names for major/minor/patch.
               $curMajor = [int]$Matches[1]; $curMinor = [int]$Matches[2]; $curPatch = [int]$Matches[3]
               if (($curMajor -gt $maxMajor) -or
                   ($curMajor -eq $maxMajor -and $curMinor -gt $maxMinor) -or
@@ -169,98 +84,60 @@ jobs:
               }
             }
           }
-          Write-Host "Newest existing release tag: v$maxMajor.$maxMinor.$maxPatch"
-
           if ([string]::IsNullOrWhiteSpace($tag)) {
-            # Clean release line: first build is v1.0.0; subsequent builds bump
-            # the patch number (v1.0.1, v1.0.2, ...). No run-number padding.
-            if ($maxMajor -eq 0 -and $maxMinor -eq 0 -and $maxPatch -eq 0) {
-              $tag = 'v1.0.0'
-            } else {
-              $tag = "v$maxMajor.$maxMinor.$($maxPatch + 1)"
-            }
-            Write-Host "Auto-selected SemVer tag: $tag"
+            $tag = if ($maxMajor -eq 0 -and $maxMinor -eq 0 -and $maxPatch -eq 0) { 'v1.0.0' }
+                   else { "v$maxMajor.$maxMinor.$($maxPatch + 1)" }
           } elseif ($tag -match '^v?(\d+)\.(\d+)\.(\d+)((?:[-.](?:alpha|beta|rc)(?:\.\d+)?)?)$') {
             $inMajor = [int]$Matches[1]; $inMinor = [int]$Matches[2]; $inPatch = [int]$Matches[3]
             $suffix = $Matches[4]
             $newer = ($inMajor -gt $maxMajor) -or
                      ($inMajor -eq $maxMajor -and $inMinor -gt $maxMinor) -or
                      ($inMajor -eq $maxMajor -and $inMinor -eq $maxMinor -and $inPatch -gt $maxPatch)
-            if (-not $newer) {
-              $raised = "v$($maxMajor + 1).0.0$suffix"
-              Write-Host "Requested $tag is not newer than v$maxMajor.$maxMinor.$maxPatch; raised to $raised because PyAppify packages only the newest release tag."
-              $tag = $raised
-            }
+            if (-not $newer) { $tag = "v$($maxMajor + 1).0.0$suffix" }
           }
-
-          # Auto-generated / raised tags must not collide with an existing one.
           $used = @((& git tag -l | Out-String).Trim() -split "`n" | ForEach-Object { $_.Trim() })
           while ($used -contains $tag) {
             if ($tag -match '^v(\d+)\.(\d+)\.(\d+)(.*)$') {
-              $collMajor = [int]$Matches[1]; $collMinor = [int]$Matches[2]; $collPatch = [int]$Matches[3] + 1
-              $suf = $Matches[4]
-              $tag = "v$collMajor.$collMinor.$collPatch$suf"
+              $tag = "v$([int]$Matches[1]).$([int]$Matches[2]).$([int]$Matches[3] + 1)$($Matches[4])"
             } else { break }
           }
-
-          # Must match PyAppify's version-tag pattern: v?X.Y.Z[-(alpha|beta|rc)[.N]]
           if ($tag -notmatch '^v?\d+\.\d+\.\d+(?:[-.](?:alpha|beta|rc)(?:\.\d+)?)?$') {
-            throw "Version '$tag' is not a valid PyAppify version tag (use v1.2.3 or v1.2.3-beta.1)."
+            throw "Version '$tag' is not a valid version tag (use v1.2.3)."
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "number=$($tag -replace '^v', '')" >> $env:GITHUB_OUTPUT
+          "APP_VERSION=$tag" >> $env:GITHUB_ENV
           Write-Host "Packaging version tag: $tag"
 
-      # SOURCE OBFUSCATION: compile every runtime module to a native .pyd so the
-      # distributed package carries no readable application logic. The slim tag
-      # below ships the compiled modules instead of their .py sources. Python
-      # 3.12 must match pyappify.yml's requires_python (the .pyd ABI tag is
-      # cp312). identity.py, schedule_patch.py, adaptive_interval.py,
-      # team_overlay.py, click_jitter.py and __init__.py stay as source: runtime monkeypatches
-      # need real Python descriptors (Cython-compiled functions won't bind
-      # self), the latter enables package discovery. char_sources/ snapshots keep built-in
-      # character-code editing
-      # working without importable .py files.
-      - name: Set up Python 3.12 for native compilation
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install Cython build toolchain
-        run: |
-          python -m pip install --disable-pip-version-check "cython>=3" "setuptools>=77"
+      - name: Install build toolchain
+        run: python -m pip install --disable-pip-version-check "cython>=3" "setuptools>=77" "pyinstaller>=6"
 
       - name: Generate character source snapshots
         run: python .github/scripts/build_char_sources.py
 
       - name: Compile runtime sources to native extensions
-        # 121 modules were compiled one-by-one (~4.7 min). Parallel C++ builds
-        # cut this to ~1.5 min on the 4-core hosted runner.
         run: python setup.py build_ext --inplace --force --parallel 4
 
       - name: Verify compiled modules
-        shell: pwsh
         run: |
           $count = @(Get-ChildItem -Recurse -Filter '*.cp312-win_amd64.pyd' -ErrorAction SilentlyContinue).Count
           Write-Host "Compiled $count native modules."
-          if ($count -lt 100) { throw "Expected 100+ compiled modules, got $count. Compilation likely failed." }
+          if ($count -lt 100) { throw "Expected 100+ compiled modules, got $count." }
           if (-not (Test-Path 'src/task/BaseWWTask.cp312-win_amd64.pyd')) { throw 'BaseWWTask.pyd missing.' }
           if (-not (Test-Path 'config.cp312-win_amd64.pyd')) { throw 'config.pyd missing.' }
           if (-not (Test-Path 'build/char_sources/BaseChar.py')) { throw 'char_sources snapshot missing.' }
 
-      # Run the existing unittest suite against the freshly compiled modules.
-      # With .py and .pyd side by side, Python prefers the .pyd extension, so
-      # these tests exercise the actual obfuscated artifacts. This is the gate
-      # that catches stale imports (e.g. a leftover `from ok ...`) that would
-      # otherwise only surface on a real user's first launch.
-      - name: Install runtime dependencies for tests
+      - name: Install runtime dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Run tests against compiled modules
         timeout-minutes: 20
         env:
-          PYTHONIOENCODING: 'utf-8'
-          PYTHONLEGACYWINDOWSSTDIO: 'utf-8'
           QT_QPA_PLATFORM: 'offscreen'
           GITHUB_TOKEN: ''
           GH_TOKEN: ''
@@ -268,734 +145,114 @@ jobs:
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
         run: ./run_tests.ps1
 
-      # See the "SLIM RELEASE TAG" note at the top of this file. PyAppify ships
-      # the release tag twice (git objects + working checkout), so publishing a
-      # tag with the full master tree doubles 894 MB of screenshots into the
-      # archive. This step publishes a runtime-only tree instead.
-      - name: Create slim release tag (runtime files only)
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
+      - name: Strip Python sources from the build tree
         run: |
-          $tag = "$env:TAG".Trim()
-          & git fetch origin --tags --force
-          if ($LASTEXITCODE -ne 0) { throw 'git fetch --tags failed.' }
+          $stripped = 0
+          Get-ChildItem -Recurse -Filter '*.py' src | Where-Object {
+            $_.Name -notin @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py') -and
+            (Test-Path ($_.FullName -replace '\.py$', '.cp312-win_amd64.pyd'))
+          } | ForEach-Object { Remove-Item $_.FullName; $stripped++ }
+          if (Test-Path config.py) { Remove-Item config.py; $stripped++ }
+          if ($stripped -lt 100) { throw "Expected to strip 100+ sources, stripped $stripped" }
+          "Stripped $stripped source files; the package ships compiled modules only."
 
-          # Rerunning a build may find the tag already published. Reuse it only
-          # when it is one of OUR slim tags; a tag pointing at a full master
-          # commit would put the 1.1 GB screenshot tree back into the package.
-          $reuse = $false
-          $existing = (& git tag -l $tag | Out-String).Trim()
-          if ($existing -eq $tag) {
-            $tagged = (& git rev-parse "$tag^{commit}" | Out-String).Trim()
-            $isSlim = $true
-            foreach ($dir in @('templates_src', 'tests')) {
-              $present = (& git ls-tree --name-only $tagged -- $dir | Out-String).Trim()
-              if ($present) { $isSlim = $false }
-            }
-            if (-not $isSlim) {
-              throw "Tag $tag already exists on a full commit $tagged. Use a newer version or leave version empty."
-            }
-            Write-Host "Reusing existing slim tag $tag -> $tagged."
-            $reuse = $true
-          }
+      - name: Build portable app with PyInstaller
+        run: python -m PyInstaller --noconfirm Monster-ww.spec
 
-          if (-not $reuse) {
-            # A separate index keeps the real index/working tree untouched:
-            # pyappify-action reads pyappify.yml and icons/ from this checkout.
-            $slimIndex = Join-Path (Get-Location) '.git/slim-release-index'
-            Remove-Item -LiteralPath $slimIndex -Force -ErrorAction SilentlyContinue
-            $env:GIT_INDEX_FILE = $slimIndex
-            try {
-              & git read-tree HEAD
-              if ($LASTEXITCODE -ne 0) { throw 'git read-tree HEAD failed.' }
-
-              # Development-only trees. deploy.txt lists the runtime paths;
-              # src/ and config.py only ever load assets/, icons/, i18n/,
-              # workshop_bundle/, readme/ and the root python files.
-              $drop = @('templates_src', 'tests', 'docs', 'tools', '.github', '.agents', '.codex')
-              foreach ($dir in $drop) {
-                & git rm -r --cached -q --ignore-unmatch -- $dir
-                if ($LASTEXITCODE -ne 0) { throw "Removing $dir from the slim tree failed." }
-              }
-
-              # SOURCE OBFUSCATION: replace every compiled .py with its .pyd in
-              # the release tree, and drop the readable source from the index.
-              # identity.py / schedule_patch.py / adaptive_interval.py /
-              # team_overlay.py / click_jitter.py / __init__.py / main.py are
-              # intentionally kept as source (see the compile step above for why).
-              $keepSource = @('identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py', '__init__.py')
-              $stripped = 0
-              $pyFiles = @(Get-ChildItem -Recurse -Filter '*.py' -Path src -ErrorAction SilentlyContinue)
-              foreach ($file in $pyFiles) {
-                if ($keepSource -contains $file.Name) { continue }
-                $pyd = [System.IO.Path]::ChangeExtension($file.FullName, '.cp312-win_amd64.pyd')
-                if (-not (Test-Path -LiteralPath $pyd)) {
-                  throw "No compiled module for $($file.FullName); refusing to ship an uncompiled source."
-                }
-                $rel = $file.FullName.Substring((Get-Location).Path.Length + 1).Replace('\', '/')
-                & git rm --cached -q --ignore-unmatch -- $rel
-                if ($LASTEXITCODE -ne 0) { throw "Stripping source $rel from slim tree failed." }
-                $stripped++
-              }
-              if (Test-Path 'config.py') {
-                & git rm --cached -q --ignore-unmatch -- config.py
-                $stripped++
-              }
-              Write-Host "Stripped $stripped readable sources from the slim tree."
-
-              # Stage all compiled native modules (forced past .gitignore).
-              $pydFiles = @(Get-ChildItem -Recurse -Filter '*.cp312-win_amd64.pyd' -ErrorAction SilentlyContinue)
-              foreach ($file in $pydFiles) {
-                $rel = $file.FullName.Substring((Get-Location).Path.Length + 1).Replace('\', '/')
-                & git add -f -- $rel
-                if ($LASTEXITCODE -ne 0) { throw "Staging compiled module $rel failed." }
-              }
-
-              # Stage character-source snapshots at the tree root so
-              # src/char/_char_sources.py can find them after .py stripping.
-              $snapshotStaging = Join-Path (Get-Location) 'char_sources'
-              if (Test-Path -LiteralPath $snapshotStaging) { Remove-Item -LiteralPath $snapshotStaging -Recurse -Force }
-              Copy-Item -LiteralPath 'build/char_sources' -Destination $snapshotStaging -Recurse -Force
-              try {
-                & git add -f -- char_sources
-                if ($LASTEXITCODE -ne 0) { throw 'Staging char_sources snapshot failed.' }
-                $tree = (& git write-tree | Out-String).Trim()
-              } finally {
-                Remove-Item -LiteralPath $snapshotStaging -Recurse -Force -ErrorAction SilentlyContinue
-              }
-              if ($tree -notmatch '^[0-9a-f]{40}$') { throw "git write-tree failed: '$tree'." }
-
-              $mustHave = @(
-                'main.py', 'config.cp312-win_amd64.pyd', 'requirements.txt', 'pyappify.yml', 'deploy.txt',
-                'src/identity.py', 'src/gui/CharacterCodeTab.cp312-win_amd64.pyd',
-                'char_sources/BaseChar.py',
-                'assets/echo_model/echo.onnx', 'assets/coco_annotations.json',
-                'assets/char_heads/Verina.png',
-                'icons/icon.png', 'i18n/zh_CN/LC_MESSAGES/ok.mo',
-                'workshop_bundle/teams.json'
-              )
-              foreach ($path in $mustHave) {
-                & git cat-file -e "${tree}:$path"
-                if ($LASTEXITCODE -ne 0) { throw "Slim tree is missing runtime file $path." }
-              }
-
-              $total = [long]0
-              $count = 0
-              foreach ($line in (& git ls-tree -r --long $tree)) {
-                $match = [regex]::Match($line, '^\d+ \w+ [0-9a-f]+\s+(\d+)\t')
-                if ($match.Success) {
-                  $total += [long]$match.Groups[1].Value
-                  $count++
-                }
-              }
-              Write-Host ("Slim tree {0}: {1} files, {2} MB" -f $tree, $count, [math]::Round($total / 1MB, 2))
-              if ($total -gt 100MB) {
-                throw "Slim tree is $total bytes, expected < 100 MB. A large file leaked into the release tag."
-              }
-            } finally {
-              Remove-Item Env:\GIT_INDEX_FILE -ErrorAction SilentlyContinue
-              Remove-Item -LiteralPath $slimIndex -Force -ErrorAction SilentlyContinue
-            }
-
-            # Every release extends the SLIM history. If the parent were the
-            # master commit, PyAppify's depth-100 shallow fetch would drag the
-            # 894 MB screenshot tree back into repo/objects.
-            $parent = ''
-            $remoteBranch = (& git ls-remote --heads origin portable | Out-String).Trim()
-            if ($LASTEXITCODE -ne 0) { throw 'git ls-remote for the portable branch failed.' }
-            if ($remoteBranch) {
-              & git fetch --no-tags origin 'refs/heads/portable:refs/remotes/origin/portable'
-              if ($LASTEXITCODE -ne 0) { throw 'Fetching the portable branch failed.' }
-              $parent = (& git rev-parse 'refs/remotes/origin/portable' | Out-String).Trim()
-              if ($parent -notmatch '^[0-9a-f]{40}$') { throw "Invalid portable branch head: '$parent'." }
-              Write-Host "Previous slim release: $parent"
-            } else {
-              Write-Host 'First slim release: creating an orphan commit.'
-            }
-
-            $message = "Monster-ww portable release $tag (runtime files only)"
-            if ($parent) {
-              $commit = (& git commit-tree $tree -p $parent -m $message | Out-String).Trim()
-            } else {
-              $commit = (& git commit-tree $tree -m $message | Out-String).Trim()
-            }
-            if ($commit -notmatch '^[0-9a-f]{40}$') { throw "git commit-tree failed: '$commit'." }
-
-            # Push the commit first so the tag always points at a reachable
-            # object, then tag that exact commit.
-            & git push origin ("{0}:refs/heads/portable" -f $commit)
-            if ($LASTEXITCODE -ne 0) { throw 'Publishing the slim release commit failed.' }
-            & git tag -a $tag $commit -m "Monster-ww portable release $tag"
-            if ($LASTEXITCODE -ne 0) { throw 'git tag failed.' }
-            & git push origin ("refs/tags/{0}" -f $tag)
-            if ($LASTEXITCODE -ne 0) { throw 'git push tag failed.' }
-            Write-Host "Created and pushed slim tag $tag -> $commit."
-          }
-
-      - name: Validate custom update repository
-        if: ${{ inputs.update_repo != '' }}
-        env:
-          CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
-          TAG: ${{ steps.version.outputs.tag }}
+      - name: Verify executable metadata
         run: |
-          # PyAppify clones git_url during setup and checks out --setup-version.
-          # A custom update source therefore has to carry the build tag before
-          # packaging starts; otherwise the build fails 20 minutes later with
-          # "Setup version ... is no longer available".
-          $url = "$env:CUSTOM_UPDATE_REPO".Trim()
-          if ($url -notmatch '^https://') { throw "update_repo must be an https git URL, got '$url'." }
-          $found = (& git ls-remote --tags $url "refs/tags/$env:TAG" | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0) { throw "Cannot read tags from custom update repo $url." }
-          if (-not $found) {
-            throw "Custom update repo $url has no tag $env:TAG. Publish the SAME slim tag there first (main.py, config.py, src/, assets/, icons/, i18n/, requirements.txt, pyappify.yml, ... but no templates_src/ or tests/), or leave update_repo empty to use this fork's slim tag."
-          }
-          Write-Host "Custom update repo $url already carries tag $env:TAG."
+          $exe = 'dist/Monster-ww/Monster-ww.exe'
+          if (-not (Test-Path $exe)) { throw "Executable missing: $exe" }
+          $identity = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $exe))
+          Write-Host "ProductName=$($identity.ProductName) FileDescription=$($identity.FileDescription) ProductVersion=$($identity.ProductVersion)"
+          if ($identity.ProductName -ne 'Monster-ww') { throw "ProductName mismatch: $($identity.ProductName)" }
+          if ($identity.FileDescription -ne 'Monster-ww') { throw "FileDescription mismatch: $($identity.FileDescription)" }
 
-      - name: Write portable-only PyAppify config
-        env:
-          APP_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
+      - name: Verify packaged tree has no readable business source
         run: |
-          # git_url is the UPDATE SOURCE. By default it is this fork: the tag
-          # created above is one of OUR OWN slim release tags, so the launcher
-          # never talks to upstream update repositories. keep_releases: 1
-          # makes both the bundled clone and later fetches shallow, so an update
-          # transfers only the new tag's changed objects, not the Python env.
-          # The checkout of that slim tag is what lands in working/, so the
-          # archive contains no templates_src/, tests/ or build sources.
-          $repoUrl = $env:APP_REPO_URL
-          if (-not [string]::IsNullOrWhiteSpace($env:CUSTOM_UPDATE_REPO)) {
-            $repoUrl = "$env:CUSTOM_UPDATE_REPO".Trim()
+          $leaks = Get-ChildItem -Recurse -Filter '*.py' dist/Monster-ww/src | Where-Object {
+            $_.Name -notin @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py')
           }
-          Write-Host "Launcher update source (git_url): $repoUrl"
+          if ($leaks) { $leaks | ForEach-Object { Write-Host "LEAK: $($_.FullName)" }; throw 'Readable business source leaked into package.' }
+          $required = @('dist/Monster-ww/Monster-ww.exe', 'dist/Monster-ww/src/identity.py',
+                        'dist/Monster-ww/workshop_bundle/teams.json', 'dist/Monster-ww/build/version.txt')
+          foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing required file: $f" } }
 
-          # Keep the profile values identical to the committed pyappify.yml.
-          # At the end of setup PyAppify reloads the CHECKED-OUT repository's
-          # pyappify.yml (the one from git_url) and uses its profiles to sync
-          # tags. Both copies must point at the same update source, or the build
-          # tag gets pruned and setup dies with "Setup version ... is no longer
-          # available". That is why upstream's update repos were replaced here.
-          $lines = @(
-            'name: "Monster-ww"'
-            'icon: "icons/icon.png"'
-            # Only the build tag's history is bundled. Without this the archive
-            # carried 1000+ inherited tags (~2.6 GB) and exceeded GitHub's
-            # 2 GiB Release asset limit.
-            'keep_releases: 1'
-            'profiles:'
-            '  - name: "Portable"'
-            ('    git_url: "' + $repoUrl + '"')
-            '    admin: true'
-            '    main_script: "main.py"'
-            '    requires_python: "3.12"'
-            '    requirements: "requirements.txt"'
-            '    use_pythonw: true'
-            '    pip_args: "--no-deps"'
-          )
-          $target = Join-Path (Get-Location) 'pyappify.yml'
-          [System.IO.File]::WriteAllLines($target, $lines, (New-Object System.Text.UTF8Encoding($false)))
-          Get-Content $target
-
-      # cmd-only mode: package_zip ships Monster-ww.cmd instead of PyAppify's
-      # Tauri launcher. A .cmd has no icon and cannot be pinned nicely, so
-      # compile a tiny Win32 GUI wrapper that only invokes Monster-ww.cmd. It has
-      # no update/network logic. Compile before packaging: it only needs tracked
-      # assets, so a compiler problem fails fast instead of after a 20 min build.
-      # updater mode skips this and uses the real launcher extracted later.
-      - name: Build offline icon-only Monster-ww.exe wrapper
-        if: ${{ inputs.launcher == 'cmd-only' }}
-        run: |
-          $compiler = @(
-            (Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe')
-            (Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe')
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $compiler) { throw 'The .NET Framework C# compiler is not available on this runner.' }
-          $source = Join-Path (Get-Location) '.github/scripts/MonsterLauncher.cs'
-          $manifest = Join-Path (Get-Location) '.github/scripts/MonsterLauncher.manifest.xml'
-          $icon = Join-Path (Get-Location) 'icons/launcher.ico'
-          foreach ($asset in @($source, $manifest, $icon)) {
-            if (-not (Test-Path $asset)) { throw "Launcher asset missing: $asset" }
-          }
-          $outDir = Join-Path (Get-Location) 'launcher'
-          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-          $out = Join-Path $outDir 'Monster-ww.exe'
-          & $compiler /nologo /target:winexe /optimize+ "/out:$out" "/win32icon:$icon" "/win32manifest:$manifest" $source
-          if ($LASTEXITCODE -ne 0) { throw "Compiling Monster-ww.exe failed (exit $LASTEXITCODE)." }
-          if (-not (Test-Path $out)) { throw 'Compiler reported success but Monster-ww.exe is missing.' }
-          Write-Host ("Built {0} ({1} bytes)" -f $out, (Get-Item -LiteralPath $out).Length)
-
-      - name: Build portable archive (no installers, no online setup)
-        id: package
-        uses: ok-oldking/pyappify-action@69bf7ae364e8c7f0606f34df86d432168a46f4bf
-        with:
-          version: v1.2.7
-          build_setup: false
-          package_zip: true
-          package_zip_format: ${{ inputs.package_format }}
-          add_version_name: true
-          app_version: ${{ steps.version.outputs.tag }}
-
-      # PyAppify streams pip output into its own emitter instead of the job log,
-      # so a failed "setup" only reports "exit code 1". Surface the real error.
-      - name: Diagnose PyAppify setup failure
-        if: failure()
-        run: |
-          Write-Host '=== PyAppify / launcher logs ==='
-          Get-ChildItem -Path pyappify_dist -Recurse -File -Filter *.log -ErrorAction SilentlyContinue |
-            ForEach-Object {
-              Write-Host "--- $($_.FullName) ---"
-              Get-Content -LiteralPath $_.FullName -Tail 60 -ErrorAction SilentlyContinue
-            }
-          $py = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/python/python.exe'
-          $req = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/working/requirements.txt'
-          Write-Host "bundled python exists: $(Test-Path $py)"
-          Write-Host "bundled requirements exists: $(Test-Path $req)"
-          if ((Test-Path $py) -and (Test-Path $req)) {
-            Write-Host '=== Rerun the exact setup pip command with visible output ==='
-            & $py -m pip install --no-warn-script-location --no-deps -r $req 2>&1 |
-              ForEach-Object { Write-Host $_ }
-            Write-Host "pip exit code: $LASTEXITCODE"
-          }
-
-      # updater mode: pyappify-action always emits a launcher-only zip alongside
-      # the package. Extract the REAL Tauri launcher and stage it at the same
-      # path the wrapper uses, so the embed step below is mode-agnostic. This
-      # exe is the "startup + update program" from the original project: it
-      # reads data/apps/Monster-ww/app.json, fetches new tags from git_url and
-      # checks them out into working/, keeping configs/ and the Python env.
-      - name: Extract PyAppify updater launcher
-        if: ${{ inputs.launcher == 'updater' }}
-        run: |
-          $zip = Join-Path (Get-Location) 'pyappify_dist/Monster-ww-win32.zip'
-          if (-not (Test-Path $zip)) {
-            Write-Host 'pyappify_dist contents:'
-            Get-ChildItem -Path pyappify_dist -File | ForEach-Object { Write-Host $_.Name }
-            throw "Launcher-only zip $zip was not produced by pyappify-action."
-          }
-          $extract = Join-Path (Get-Location) 'launcher_extract'
-          New-Item -ItemType Directory -Path $extract -Force | Out-Null
-          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
-          $exe = Join-Path $extract 'Monster-ww/Monster-ww.exe'
-          if (-not (Test-Path $exe)) { throw "Monster-ww/Monster-ww.exe not found inside $zip." }
-          $size = (Get-Item -LiteralPath $exe).Length
-          # The offline icon-only wrapper is ~100 KB; the Tauri launcher is MBs.
-          if ($size -lt 1MB) { throw "Extracted launcher is only $size bytes; expected PyAppify's Tauri binary." }
-          $outDir = Join-Path (Get-Location) 'launcher'
-          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-          Copy-Item -LiteralPath $exe -Destination (Join-Path $outDir 'Monster-ww.exe') -Force
-          Write-Host ("Using PyAppify updater launcher ({0} bytes)" -f $size)
-
-      # PyAppify's embedded manifest has no trustInfo, i.e. asInvoker. Launching
-      # Monster-ww.exe directly then leaves pythonw at MEDIUM integrity and every
-      # PostMessage to the elevated game window fails with Win32 error 5 (UIPI).
-      # Patch RT_MANIFEST/1 so double-clicking the launcher requests elevation
-      # once, and the whole process tree (launcher -> pythonw) is HIGH.
-      - name: Require administrator for the updater launcher
-        if: ${{ inputs.launcher == 'updater' }}
-        run: |
-          $script = Join-Path (Get-Location) '.github/scripts/patch_launcher_manifest.py'
-          $manifest = Join-Path (Get-Location) '.github/scripts/MonsterUpdater.manifest.xml'
-          foreach ($asset in @($script, $manifest)) {
-            if (-not (Test-Path $asset)) { throw "Launcher asset missing: $asset" }
-          }
-          $exe = Join-Path (Get-Location) 'launcher/Monster-ww.exe'
-          if (-not (Test-Path $exe)) { throw 'Extracted updater launcher is missing.' }
-          # ctypes calls the Win32 resource-update APIs directly; no compiler
-          # is needed. The runner has python on PATH, and the Python that
-          # pyappify-action just bundled is a guaranteed fallback.
-          $py = (Get-Command python -ErrorAction SilentlyContinue).Source
-          if (-not $py) {
-            $py = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/python/python.exe'
-          }
-          if (-not $py -or -not (Test-Path $py)) { throw 'No Python interpreter is available to patch the launcher manifest.' }
-          & $py $script $exe $manifest
-          if ($LASTEXITCODE -ne 0) { throw "Patching the launcher manifest failed (exit $LASTEXITCODE)." }
-          Write-Host ("Patched launcher requires administrator ({0} bytes)" -f (Get-Item -LiteralPath $exe).Length)
-
-      # Whichever mode was selected, launcher/Monster-ww.exe now holds the binary
-      # to place next to Monster-ww.cmd inside Monster-ww/.
-      - name: Embed Monster-ww.exe in the portable archive
-        env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
-        run: |
-          $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
-          if (-not $seven) {
-            $fallback = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
-            if (Test-Path $fallback) { $seven = $fallback }
-          }
-          if (-not $seven) { throw '7-Zip is not available on this runner.' }
-          $archive = @(Get-ChildItem -Path pyappify_dist -Filter "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT" -File)
-          if ($archive.Count -ne 1) { throw "Expected one portable archive, found $($archive.Count)." }
-          $exe = Join-Path (Get-Location) 'launcher/Monster-ww.exe'
-          if (-not (Test-Path $exe)) { throw 'Compiled Monster-ww.exe is missing.' }
-
-          # 7z stores whatever relative path it is given, so stage the exe at
-          # Monster-ww/Monster-ww.exe to match Monster-ww/Monster-ww.cmd inside the archive.
-          $stage = Join-Path (Get-Location) 'launcher_stage/Monster-ww'
-          New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'Monster-ww.exe') -Force
-          $root = Join-Path (Get-Location) 'launcher_stage'
-          $target = $archive[0].FullName
-          Push-Location $root
-          try {
-            & $seven a "-t$env:PACKAGE_FORMAT" -y $target 'Monster-ww/Monster-ww.exe'
-            if ($LASTEXITCODE -ne 0) { throw "Adding Monster-ww.exe to the archive failed (exit $LASTEXITCODE)." }
-          } finally { Pop-Location }
-          $listing = (& $seven l $target | Out-String)
-          if ($listing -notmatch 'Monster-ww\\Monster-ww\.exe' -or $listing -notmatch 'Monster-ww\\Monster-ww\.cmd') {
-            throw 'The archive must contain both Monster-ww.exe and Monster-ww.cmd.'
-          }
-          Write-Host "Embedded Monster-ww.exe next to Monster-ww.cmd in $($archive[0].Name)."
-
-      # Acceptance check for the slim release tag. pyappify-action DELETES
-      # pyappify_dist/<App>/data after creating the archive (index.js removes
-      # appDistDir at the end of the profile loop), so the checkout can no
-      # longer be inspected on disk here: verify the ARCHIVE's file list instead.
-      - name: Verify the packaged working tree is slim
-        env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
-        run: |
-          $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
-          if (-not $seven) {
-            $fallback = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
-            if (Test-Path $fallback) { $seven = $fallback }
-          }
-          if (-not $seven) { throw '7-Zip is not available on this runner.' }
-          $archives = @(Get-ChildItem -Path pyappify_dist -Filter "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT" -File)
-          if ($archives.Count -ne 1) { throw "Expected one portable archive, found $($archives.Count)." }
-          $archive = $archives[0]
-          $listing = (& $seven l $archive.FullName | Out-String)
-          if ($LASTEXITCODE -ne 0) { throw "7z l failed for $($archive.Name)." }
-
-          $prefix = 'Monster-ww\data\apps\Monster-ww\working\'
-          $heavy = @('templates_src', 'tests', 'docs', 'tools', '.github', '.agents', '.codex')
-          $leaked = @($heavy | Where-Object {
-            $listing -match [regex]::Escape($prefix + $_ + '\')
-          })
-          if ($leaked.Count -gt 0) {
-            throw "The portable archive still contains development-only directories: $($leaked -join ', '). The release tag is not slim."
-          }
-          $required = @(
-            'main.py', 'config.cp312-win_amd64.pyd', 'requirements.txt', 'pyappify.yml',
-            'assets\echo_model\echo.onnx', 'icons\icon.png', 'src\identity.py',
-            'src\schedule_patch.py', 'src\adaptive_interval.py', 'src\team_overlay.py',
-            'src\click_jitter.py',
-            'src\task\BaseWWTask.cp312-win_amd64.pyd', 'char_sources\BaseChar.py',
-            'workshop_bundle\teams.json'
-          )
-          # Obfuscation check: no readable application module may ship under
-          # working\src\ (except identity.py / schedule_patch.py /
-          # adaptive_interval.py / team_overlay.py / click_jitter.py /
-          # __init__.py, kept as source by design because they monkeypatch
-          # framework classes).
-          # Root entry scripts and char_sources/ are intentionally readable and
-          # are not part of this check.
-          $srcPrefix = $prefix + 'src\'
-          $sourceLeak = @($listing -split "`n" | Where-Object {
-            $_ -match [regex]::Escape($srcPrefix) -and $_ -match '\.py\s*$' -and
-            $_ -notmatch '\\identity\.py\s*$' -and $_ -notmatch '\\schedule_patch\.py\s*$' -and
-            $_ -notmatch '\\adaptive_interval\.py\s*$' -and $_ -notmatch '\\team_overlay\.py\s*$' -and
-            $_ -notmatch '\\click_jitter\.py\s*$' -and $_ -notmatch '\\__init__\.py\s*$'
-          })
-          if ($sourceLeak.Count -gt 0) {
-            throw "Readable app modules leaked into the obfuscated build: $($sourceLeak[0])."
-          }
-          $missing = @($required | Where-Object {
-            $listing -notmatch [regex]::Escape($prefix + $_)
-          })
-          if ($missing.Count -gt 0) {
-            throw "The portable archive is missing runtime files: $($missing -join ', ')."
-          }
-
-          $sizeMB = [math]::Round($archive.Length / 1MB, 1)
-          Write-Host "Portable archive: $($archive.Name) = $sizeMB MB"
-          Write-Host 'Slim release tag verified: no development-only directories, all runtime entry points present.'
-          if ($archive.Length -gt 800MB) {
-            throw "Portable archive is $sizeMB MB, far above the ~205 MB (measured 205.6 MB) expected from a slim release tag."
-          }
-
-      # Smoke-test the actual packaged artifact: extract the archive and start
-      # it with the bundled Python on an isolated PATH. Catches obfuscation
-      # defects (bad imports compiled into .pyd) that only surface at runtime.
       - name: Smoke-test packaged app
+        # GitHub-hosted runners already run elevated, so the requireAdministrator
+        # manifest does not trigger an interactive UAC prompt here. Limit PATH
+        # to the packaged tree so developer-installed DLLs cannot mask a
+        # missing-bundle bug (same trick xjtu uses), and force offscreen Qt.
         env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
+          QT_QPA_PLATFORM: 'offscreen'
         run: |
-          $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
-          if (-not $seven) {
-            $fallback = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
-            if (Test-Path $fallback) { $seven = $fallback }
+          $exe = (Resolve-Path 'dist/Monster-ww/Monster-ww.exe').Path
+          $stdout = Join-Path (Get-Location) 'smoke-stdout.log'
+          $stderr = Join-Path (Get-Location) 'smoke-stderr.log'
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          Start-Sleep -Seconds 20
+          $proc.Refresh()
+          if ($proc.HasExited) {
+            Get-Content $stderr -Tail 40
+            throw "Packaged app exited early with code $($proc.ExitCode)"
           }
-          if (-not $seven) { throw '7-Zip is not available on this runner.' }
-          $archive = @(Get-ChildItem -Path pyappify_dist -Filter "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT" -File)[0]
-          if (-not $archive) { throw 'Portable archive not found for smoke test.' }
-          $extract = Join-Path (Get-Location) 'build/smoke-extract'
-          if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
-          New-Item -ItemType Directory -Path $extract -Force | Out-Null
-          & $seven x $archive.FullName "-o$extract" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "Failed to extract archive for smoke test." }
-          $root = Join-Path $extract 'Monster-ww'
-          if (-not (Test-Path -LiteralPath $root)) { throw "Archive has no Monster-ww/ root at $root." }
-          Write-Host "Smoke-testing packaged tree: $root"
-          & ./.github/scripts/test_portable.ps1 -PackageRoot $root -TimeoutSeconds 90
-          if ($LASTEXITCODE -ne 0) { throw 'Portable smoke test failed.' }
+          $err = if (Test-Path $stderr) { Get-Content $stderr -Raw } else { '' }
+          if ($err -match 'Traceback \(most recent call last\)|ModuleNotFoundError|ImportError') {
+            Get-Content $stderr -Tail 40
+            throw 'Packaged app raised a startup traceback.'
+          }
+          Stop-Process -Id $proc.Id -Force
+          Write-Host "Packaged app started successfully (pid $($proc.Id))."
 
-      # Cheap post-mortem helper: shows which tags libgit2 kept in the bare
-      # repository it cloned, useful when PyAppify rejects a setup version.
-      # NOTE: pyappify-action deletes the staged data/ folder after packaging,
-      # so on a SUCCESSFUL build this prints "Packaged repository not found";
-      # it is only informative when the build stopped before that cleanup.
-      - name: Diagnose packaged repository tags
-        if: always()
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
+      - name: Package portable archive
         run: |
-          $repo = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/repo'
-          if (Test-Path $repo) {
-            try {
-              $remoteUrl = (& git "--git-dir=$repo" remote get-url origin 2>$null | Out-String).Trim()
-              Write-Host "Packaged repo origin: $remoteUrl"
-              $all = (& git "--git-dir=$repo" tag -l 2>$null | Out-String).Trim()
-              $list = @($all -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-              Write-Host "Packaged repo tag count: $($list.Count)"
-              Write-Host "Contains build tag $env:TAG : $($list -contains $env:TAG)"
-              Write-Host "First tags: $(($list | Select-Object -First 8) -join ', ')"
-            } catch {
-              Write-Host "Tag diagnosis unavailable: $($_.Exception.Message)"
-            }
-          } else {
-            Write-Host 'Packaged repository not found (build step did not reach checkout).'
+          $metadata = [ordered]@{
+            version = $env:APP_VERSION
+            commit = $env:GITHUB_SHA
+            run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            python = (python --version)
           }
-
-      - name: Collect portable archives only
-        id: collect
-        env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
-          VERSION_TAG: ${{ steps.version.outputs.tag }}
-          LAUNCHER_MODE: ${{ inputs.launcher }}
-          APP_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
-        run: |
-          New-Item -ItemType Directory -Path release_assets -Force | Out-Null
-          $pattern = "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT"
-          $files = @(Get-ChildItem -Path pyappify_dist -Filter $pattern -File)
-          if ($files.Count -eq 0) {
-            Write-Host 'pyappify_dist contents:'
-            Get-ChildItem -Path pyappify_dist -Recurse -File | ForEach-Object { Write-Host $_.FullName }
-            throw "No portable archive matching '$pattern' was produced."
-          }
-          foreach ($file in $files) {
-            Copy-Item -LiteralPath $file.FullName -Destination release_assets -Force
-          }
-
-          # Enforce the "archive only" contract: no exe, no setup/installer.
-          $unexpected = @(Get-ChildItem -Path release_assets -File | Where-Object {
-            $_.Extension -notin @('.zip', '.7z') -or $_.Name -match '(?i)setup|installer'
-          })
-          if ($unexpected.Count -gt 0) {
-            throw "Unexpected non-portable artifacts: $($unexpected.Name -join ', ')"
-          }
-
-          $first = Join-Path release_assets $files[0].Name
-          $hash = (Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash
-          $sizeMB = [math]::Round($files[0].Length / 1MB, 1)
-          $largest = ($files | Measure-Object -Property Length -Maximum).Maximum
-          # A GitHub Release asset must be strictly smaller than 2 GiB
-          # (2147483648 bytes). Uploading a larger file fails the whole job
-          # even though the Actions artifact uploads fine, so skip the release
-          # step instead of marking an otherwise successful build as failed.
-          $releaseLimit = 2147483648
-          $releaseReady = if ($largest -lt $releaseLimit) { 'true' } else { 'false' }
-          "sha256=$hash" >> $env:GITHUB_OUTPUT
-          "release_ready=$releaseReady" >> $env:GITHUB_OUTPUT
-          "largest_bytes=$largest" >> $env:GITHUB_OUTPUT
-
-          $repoUrl = $env:APP_REPO_URL
-          if (-not [string]::IsNullOrWhiteSpace($env:CUSTOM_UPDATE_REPO)) {
-            $repoUrl = "$env:CUSTOM_UPDATE_REPO".Trim()
-          }
-
-          # Keep this script pure ASCII: GitHub writes pwsh scripts as UTF-8
-          # without a BOM, and Windows PowerShell 5.1 would otherwise decode
-          # non-ASCII text as the local ANSI codepage. The Chinese release
-          # notes live in YAML below, where GitHub handles the encoding.
-          if ($env:LAUNCHER_MODE -eq 'updater') {
-            $launcherSummary = @(
-              ''
-              'Launcher: PyAppify Tauri updater (Monster-ww/Monster-ww.exe).'
-              "Update source (pyappify.yml git_url): $repoUrl"
-              'Updates fetch only the new slim tag''s changed git objects into data/apps/Monster-ww/working; the Python env, pip packages and configs/ are not tracked there and survive intact.'
-              'The release tag carries runtime files only (no templates_src/, tests/, docs/ or build sources), which keeps both the bundled git database and the checkout small.'
-              'The first download is the full archive; later updates transfer only changed source files.'
-              'Monster-ww/Monster-ww.cmd remains available for command-line or fully offline starts (it sets PYAPPIFY_UPGRADEABLE=0).'
-            )
-          } else {
-            $launcherSummary = @(
-              ''
-              'Launcher: offline icon-only wrapper around Monster-ww.cmd, no update or network logic.'
-              'Re-run this workflow with launcher=updater to get incremental updates.'
-            )
-          }
-
-          $summary = @(
-            "## Monster-ww portable package ($env:LAUNCHER_MODE)"
-            ''
-            "- Archive: $($files[0].Name) ($sizeMB MB)"
-            "- SHA256: $hash"
-            "- Version tag: $env:VERSION_TAG"
-            "- Update source: $repoUrl"
-            ''
-            'Only the portable archive is published; PyAppify''s launcher-only zip, hash file and any installer are discarded.'
-            'Extract (7z needs 7-Zip or Windows 11 23H2+) and double-click Monster-ww/Monster-ww.exe; Monster-ww/Monster-ww.cmd remains available for command-line arguments.'
-            'The team workshop is fully offline: 49 teams / 69 configurations ship in workshop_bundle/, so no CDN access is needed.'
-            'Custom scripts use the canonical ok_tasks/ and ok_import/ folders; legacy Monster-ww_scripts/ and Monster-ww_drop/ are migrated on first start (a conflicting file aborts startup instead of being overwritten). Runtime logs use Monster-ww-runtime.log.'
-            'The bundled framework is Mon-script 3.0.5b8-mon1 (upstream v3.8.1: CLI -t/-e tasks and smoother dropdowns / task filtering).'
-            'Both entry points request administrator rights. The game runs elevated, so a non-elevated script gets Win32 error 5 (Access is denied) on every PostMessage and cannot click or press keys.'
-            'Slim release tag: templates_src/, tests/, docs/ and build tooling are excluded, so the archive is ~205 MB (measured 205.6 MB) instead of 2.2 GiB while still supporting incremental updates.'
-          ) + $launcherSummary
-          if ($releaseReady -eq 'false') {
-            $summary += @(
-              ''
-              "The archive is $([math]::Round($largest / 1GB, 2)) GiB, above GitHub's 2 GiB per-asset limit; the Release will use split 7z volumes instead."
-              'The complete single-file archive is always downloadable from this run''s Actions artifact (Monster-ww-portable-<version>).'
-            )
-          }
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary
+          $metadata | ConvertTo-Json | Set-Content 'dist/Monster-ww/build-info.json' -Encoding utf8
+          $archive = "dist/Monster-ww-$env:APP_VERSION-windows-x64.zip"
+          python -m zipfile -c $archive dist/Monster-ww
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $([System.IO.Path]::GetFileName($archive))" | Set-Content "$archive.sha256" -Encoding ascii
+          @("Version: $env:APP_VERSION", "Package: $([System.IO.Path]::GetFileName($archive))", "SHA-256: $hash") -join "`n`n" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "archive=$archive" >> $env:GITHUB_OUTPUT
 
       - name: Upload portable archive
         uses: actions/upload-artifact@v4
         with:
           name: Monster-ww-portable-${{ steps.version.outputs.number }}
-          path: release_assets/*
-          if-no-files-found: error
-          retention-days: 30
-
-      # GitHub caps a single Release asset at 2 GiB, but the portable 7z is
-      # ~2.2 GiB. A 7z volume set is simply the archive split by bytes: 7-Zip
-      # reads .001/.002/... as one continuous stream, so users still extract
-      # the complete Monster-ww folder in a single step. Verified locally with
-      # 7z l / t / x against a multi-volume set with the original removed.
-      - name: Split oversized 7z into release parts
-        id: split
-        if: ${{ steps.collect.outputs.release_ready != 'true' && inputs.package_format == '7z' }}
-        env:
-          VERSION_NUMBER: ${{ steps.version.outputs.number }}
-        run: |
-          $partSize = [long]1900 * 1MB
-          $limit = 2147483648
-          $source = @(Get-ChildItem -Path release_assets -Filter '*.7z' -File)
-          if ($source.Count -ne 1) { throw "Expected exactly one 7z archive in release_assets, found $($source.Count)." }
-          New-Item -ItemType Directory -Path release_parts -Force | Out-Null
-          $base = "Monster-ww-win32-Portable-$env:VERSION_NUMBER.7z"
-          $total = $source[0].Length
-          $inStream = [System.IO.File]::OpenRead($source[0].FullName)
-          $buffer = New-Object byte[] 4194304
-          $index = 1
-          $remaining = $total
-          try {
-            while ($remaining -gt 0) {
-              $partPath = Join-Path (Get-Location) ("release_parts/{0}.{1:d3}" -f $base, $index)
-              $outStream = [System.IO.File]::Create($partPath)
-              # Do not use [math]::Min here: PowerShell binds it to
-              # Min(int, int) and a >2 GiB Int64 length overflows Int32
-              # ("value was either too large or too small for an Int32").
-              $thisPart = if ($remaining -lt $partSize) { $remaining } else { $partSize }
-              $written = 0
-              try {
-                while ($written -lt $thisPart) {
-                  $space = $thisPart - $written
-                  $toRead = if ($space -lt $buffer.Length) { [int]$space } else { $buffer.Length }
-                  $read = $inStream.Read($buffer, 0, $toRead)
-                  if ($read -le 0) { break }
-                  $outStream.Write($buffer, 0, $read)
-                  $written += $read
-                }
-              } finally { $outStream.Dispose() }
-              $remaining -= $written
-              $index++
-            }
-          } finally { $inStream.Dispose() }
-          $parts = @(Get-ChildItem -Path release_parts -File | Sort-Object Name)
-          if ($parts.Count -lt 2) { throw 'Splitting did not produce multiple parts.' }
-          $sum = ($parts | Measure-Object -Property Length -Sum).Sum
-          if ($sum -ne $total) { throw "Split size mismatch: $sum vs $total bytes." }
-          $oversized = @($parts | Where-Object { $_.Length -ge $limit })
-          if ($oversized.Count -gt 0) { throw "A part is still above 2 GiB: $($oversized.Name -join ', ')" }
-          foreach ($p in $parts) { Write-Host ("  {0} ({1} MB)" -f $p.Name, [math]::Round($p.Length / 1MB, 1)) }
-          Write-Host "Split $total bytes into $($parts.Count) Release-safe parts."
-          $notes = @(
-            ''
-            '## GitHub Release split volumes'
-            ''
-            "The archive is $([math]::Round($total / 1GB, 2)) GiB, above GitHub's 2 GiB per-asset limit, so the Release uses $($parts.Count) split parts."
-            'Download every .7z.001 / .7z.002 / ... part into one folder and open the .001 part with 7-Zip; it extracts the full Monster-ww folder in one step.'
-            'The complete single-file archive is also available as this run''s Actions artifact.'
-          )
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $notes
-          "has_parts=true" >> $env:GITHUB_OUTPUT
-
-      - name: Resolve release files
-        id: release
-        env:
-          RELEASE_READY: ${{ steps.collect.outputs.release_ready }}
-          HAS_PARTS: ${{ steps.split.outputs.has_parts }}
-        run: |
-          if ($env:RELEASE_READY -eq 'true') {
-            $pattern = 'release_assets/*'
-            $publish = 'true'
-            Write-Host 'The portable archive fits a single GitHub Release asset.'
-          } elseif ($env:HAS_PARTS -eq 'true') {
-            $pattern = 'release_parts/*'
-            $publish = 'true'
-            Write-Host 'Publishing the split 7z volume parts to the GitHub Release.'
-          } else {
-            $pattern = ''
-            $publish = 'false'
-            Write-Host 'No Release-safe asset; the Actions artifact is the delivery channel.'
-          }
-          "pattern=$pattern" >> $env:GITHUB_OUTPUT
-          "publish=$publish" >> $env:GITHUB_OUTPUT
-
-      - name: Explain skipped GitHub release
-        if: ${{ inputs.publish_release && steps.release.outputs.publish != 'true' }}
-        env:
-          VERSION_NUMBER: ${{ steps.version.outputs.number }}
-        run: |
-          Write-Host "::warning::No Release-safe asset was produced; only the Actions artifact was published."
-          Write-Host "Download the full archive from this run's artifact: Monster-ww-portable-$env:VERSION_NUMBER (retention: 30 days)."
-          Write-Host 'Use the default 7z format so an oversized archive can be split into sub-2-GiB Release parts.'
+          path: |
+            dist/Monster-ww-*.zip
+            dist/Monster-ww-*.zip.sha256
 
       - name: Publish GitHub release
-        if: ${{ inputs.publish_release && steps.release.outputs.publish == 'true' }}
+        if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Monster-ww ${{ steps.version.outputs.number }} (portable)
           draft: false
           prerelease: false
-          # Chinese text stays in YAML (GitHub handles UTF-8 here); the two
-          # expressions keep the notes in sync with the selected mode / source.
           body: |
-            ### Monster-ww 便携版
+            ### Monster-ww 便携版（PyInstaller 全量包）
 
-            解压后双击 `Monster-ww/Monster-ww.exe` 启动；需要命令行参数或完全离线启动时可运行 `Monster-ww/Monster-ww.cmd`。
+            解压后双击 `Monster-ww/Monster-ww.exe` 启动。
 
-            - **必须以管理员权限运行**：`Monster-ww.exe` 已内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权；`Monster-ww.cmd` 通过 `fltmc` 自提权。鸣潮客户端本身是管理员权限，脚本若以普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应
-            - 本次启动器模式：`${{ inputs.launcher }}`
-            - 更新源（`pyappify.yml` 的 `git_url`）：`${{ inputs.update_repo || format('{0}/{1}.git', github.server_url, github.repository) }}`
-            - `updater` 模式：`Monster-ww.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster-ww/working`；Python 环境、pip 依赖和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
-            - **本版使用精简发布 tag**：发布 tag 只包含运行时文件，不含 `templates_src/`（894 MB 测试截图）、`tests/`、`docs/` 和构建脚本。PyAppify 会把 tag 同时打包成 git 对象库和 `working/` 检出目录，两份一起缩小，因此压缩包从原来的 2.2 GiB 降到约 205 MB（v22.0.22 实测 205.6 MB），且**增量更新能力完全保留**。运行时只读 `assets/`、`icons/`、`i18n/`、`src/` 和根目录的 Python 文件，功能不受影响
-            - **队伍创意工坊已完全离线**：`workshop_bundle/` 内置 49 个队伍、69 个共享配置（约 3 MB），浏览和导入工坊配置不再访问外部 CDN；也可继续用「导入队伍」导入本地 ZIP
-            - **自定义脚本目录改用框架规范名**：`ok_tasks/` 与 `ok_import/`。旧版 `Monster-ww_scripts/`、`Monster-ww_drop/` 会在首次启动时自动迁移；若同名文件内容不同，启动会中止并提示手动处理，绝不覆盖用户文件
-            - 内置框架升级到 Mon-script 3.0.7-mon1（对应 ok-script 3.0.7）：OCR 升级到 PP-OCRv6、恢复云游戏支持；`requirements.txt` 变化会触发 PyAppify 重装依赖，增量更新同样生效
-            - 从旧版（`templates_src/` 尚在包内）通过 updater 升级时，切换 tag 会自动移除 `working/` 里的开发素材，`configs/`、日志和自定义脚本目录不受影响；但旧包已有的 git 对象库不会自动回收，想彻底减小磁盘占用建议下载本包全新解压
-            - `cmd-only` 模式：`Monster-ww.exe` 只是带图标和管理员权限清单的轻量包装器，不含更新或联网逻辑
-            - `Monster-ww.cmd` 设置了 `PYAPPIFY_UPGRADEABLE=0`，适合命令行参数或完全离线启动
-            - 仅提供便携压缩包，不含安装程序，也不含在线安装包
-            - 默认 7z 格式，请用 7-Zip 或 Windows 11 23H2+ 解压
-            - 若资产为 `.7z.001`、`.7z.002` 等分卷：把全部分卷下载到同一目录，用 7-Zip 打开第一个（`.001`）解压即可，无需手动合并（精简版正常情况下不会出现分卷）
+            - **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组
+            - **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应
+            - **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去
+            - **每次升级是全量替换**：下载新 zip 解压覆盖程序目录即可，配置不受影响
+            - **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN
+            - **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码
             - Python 环境与依赖已随包提供，首次运行无需联网下载
             - 由手动触发的 `Monster-ww Portable Release` 工作流构建
-          files: ${{ steps.release.outputs.pattern }}
+          files: |
+            dist/Monster-ww-*.zip
+            dist/Monster-ww-*.zip.sha256
         env:
           GITHUB_TOKEN: ${{ github.token }}

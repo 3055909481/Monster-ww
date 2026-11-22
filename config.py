@@ -17,6 +17,25 @@ pyappify.get_version_list = None
 version = "dev"
 
 
+def _appdata_config_folder():
+    """User data lives under %APPDATA%/Monster-ww so full package replacement
+    never touches accounts, schedules or run history. Falls back to the legacy
+    in-app "configs" folder on non-Windows or when APPDATA is unavailable."""
+    try:
+        base = os.environ.get("APPDATA")
+        if not base:
+            import tempfile
+            base = os.path.join(tempfile.gettempdir(), "Monster-ww-data")
+        path = os.path.join(base, "Monster-ww", "configs")
+        os.makedirs(path, exist_ok=True)
+        return path
+    except (OSError, TypeError):
+        return "configs"
+
+
+CONFIG_FOLDER = _appdata_config_folder()
+
+
 def _find_most_recently_run_pc_exe():
     try:
         import codecs
@@ -218,7 +237,7 @@ config = {
         'group:Multi-account': {'light': '#7650A5', 'dark': '#C2A3EA'},
         'group:版本活动': {'light': '#B4682A', 'dark': '#F0AE72'},
     },
-    'config_folder': 'configs',
+    'config_folder': CONFIG_FOLDER,
     'blur_area': blur_area,
     'gui_icon': 'icons/icon.png',
     'global_configs': [basic_config_option, key_config_option, char_config_option, monthly_card_config_option],
