@@ -75,9 +75,13 @@ def _tr(text):
 
 
 def _cover_rect(src_w, src_h, dst_w, dst_h):
-    scale = max(dst_w / src_w, dst_h / src_h)
-    w, h = src_w * scale, src_h * scale
-    return ((dst_w - w) / 2, (dst_h - h) / 2, w, h)
+    """返回 QPainter.drawPixmap 用的 source rect（在原图坐标系内居中裁剪）。
+
+    头像目标是圆形（宽高相等），所以从原图中央取一个正方形块贴到圆里，
+    避免取到左上角的一小块拉伸变形。返回值全部落在原图范围内。
+    """
+    side = min(src_w, src_h)
+    return ((src_w - side) / 2, (src_h - side) / 2, side, side)
 
 
 class Avatar(QWidget):
