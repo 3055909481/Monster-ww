@@ -46,6 +46,21 @@ APP_DIR_NAME = "Monster-ww"
 EXE_NAME = "Monster-ww.exe"
 USER_AGENT = "Monster-ww-updater"
 
+# Injected by install(): routes phase messages to the About/Update card's
+# status label through a Qt signal (safe from the background worker thread).
+_status_reporter = None
+
+
+def _status(message):
+    """Report a user-visible phase; never let UI issues break an update."""
+    reporter = _status_reporter
+    if reporter is not None:
+        try:
+            reporter(message)
+        except Exception:
+            pass
+    LOG.info("update status: %s", message)
+
 
 def _app_dir() -> Path:
     """Directory holding Monster-ww.exe (the packaged app root)."""
@@ -180,6 +195,7 @@ def _is_prerelease(tag):
 
 def get_version_list(release_only=True, exit_event=None, number_versions=30, **_kwargs):
     """Return the framework's version-list shape, newest first."""
+    _status("正在检查更新…")
     try:
         text = _http_text(RELEASES_ATOM, accept="application/atom+xml")
         releases = _releases_from_atom(text, limit=number_versions)
@@ -210,6 +226,7 @@ def get_version_list(release_only=True, exit_event=None, number_versions=30, **_
             "update_note": [release["body"][:800]],
             "prerelease": prerelease,
         })
+    _status(f"已获取 {len(result)} 个版本" if result else "未找到可用版本")
     return result
 
 
@@ -302,7 +319,12 @@ def _download(url, destination, expected_sha256=None):
 def _extract(archive, target):
     suffix = archive.suffix.lower()
     if suffix == ".7z":
-        import py7zr
+        try:
+            import py7zr
+        except ImportError as error:
+            raise RuntimeError(
+                "缺少 7z 解压组件 py7zr，请重新下载完整安装包后解压覆盖，不要在原目录上修补"
+            ) from error
         with py7zr.SevenZipFile(archive, mode="r") as zf:
             zf.extractall(path=target)
     elif suffix == ".zip":
@@ -320,6 +342,7 @@ def update_to_version(version, exit_event=None, language=None):
 
     import shutil
 
+    _status(f"正在下载 {version} 更新包…")
     asset = _asset_for(str(version))
     staging_root = Path(tempfile.gettempdir()) / "Monster-ww-update"
     staging_root.mkdir(parents=True, exist_ok=True)
@@ -327,12 +350,15 @@ def update_to_version(version, exit_event=None, language=None):
     LOG.info("downloading update %s -> %s", version, archive)
     _download(asset["url"], archive, _sha256_for(asset))
 
+    _status("下载完成，正在解压更新包…")
     extracted_app = staging_root / APP_DIR_NAME
     if extracted_app.exists():
         shutil.rmtree(extracted_app, ignore_errors=True)
     _extract(archive, staging_root)
     if not (extracted_app / EXE_NAME).is_file():
         raise RuntimeError("更新包结构不正确（缺少 Monster-ww.exe）")
+
+    _status("更新包已就绪，程序即将退出并自动替换文件、重新启动…")
 
     app_dir = _app_dir()
     # Keep the apply script outside staging: the script deletes staging at the
@@ -396,6 +422,18 @@ def install():
     except ImportError:
         LOG.warning("pyappify not importable; in-app updater disabled")
         return False
+
+    # Phase status must be delivered on the Qt GUI thread. identity.py stays
+    # as source in the package (Cython cannot make Qt Signal a descriptor),
+    # so install the bridge there and route our logs through it.
+    global _status_reporter
+    try:
+        from src import identity
+        identity.install_update_status_bridge()
+        _status_reporter = identity.report_update_status
+    except Exception as error:
+        LOG.warning("update status bridge unavailable: %s", error)
+
     version = _current_version()
     pyappify.app_version = version
     pyappify.get_version_list = get_version_list

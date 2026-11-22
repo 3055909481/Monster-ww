@@ -90,6 +90,15 @@ class TestAtomFeed(unittest.TestCase):
         self.assertEqual(fetch.call_args.args[0], u.RELEASES_ATOM)
         self.assertNotIn('api.github.com', u.RELEASES_ATOM)
 
+    def test_reports_check_phase_to_ui(self):
+        statuses = []
+        with mock_patch.object(u, '_status', side_effect=statuses.append), \
+             mock_patch.object(u, '_http_text', return_value=ATOM), \
+             mock_patch.object(u, '_current_version', return_value='v1.0.27'):
+            u.get_version_list()
+        self.assertIn('正在检查更新…', statuses)
+        self.assertTrue(any('2 个版本' in s for s in statuses))
+
     def test_network_failure_raises_readable_error(self):
         with mock_patch.object(u, '_http_text', side_effect=OSError('offline')):
             with self.assertRaises(RuntimeError) as ctx:
@@ -129,6 +138,13 @@ class TestAssets(unittest.TestCase):
         with mock_patch.object(u, '_http_text', return_value=f'{digest}  Monster-ww.7z\n'):
             self.assertEqual(u._sha256_for({'name': 'Monster-ww.7z', 'url': 'https://example/x'}), digest)
 
+    def test_extract_7z_without_py7zr_has_readable_error(self):
+        with mock_patch.dict(sys.modules, {'py7zr': None}):
+            with self.assertRaises(RuntimeError) as ctx:
+                u._extract(Path('dummy.7z'), Path('out'))
+        self.assertIn('py7zr', str(ctx.exception))
+        self.assertIn('重新下载完整安装包', str(ctx.exception))
+
     def test_extract_zip(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
@@ -158,12 +174,18 @@ class TestInstall(unittest.TestCase):
     def test_install_is_idempotent(self):
         from types import SimpleNamespace
         fake = SimpleNamespace(app_version=None)
-        with mock_patch.dict(sys.modules, {'pyappify': fake}):
+        with mock_patch.dict(sys.modules, {'pyappify': fake, 'src.identity': None}):
             with mock_patch.object(u, '_current_version', return_value='v1.0.27'):
                 self.assertTrue(u.install())
                 fake.get_version_list = Mock()  # would be overwritten if re-installed
                 self.assertFalse(u.install())
                 self.assertIs(fake.get_version_list, u.get_version_list)
+
+    def test_status_reporter_never_raises(self):
+        def broken(_message):
+            raise RuntimeError('ui gone')
+        with mock_patch.object(u, '_status_reporter', broken):
+            u._status('正在下载…')  # must not propagate
 
 
 class TestApplyScript(unittest.TestCase):

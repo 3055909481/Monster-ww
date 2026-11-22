@@ -52,6 +52,12 @@ for name in ('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interv
 hiddenimports = collect_submodules('src')
 hiddenimports += ['src.identity', 'src.schedule_patch', 'src.adaptive_interval',
                   'src.team_overlay', 'src.click_jitter']
+# src/updater.py ships as a Cython .pyd, so PyInstaller cannot see its
+# function-level `import py7zr`. Collect it explicitly (with its codecs).
+pyd_data, pyd_binaries, pyd_imports = collect_all('py7zr')
+datas += pyd_data
+binaries += pyd_binaries
+hiddenimports += list(pyd_imports)
 binaries = collect_dynamic_libs('openvino')
 # Our framework fork is named Mon (upstream is ok). Workshop character code
 # still imports "ok"; identity.py aliases ok -> Mon at runtime, so we only
