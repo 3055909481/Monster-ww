@@ -98,21 +98,31 @@ class TestClassName(unittest.TestCase):
 
 
 class TestTeamStripRefresh(unittest.TestCase):
-    """TeamStrip 渲染状态：需 Qt offscreen 环境。"""
+    """TeamStrip 刷新状态逻辑。
 
-    @classmethod
-    def setUpClass(cls):
-        from PySide6.QtWidgets import QApplication
-        cls.app = QApplication.instance() or QApplication([])
+    刻意不实例化真实 QWidget/QPixmap：CI 无显示会话下 Qt 全局对象在进程退出
+    时会间歇性触发 access violation（测试本身全过但进程崩溃）。用 __new__
+    构造未初始化的 strip + mock 依赖，只验证 refresh 的状态机逻辑。
+    """
 
     def _strip(self, executor):
-        strip = to.TeamStrip()
-        original = strip.executor
-
-        def fake_executor():
-            return executor
-
-        strip.__class__ = type('StripWithEx', (to.TeamStrip,), {'executor': property(lambda s: executor)})
+        # __new__ 绕过 QWidget.__init__，不创建任何 Qt GUI 对象
+        strip = to.TeamStrip.__new__(to.TeamStrip)
+        strip._avatars = [Mock() for _ in range(3)]
+        label = Mock()
+        label._text = ''
+        label.text.side_effect = lambda: label._text
+        label.setText.side_effect = lambda value: setattr(label, '_text', value)
+        strip.name_label = label
+        strip._last_signature = None
+        strip.show = Mock()
+        strip.setToolTip = Mock()
+        strip.isVisible = Mock(return_value=True)
+        strip.isHidden = Mock(return_value=False)
+        # executor 是 property，用动态子类覆盖
+        strip.__class__ = type('StripWithEx', (to.TeamStrip,), {
+            'executor': property(lambda s: executor),
+        })
         return strip
 
     def test_unrecognized_shows_placeholder_not_hidden(self):
@@ -127,8 +137,7 @@ class TestTeamStripRefresh(unittest.TestCase):
                         '未识别时不应隐藏队伍条')
         self.assertEqual(strip.name_label.text(), '未识别')
         for avatar in strip._avatars:
-            self.assertIsNone(avatar._pixmap)
-            self.assertEqual(avatar._text, '')
+            avatar.clear.assert_called_once_with()
 
     def test_recognized_shows_team(self):
         members = [_char('Verina'), _char('Changli'), _char('Jinhsi')]
@@ -154,8 +163,7 @@ class TestTeamStripRefresh(unittest.TestCase):
         self.assertIsNone(strip._last_signature)
         self.assertEqual(strip.name_label.text(), '未识别')
         for avatar in strip._avatars:
-            self.assertIsNone(avatar._pixmap)
-            self.assertEqual(avatar._text, '')
+            avatar.clear.assert_called_once_with()
 
 
 class TestInstall(unittest.TestCase):
