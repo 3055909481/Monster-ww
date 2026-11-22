@@ -1,11 +1,42 @@
-"""应用内更新器测试：版本比较、版本列表解析、GitHub 交互、更新暂存。"""
+"""应用内更新器测试：版本比较、Atom 解析、直链构造、更新暂存。"""
 import os
 import sys
 import tempfile
 import unittest
+import zipfile
+from pathlib import Path
 from unittest.mock import Mock, patch as mock_patch
 
 from src import updater as u
+
+ATOM = '''<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v1.0.28</id>
+    <title>v1.0.28</title>
+    <updated>2026-11-22T11:57:38Z</updated>
+    <content type="html">&lt;p&gt;fix A &amp;amp; B&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v1.0.27</id>
+    <title>v1.0.27</title>
+    <updated>2026-11-22T11:25:34Z</updated>
+    <content type="html">&lt;p&gt;previous&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v2.0.0-beta.1</id>
+    <title>v2.0.0-beta.1</title>
+    <updated>2026-11-23T00:00:00Z</updated>
+    <content type="html">&lt;p&gt;beta&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/not-a-version</id>
+    <title>not-a-version</title>
+    <updated>2026-11-24T00:00:00Z</updated>
+    <content type="html">&lt;p&gt;ignored&lt;/p&gt;</content>
+  </entry>
+</feed>
+'''
 
 
 class TestVersionComparison(unittest.TestCase):
@@ -26,48 +57,88 @@ class TestVersionComparison(unittest.TestCase):
         self.assertFalse(u.is_greater_version('', 'v1.0.0'))
 
 
-class TestVersionList(unittest.TestCase):
+class TestAtomFeed(unittest.TestCase):
 
-    def _release(self, tag, assets=True, prerelease=False):
-        return {
-            'tag_name': tag,
-            'prerelease': prerelease,
-            'body': f'release notes for {tag}',
-            'assets': ([{'name': f'Monster-ww-{tag}-windows-x64.7z',
-                         'browser_download_url': f'https://example.com/{tag}.7z',
-                         'digest': 'sha256:abc'}]
-                       if assets else []),
-        }
+    def test_parses_entries_and_strips_html(self):
+        releases = u._releases_from_atom(ATOM, limit=10)
+        self.assertEqual(len(releases), 4)
+        self.assertEqual(releases[0]['tag'], 'v1.0.28')
+        self.assertEqual(releases[0]['body'], 'fix A & B')
+        self.assertEqual(releases[0]['updated'], '2026-11-22T11:57:38Z')
 
     def test_filters_and_relations(self):
-        releases = [self._release('v1.0.28'), self._release('v1.0.27'),
-                    self._release('v1.0.29', assets=False)]
-        with mock_patch.object(u, '_http_json', return_value=releases), \
+        with mock_patch.object(u, '_http_text', return_value=ATOM), \
              mock_patch.object(u, '_current_version', return_value='v1.0.27'):
             versions = u.get_version_list(release_only=True)
         self.assertEqual([v['version'] for v in versions], ['v1.0.28', 'v1.0.27'])
         self.assertEqual(versions[0]['relation'], 'newer')
         self.assertEqual(versions[1]['relation'], 'current')
+        self.assertEqual(versions[0]['update_note'], ['fix A & B'])
 
     def test_skips_prerelease_when_release_only(self):
-        releases = [self._release('v1.0.28'), self._release('v2.0.0-beta.1', prerelease=True)]
-        with mock_patch.object(u, '_http_json', return_value=releases), \
+        with mock_patch.object(u, '_http_text', return_value=ATOM), \
              mock_patch.object(u, '_current_version', return_value='v1.0.27'):
             only = u.get_version_list(release_only=True)
-            all_versions = u.get_version_list(release_only=False)
-        self.assertEqual([v['version'] for v in only], ['v1.0.28'])
-        self.assertIn('v2.0.0-beta.1', [v['version'] for v in all_versions])
+            everything = u.get_version_list(release_only=False)
+        self.assertNotIn('v2.0.0-beta.1', [v['version'] for v in only])
+        self.assertIn('v2.0.0-beta.1', [v['version'] for v in everything])
+
+    def test_uses_atom_url_without_api(self):
+        with mock_patch.object(u, '_http_text', return_value=ATOM) as fetch, \
+             mock_patch.object(u, '_current_version', return_value='v1.0.27'):
+            u.get_version_list()
+        self.assertEqual(fetch.call_args.args[0], u.RELEASES_ATOM)
+        self.assertNotIn('api.github.com', u.RELEASES_ATOM)
 
     def test_network_failure_raises_readable_error(self):
-        with mock_patch.object(u, '_http_json', side_effect=OSError('offline')):
+        with mock_patch.object(u, '_http_text', side_effect=OSError('offline')):
             with self.assertRaises(RuntimeError) as ctx:
                 u.get_version_list()
         self.assertIn('无法检查更新', str(ctx.exception))
+
+    def test_rate_limit_message_passes_through(self):
+        with mock_patch.object(u, '_http_text', side_effect=RuntimeError('GitHub 检查次数已达上限')):
+            with self.assertRaises(RuntimeError) as ctx:
+                u.get_version_list()
+        self.assertIn('GitHub 检查次数已达上限', str(ctx.exception))
 
     def test_update_notes(self):
         versions = [{'version': 'v1.0.28', 'update_note': ['fix A', 'fix B']}]
         notes = u.calculate_update_notes(versions, 'v1.0.27', 'v1.0.28')
         self.assertEqual(notes, ['fix A', 'fix B'])
+
+
+class TestAssets(unittest.TestCase):
+
+    def test_asset_candidates_are_direct_download_links(self):
+        assets = u._asset_candidates('v1.0.28')
+        self.assertEqual(assets[0]['name'], 'Monster-ww-v1.0.28-windows-x64.7z')
+        self.assertTrue(assets[0]['url'].startswith('https://github.com/'))
+        self.assertIn('/releases/download/v1.0.28/', assets[0]['url'])
+        self.assertNotIn('api.github.com', assets[0]['url'])
+        self.assertEqual(assets[1]['name'], 'Monster-ww-v1.0.28-windows-x64.zip')
+
+    def test_asset_for_prefers_available_head(self):
+        assets = u._asset_candidates('v1.0.28')
+        with mock_patch.object(u, '_head_ok', side_effect=[False, True, False]):
+            chosen = u._asset_for('v1.0.28')
+        self.assertEqual(chosen, assets[1])
+
+    def test_sha256_for(self):
+        digest = 'a' * 64
+        with mock_patch.object(u, '_http_text', return_value=f'{digest}  Monster-ww.7z\n'):
+            self.assertEqual(u._sha256_for({'name': 'Monster-ww.7z', 'url': 'https://example/x'}), digest)
+
+    def test_extract_zip(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            archive = root / 'app.zip'
+            with zipfile.ZipFile(archive, 'w') as zf:
+                zf.writestr('Monster-ww/Monster-ww.exe', 'fake')
+            target = root / 'out'
+            target.mkdir()
+            u._extract(archive, target)
+            self.assertTrue((target / 'Monster-ww' / 'Monster-ww.exe').is_file())
 
 
 class TestInstall(unittest.TestCase):
@@ -97,15 +168,20 @@ class TestInstall(unittest.TestCase):
 
 class TestApplyScript(unittest.TestCase):
 
-    def test_apply_script_waits_and_relaunches(self):
+    def test_apply_script_uses_cmd_and_relaunches(self):
         script = u._APPLY_SCRIPT.format(app_dir='C:/app', staged='C:/staged',
                                         staging='C:/tmp', pid=123, exe_name='Monster-ww.exe')
-        self.assertIn('old_pid = 123', script)
-        self.assertIn('os.kill(old_pid, 0)', script)
+        self.assertIn('@echo off', script)
+        self.assertIn('set "OLD_PID=123"', script)
+        self.assertIn('tasklist /FI "PID eq %OLD_PID%"', script)
+        self.assertIn('move /Y "%STAGED%" "%APP_DIR%"', script)
+        self.assertIn('start "" /D "%APP_DIR%"', script)
         self.assertIn('Monster-ww.exe', script)
-        self.assertIn('os.rename(app_dir, backup)', script)
-        self.assertIn('os.rename(staged, app_dir)', script)
-        compile(script, 'apply_update.py', 'exec')
+
+    def test_apply_script_escapes_backslash_for_cmd(self):
+        script = u._APPLY_SCRIPT.format(app_dir='C:/app', staged='C:/staged',
+                                        staging='C:/tmp', pid=123, exe_name='Monster-ww.exe')
+        self.assertIn('%APP_DIR%\\%EXE_NAME%', script)
 
 
 if __name__ == '__main__':

@@ -6,16 +6,21 @@ releases instead. Installing it (see ``install()``) makes the existing update
 UI work: version picker, check button, automatic startup check and toast,
 plus update-then-restart.
 
+Version discovery uses the public ``releases.atom`` feed and download links
+under ``/releases/download``. Neither is a GitHub REST API endpoint, so the
+60-request/hour anonymous API limit no longer breaks update checks. A token
+is never read from the environment or from Git credentials.
+
 Full-package updates must replace files while the app is not running. The
 flow is therefore two-phase:
 
 1. ``update_to_version`` (in the running GUI) downloads and extracts the
-   release into a staging directory, writes a small apply script, spawns it
-   detached, and returns ``{"updated": True, "restart_required": True}``.
+   release into a staging directory, writes a small .cmd apply script, spawns
+   it detached, and returns ``{"updated": True, "restart_required": True}``.
    The framework then emits ``communicate.quit`` and the app exits.
-2. The detached apply script waits for the old PID to exit, swaps the app
-   directory (old -> .old, staged -> app dir), and relaunches Monster-ww.exe.
-   User data lives in %APPDATA% and is never touched.
+2. The detached script waits for the old PID to exit, swaps the app directory
+   (old -> .old, staged -> app dir), and relaunches Monster-ww.exe. User data
+   lives in %APPDATA% and is never touched.
 
 Every network step is best-effort: failures are reported to the UI as a
 string (UpdateCard shows them) and never crash the app. Checking is opt-in
@@ -35,15 +40,17 @@ from pathlib import Path
 LOG = logging.getLogger(__name__)
 
 REPO = "3055909481/Monster-ww"
-API_RELEASES = f"https://api.github.com/repos/{REPO}/releases"
-ASSET_SUFFIX = "-windows-x64.7z"
+RELEASES_ATOM = f"https://github.com/{REPO}/releases.atom"
+RELEASE_PAGE = f"https://github.com/{REPO}/releases"
 APP_DIR_NAME = "Monster-ww"
+EXE_NAME = "Monster-ww.exe"
+USER_AGENT = "Monster-ww-updater"
 
 
 def _app_dir() -> Path:
     """Directory holding Monster-ww.exe (the packaged app root)."""
     exe = Path(sys.executable)
-    # PyInstaller onefile runs from a temp _MEI dir; sys.argv[0] is the real exe.
+    # PyInstaller onedir runs the real exe, so argv[0] and executable agree.
     candidate = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else exe
     if candidate.is_file():
         return candidate.parent
@@ -72,7 +79,7 @@ def _current_version() -> str:
             import ctypes
             from ctypes import wintypes
 
-            exe = str(_app_dir() / "Monster-ww.exe")
+            exe = str(_app_dir() / EXE_NAME)
             size = ctypes.windll.version.GetFileVersionInfoSizeW(exe, None)
             if size:
                 buf = ctypes.create_string_buffer(size)
@@ -111,50 +118,96 @@ def is_greater_version(left, right) -> bool:
     return a > b
 
 
-def _http_json(url, timeout=20):
-    import json
+def _http_text(url, timeout=20, accept=None):
+    """Fetch a public GitHub page/feed as text. No credentials, no API quota."""
+    import urllib.error
     import urllib.request
 
-    request = urllib.request.Request(url, headers={
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "Monster-ww-updater",
-    })
-    token = os.environ.get("GITHUB_TOKEN") or ""
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    headers = {"User-Agent": USER_AGENT}
+    if accept:
+        headers["Accept"] = accept
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 429):
+            raise RuntimeError(
+                f"GitHub 检查次数已达上限，请稍后再试或直接前往 {RELEASE_PAGE} 下载"
+            ) from error
+        raise
 
 
-def get_version_list(release_only=True, exit_event=None):
+def _strip_html(value):
+    import html
+
+    text = html.unescape(value or "")
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"</(?:p|div|li|h[1-6])>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()
+
+
+def _releases_from_atom(text, limit=30):
+    """Parse GitHub's releases.atom into simple release dictionaries."""
+    import xml.etree.ElementTree as ET
+
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    root = ET.fromstring(text)
+    releases = []
+    for entry in root.findall("a:entry", ns):
+        entry_id = (entry.findtext("a:id", default="", namespaces=ns) or "").strip()
+        tag = entry_id.rsplit("/", 1)[-1] if entry_id else ""
+        if not tag:
+            continue
+        releases.append({
+            "tag": tag,
+            "title": (entry.findtext("a:title", default=tag, namespaces=ns) or tag).strip(),
+            "updated": (entry.findtext("a:updated", default="", namespaces=ns) or "").strip(),
+            "body": _strip_html(entry.findtext("a:content", default="", namespaces=ns)),
+        })
+        if len(releases) >= limit:
+            break
+    return releases
+
+
+def _is_prerelease(tag):
+    parsed = _parse_version(tag)
+    return bool(parsed and parsed[3] < 3)
+
+
+def get_version_list(release_only=True, exit_event=None, number_versions=30, **_kwargs):
     """Return the framework's version-list shape, newest first."""
     try:
-        releases = _http_json(f"{API_RELEASES}?per_page=30")
+        text = _http_text(RELEASES_ATOM, accept="application/atom+xml")
+        releases = _releases_from_atom(text, limit=number_versions)
+    except RuntimeError:
+        raise  # already a user-facing message (e.g. rate limit hint)
     except Exception as error:
         LOG.warning("update check failed: %s", error)
         raise RuntimeError(f"无法检查更新：{error}") from error
+
     current = _current_version()
+    current_parsed = _parse_version(current) or (-1, -1, -1, -1, -1)
     result = []
     for release in releases:
-        tag = str(release.get("tag_name") or "")
-        if not tag:
-            continue
-        prerelease = bool(release.get("prerelease"))
-        if release_only and prerelease:
-            continue
-        assets = release.get("assets") or []
-        if not any(str(a.get("name", "")).endswith(ASSET_SUFFIX) for a in assets):
-            continue  # only releases carrying a portable package are updatable
+        tag = release["tag"]
         parsed = _parse_version(tag)
         if parsed is None:
             continue
-        relation = "current" if tag == current else ("newer" if parsed > (_parse_version(current) or (-1,)) else "older")
+        prerelease = _is_prerelease(tag)
+        if release_only and prerelease:
+            continue
+        relation = ("newer" if parsed > current_parsed else
+                    "current" if parsed == current_parsed else "older")
         result.append({
             "version": tag,
             "title": tag,
             "kind": "tag",
             "relation": relation,
-            "update_note": [str(release.get("body") or "").strip()[:800]],
+            "update_note": [release["body"][:800]],
             "prerelease": prerelease,
         })
     return result
@@ -173,19 +226,65 @@ def entry_notes(entry, language=None):
     return notes if isinstance(notes, list) else [notes]
 
 
+def _asset_candidates(tag):
+    """Known asset names for a release tag, newest format first."""
+    from urllib.parse import quote
+
+    base = f"https://github.com/{REPO}/releases/download/{quote(tag, safe='')}/"
+    plain = str(tag).lstrip("v")
+    names = (
+        f"Monster-ww-{tag}-windows-x64.7z",
+        f"Monster-ww-{tag}-windows-x64.zip",
+        f"Monster-ww-win32-Portable-{plain}.7z",
+    )
+    return [{"name": name, "url": base + quote(name, safe="")} for name in names]
+
+
+def _head_ok(url):
+    import urllib.error
+    import urllib.request
+
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT}, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return 200 <= response.status < 400
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return False
+        # Some CDNs reject HEAD; let the GET decide instead.
+        return True
+    except Exception:
+        return False
+
+
 def _asset_for(release_tag):
-    release = _http_json(f"{API_RELEASES}/tags/{release_tag}")
-    for asset in release.get("assets") or []:
-        if str(asset.get("name", "")).endswith(ASSET_SUFFIX):
+    candidates = _asset_candidates(str(release_tag))
+    for asset in candidates:
+        if _head_ok(asset["url"]):
             return asset
+    if candidates:
+        # Network failures must surface as a real download error, not a
+        # misleading "no package" message.
+        LOG.warning("no asset HEAD succeeded for %s; trying %s", release_tag, candidates[0]["url"])
+        return candidates[0]
     raise RuntimeError(f"版本 {release_tag} 没有可更新的安装包")
+
+
+def _sha256_for(asset):
+    try:
+        text = _http_text(asset["url"] + ".sha256", timeout=20)
+    except Exception as error:
+        LOG.warning("no checksum for %s: %s", asset["name"], error)
+        return None
+    match = re.search(r"\b([0-9a-fA-F]{64})\b", text)
+    return match.group(1) if match else None
 
 
 def _download(url, destination, expected_sha256=None):
     import hashlib
     import urllib.request
 
-    request = urllib.request.Request(url, headers={"User-Agent": "Monster-ww-updater"})
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=120) as response, open(destination, "wb") as out:
         digest = hashlib.sha256()
         while True:
@@ -200,85 +299,93 @@ def _download(url, destination, expected_sha256=None):
     return actual
 
 
+def _extract(archive, target):
+    suffix = archive.suffix.lower()
+    if suffix == ".7z":
+        import py7zr
+        with py7zr.SevenZipFile(archive, mode="r") as zf:
+            zf.extractall(path=target)
+    elif suffix == ".zip":
+        import zipfile
+        with zipfile.ZipFile(archive) as zf:
+            zf.extractall(path=target)
+    else:
+        raise RuntimeError(f"不支持的压缩包格式：{suffix}")
+
+
 def update_to_version(version, exit_event=None, language=None):
     """Stage a full-package update and schedule the swap after we exit."""
-    import py7zr
+    if os.name != "nt":
+        raise RuntimeError("自动更新仅支持 Windows")
 
-    target = str(version).lstrip("v")
+    import shutil
+
     asset = _asset_for(str(version))
-    url = asset["browser_download_url"]
-
     staging_root = Path(tempfile.gettempdir()) / "Monster-ww-update"
     staging_root.mkdir(parents=True, exist_ok=True)
     archive = staging_root / asset["name"]
-    expected = asset.get("digest", "").split(":", 1)[-1] if asset.get("digest") else None
     LOG.info("downloading update %s -> %s", version, archive)
-    _download(url, archive, expected)
+    _download(asset["url"], archive, _sha256_for(asset))
 
-    unpacked = staging_root / f"unpacked-{target}"
-    if unpacked.exists():
-        import shutil
-        shutil.rmtree(unpacked, ignore_errors=True)
-    with py7zr.SevenZipFile(archive, mode="r") as zf:
-        zf.extractall(path=staging_root)
     extracted_app = staging_root / APP_DIR_NAME
-    if not (extracted_app / "Monster-ww.exe").is_file():
+    if extracted_app.exists():
+        shutil.rmtree(extracted_app, ignore_errors=True)
+    _extract(archive, staging_root)
+    if not (extracted_app / EXE_NAME).is_file():
         raise RuntimeError("更新包结构不正确（缺少 Monster-ww.exe）")
 
     app_dir = _app_dir()
-    apply_script = staging_root / "apply_update.py"
-    current_pid = os.getpid()
+    # Keep the apply script outside staging: the script deletes staging at the
+    # end, and Windows cannot delete a batch file that is still executing.
+    apply_script = Path(tempfile.gettempdir()) / "Monster-ww-apply.cmd"
     apply_script.write_text(
         _APPLY_SCRIPT.format(
             app_dir=str(app_dir), staged=str(extracted_app),
-            staging=str(staging_root), pid=current_pid,
-            exe_name="Monster-ww.exe",
+            staging=str(staging_root), pid=os.getpid(),
+            exe_name=EXE_NAME,
         ),
         encoding="utf-8",
     )
-    python_exe = Path(sys.executable)
-    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-    subprocess.Popen([str(python_exe), str(apply_script)], creationflags=flags,
+    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen(["cmd.exe", "/c", str(apply_script)], creationflags=flags,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      cwd=str(staging_root))
-    LOG.info("update staged; apply script launched, waiting for pid %s", current_pid)
+    LOG.info("update staged; apply script launched, waiting for pid %s", os.getpid())
     return {"updated": True, "restart_required": True}
 
 
-_APPLY_SCRIPT = '''"""Applied after the main app exits: swap directories and relaunch."""
-import os, shutil, subprocess, sys, time
-app_dir = r"{app_dir}"
-staged = r"{staged}"
-staging = r"{staging}"
-old_pid = {pid}
-exe_name = "{exe_name}"
+_APPLY_SCRIPT = '''@echo off
+setlocal
+set "APP_DIR={app_dir}"
+set "STAGED={staged}"
+set "STAGING={staging}"
+set "OLD_PID={pid}"
+set "EXE_NAME={exe_name}"
 
-deadline = time.time() + 60
-while time.time() < deadline:
-    try:
-        os.kill(old_pid, 0)
-    except (ProcessLookupError, PermissionError):
-        break
-    time.sleep(0.3)
+set /a TRIES=0
+:wait
+set /a TRIES+=1
+if %TRIES% GTR 180 goto swap
+tasklist /FI "PID eq %OLD_PID%" 2^>nul | findstr /I /C:"%OLD_PID%" >nul
+if errorlevel 1 goto swap
+ping -n 2 127.0.0.1 >nul
+goto wait
 
-backup = app_dir + ".old"
-try:
-    if os.path.isdir(backup):
-        shutil.rmtree(backup, ignore_errors=True)
-    if os.path.isdir(app_dir):
-        os.rename(app_dir, backup)
-    os.rename(staged, app_dir)
-except Exception:
-    if os.path.isdir(backup) and not os.path.isdir(app_dir):
-        os.rename(backup, app_dir)
-    raise
+:swap
+if exist "%APP_DIR%.old" rmdir /S /Q "%APP_DIR%.old" >nul 2^>nul
+if exist "%APP_DIR%" move /Y "%APP_DIR%" "%APP_DIR%.old" >nul
+if errorlevel 1 goto rollback
+move /Y "%STAGED%" "%APP_DIR%" >nul
+if errorlevel 1 goto rollback
+start "" /D "%APP_DIR%" "%APP_DIR%\\%EXE_NAME%"
+if exist "%STAGING%" rmdir /S /Q "%STAGING%" >nul 2^>nul
+goto done
 
-exe = os.path.join(app_dir, exe_name)
-subprocess.Popen([exe], cwd=app_dir, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
-try:
-    shutil.rmtree(staging, ignore_errors=True)
-except Exception:
-    pass
+:rollback
+if exist "%APP_DIR%.old" if not exist "%APP_DIR%" move /Y "%APP_DIR%.old" "%APP_DIR%" >nul
+
+:done
+endlocal
 '''
 
 
