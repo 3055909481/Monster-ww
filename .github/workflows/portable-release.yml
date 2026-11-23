@@ -159,6 +159,17 @@ jobs:
       - name: Build portable app with PyInstaller
         run: python -m PyInstaller --noconfirm Monster-ww.spec
 
+      - name: Build standalone updater window
+        # A separate GUI executable shows download/extract/install progress and
+        # stays alive while the main app exits to have its files replaced.
+        run: |
+          python -c "import tkinter, py7zr; print('updater GUI deps OK')"
+          python -m PyInstaller --noconfirm MonsterUpdate.spec
+          if (-not (Test-Path 'dist/MonsterUpdate.exe')) { throw 'MonsterUpdate.exe was not built.' }
+          Copy-Item 'dist/MonsterUpdate.exe' 'dist/Monster-ww/MonsterUpdate.exe' -Force
+          $size = (Get-Item 'dist/Monster-ww/MonsterUpdate.exe').Length
+          Write-Host "Bundled standalone updater ($([math]::Round($size/1MB,1)) MB)"
+
       - name: Drop runtime caches from the package
         # OpenVINO writes compiled .blob caches at runtime. collect_all() may
         # pick up a cache/ folder from the build machine; it is regenerated on
@@ -196,14 +207,15 @@ jobs:
         # fail the build instead of shipping a medium-integrity executable.
         run: python .github/scripts/patch_launcher_manifest.py --verify dist/Monster-ww/Monster-ww.exe
 
-      - name: Verify update dependencies are bundled
-        # src/updater.py is Cython-compiled, so PyInstaller cannot see its
-        # function-level `import py7zr`. Fail if the explicit collection was
-        # lost, instead of shipping an updater that always errors at runtime.
+      - name: Verify standalone updater is bundled
+        # Updating is entirely delegated to MonsterUpdate.exe; without it the
+        # in-app "Update" button would fail with a missing-updater error.
         run: |
-          $out = python -m PyInstaller.utils.cliutils.archive_viewer -r -b dist/Monster-ww/Monster-ww.exe 2>&1 | Out-String
-          if ($out -notmatch 'py7zr') { throw 'py7zr missing from PyInstaller archive; in-app update extraction would fail.' }
-          Write-Host 'py7zr found in PyInstaller archive.'
+          $updater = 'dist/Monster-ww/MonsterUpdate.exe'
+          if (-not (Test-Path $updater)) { throw "Standalone updater missing: $updater" }
+          if ((Get-Item $updater).Length -lt 1MB) { throw 'Standalone updater looks truncated.' }
+          python .github/scripts/patch_launcher_manifest.py --verify $updater
+          Write-Host 'Standalone updater present and elevated.'
 
       - name: Smoke-test packaged app
         # GitHub-hosted runners already run elevated, so the requireAdministrator
