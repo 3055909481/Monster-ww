@@ -1,3 +1,4 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -113,6 +114,12 @@ class TestGameServerPath(unittest.TestCase):
                     self.assertEqual(config.calculate_pc_exe_path(), 'C:/auto.exe')
         finally:
             os.unlink(cn_path)
+
+    def test_scheduled_server_overrides_global(self):
+        basic = self._basic(config.SERVER_CN)  # global = 国服
+        with self._mock_basic(basic):
+            with patch.object(sys, 'argv', ['main.py', '-t', '1', '--schedule-server', '国际服']):
+                self.assertEqual(config.get_current_server(), config.SERVER_GLOBAL)
 
     def test_server_options_in_basic_config(self):
         cfg_type = config.basic_config_option.config_type

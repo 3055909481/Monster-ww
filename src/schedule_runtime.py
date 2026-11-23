@@ -13,6 +13,7 @@ from typing import Optional
 # 命令行开关名（同时作为 Windows 计划任务参数写入）
 PLAN_ARG = '--routine-plan'
 ACCOUNT_ARG = '--schedule-account'
+SERVER_ARG = '--schedule-server'
 
 
 def _clean(value: Optional[str]) -> Optional[str]:
@@ -48,13 +49,19 @@ def scheduled_account() -> Optional[str]:
     return _read_arg(ACCOUNT_ARG)
 
 
-def build_task_args(plan: Optional[str] = None, account: Optional[str] = None) -> str:
+def scheduled_server() -> Optional[str]:
+    """本次定时任务指定的客户端服务器（国服/国际服）；未指定返回 None。"""
+    return _read_arg(SERVER_ARG)
+
+
+def build_task_args(plan: Optional[str] = None, account: Optional[str] = None,
+                    server: Optional[str] = None) -> str:
     """构造追加到 ``-t <task>`` 之后的命令行参数片段。
 
     账号/计划名可能含空格，统一用双引号包裹；内部双引号去除以防注入。
     """
     parts = []
-    for name, value in ((PLAN_ARG, plan), (ACCOUNT_ARG, account)):
+    for name, value in ((PLAN_ARG, plan), (ACCOUNT_ARG, account), (SERVER_ARG, server)):
         if value:
             safe = str(value).replace('"', '').strip()
             if safe:

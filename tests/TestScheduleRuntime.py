@@ -5,7 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from src.schedule_runtime import (
-    ACCOUNT_ARG, PLAN_ARG, build_task_args, scheduled_account, scheduled_plan,
+    ACCOUNT_ARG, PLAN_ARG, SERVER_ARG, build_task_args, scheduled_account,
+    scheduled_plan, scheduled_server,
 )
 
 
@@ -44,6 +45,19 @@ class TestScheduleRuntime(unittest.TestCase):
         with patch.object(sys, 'argv', argv):
             self.assertEqual(scheduled_plan(), '默认')
             self.assertEqual(scheduled_account(), 'abc')
+
+    def test_server_arg_read_and_encoding(self):
+        argv = ['main.py', '-t', '1', SERVER_ARG, '国际服']
+        with patch.object(sys, 'argv', argv):
+            self.assertEqual(scheduled_server(), '国际服')
+        encoded = build_task_args(None, None, '国际服')
+        self.assertEqual(encoded, f'{SERVER_ARG} "国际服"')
+
+    def test_build_task_args_with_all_three(self):
+        encoded = build_task_args('默认', 'abc', '国服')
+        self.assertEqual(
+            encoded,
+            f'{PLAN_ARG} "默认" {ACCOUNT_ARG} "abc" {SERVER_ARG} "国服"')
 
 
 if __name__ == '__main__':

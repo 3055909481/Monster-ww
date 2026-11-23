@@ -1,4 +1,4 @@
-"""创建计划任务弹窗：计划配置/执行账号仅对日常一条龙动态显示。"""
+"""创建计划任务弹窗：计划配置仅一条龙显示；执行账号/服务器对所有任务可见。"""
 
 import unittest
 from unittest.mock import patch as mock_patch
@@ -65,25 +65,30 @@ class TestScheduleDialogVisibility(unittest.TestCase):
         dlg = self._dialog([FakeTask('噩梦巢穴任务', 'NightmareNestTask')])
         self._sync(dlg, 0)
         self.assertTrue(dlg.schedule_plan_combo.isHidden())
-        self.assertTrue(dlg.schedule_account_combo.isHidden())
+        # 账号/服务器对所有任务生效，不能隐藏
+        self.assertFalse(dlg.schedule_account_combo.isHidden())
+        self.assertFalse(dlg.schedule_server_combo.isHidden())
 
     def test_extras_shown_for_routine_task(self):
         dlg = self._dialog([FakeTask('日常一条龙', 'RoutineTask')])
         self._sync(dlg, 0)
         self.assertFalse(dlg.schedule_plan_combo.isHidden())
         self.assertFalse(dlg.schedule_account_combo.isHidden())
+        self.assertFalse(dlg.schedule_server_combo.isHidden())
 
-    def test_switching_task_resets_values(self):
+    def test_switching_task_resets_only_plan(self):
         dlg = self._dialog([
             FakeTask('日常一条龙', 'RoutineTask'),
             FakeTask('噩梦巢穴任务', 'NightmareNestTask'),
         ])
         dlg.schedule_plan_combo.setCurrentText('国际服')
         dlg.schedule_account_combo.setCurrentText('acc@x.com')
-        # 切到非一条龙：控件隐藏且值被重置为首项
+        dlg.schedule_server_combo.setCurrentText('国际服')
+        # 切到非一条龙：只有计划配置被隐藏并重置；账号/服务器保留
         self._sync(dlg, 1)
         self.assertEqual(dlg.schedule_plan_combo.currentIndex(), 0)
-        self.assertEqual(dlg.schedule_account_combo.currentIndex(), 0)
+        self.assertEqual(dlg.schedule_account_combo.currentText(), 'acc@x.com')
+        self.assertEqual(dlg.schedule_server_combo.currentText(), '国际服')
         self.assertTrue(dlg.schedule_plan_combo.isHidden())
 
     def test_hidden_dialog_never_adjusts_size(self):

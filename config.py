@@ -163,9 +163,18 @@ def set_server_override(server):
 
 
 def get_current_server():
-    """Resolve the active server: per-account override first, then global config."""
+    """Resolve the active server: per-account override, schedule arg, then global."""
     if _server_override in SERVER_OPTIONS:
         return _server_override
+    try:
+        # Scheduled tasks pass --schedule-server before the game is launched,
+        # so the right client path is used from the very first start_device().
+        from src.schedule_runtime import scheduled_server
+        scheduled = scheduled_server()
+        if scheduled in SERVER_OPTIONS:
+            return scheduled
+    except Exception:
+        pass
     try:
         from Mon import og
         value = og.global_config.get_config('Basic Options').get(SERVER_KEY)
