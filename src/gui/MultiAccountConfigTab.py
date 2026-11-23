@@ -153,6 +153,19 @@ class AccountTaskCard(Card):
         row.set_control(self.task_combo)
         self.viewLayout.addWidget(row)
 
+        # Per-account client server. Empty means "follow the global Game Server
+        # option"; selecting one overrides it just for this account's run.
+        self.server_combo = ComboBox()
+        self.server_combo.setMinimumWidth(280)
+        self.server_combo.addItem('跟随全局', userData=None)
+        for server in ('国服', '国际服'):
+            self.server_combo.addItem(server, userData=server)
+        server_index = max(0, self.server_combo.findData(account.get('server')))
+        self.server_combo.setCurrentIndex(server_index)
+        row = SettingRow('客户端服务器', '该账号执行时使用国服/国际服路径；默认跟随主界面配置。', control_width=320)
+        row.set_control(self.server_combo)
+        self.viewLayout.addWidget(row)
+
         self.config_container = QWidget()
         self.config_layout = QVBoxLayout(self.config_container)
         self.config_layout.setContentsMargins(0, 0, 0, 0)
@@ -236,6 +249,7 @@ class AccountTaskCard(Card):
     def snapshot(self):
         return {'account_key': self.account_edit.text(), 'task': deepcopy(self.reference),
                 'enabled': self.enabled_switch.isChecked(),
+                'server': self.server_combo.currentData(),
                 'config': deepcopy(dict(self.values)) if self.reference else {}}
 
 

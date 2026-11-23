@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import config
@@ -58,6 +59,67 @@ class TestCalculatePcExePath(unittest.TestCase):
             result = config._find_pc_exe_near_registered_path(str(launcher))
 
         self.assertEqual(str(game_exe), result)
+
+
+class TestGameServerPath(unittest.TestCase):
+
+    def setUp(self):
+        self._saved_override = config._server_override
+        config.set_server_override(None)
+
+    def tearDown(self):
+        config._server_override = self._saved_override
+
+    def _basic(self, server=None, cn='', global_path=''):
+        return {
+            config.SERVER_KEY: server or config.SERVER_CN,
+            config.SERVER_PATH_KEYS[config.SERVER_CN]: cn,
+            config.SERVER_PATH_KEYS[config.SERVER_GLOBAL]: global_path,
+        }
+
+    def _mock_basic(self, basic):
+        og = SimpleNamespace(global_config=SimpleNamespace(get_config=lambda name: basic))
+        return patch("Mon.og", og, create=True)
+
+    def test_configured_path_wins_for_selected_server(self):
+        import os
+        with tempfile.NamedTemporaryFile(suffix='.exe', delete=False) as handle:
+            path = handle.name
+        try:
+            basic = self._basic(config.SERVER_GLOBAL, cn='C:/missing/cn.exe', global_path=path)
+            with self._mock_basic(basic):
+                self.assertEqual(config.get_current_server(), config.SERVER_GLOBAL)
+                self.assertEqual(config.calculate_pc_exe_path(), path)
+        finally:
+            os.unlink(path)
+
+    def test_missing_configured_path_falls_back_to_detection(self):
+        basic = self._basic(config.SERVER_CN, cn=r'C:\missing\cn.exe')
+        with self._mock_basic(basic):
+            with patch.object(config, "_find_most_recently_run_pc_exe", return_value='C:/auto.exe'):
+                self.assertEqual(config.calculate_pc_exe_path(), 'C:/auto.exe')
+
+    def test_account_override_switches_server_path(self):
+        import os
+        with tempfile.NamedTemporaryFile(suffix='.exe', delete=False) as handle:
+            cn_path = handle.name
+        try:
+            basic = self._basic(config.SERVER_GLOBAL, cn=cn_path, global_path='C:/missing/global.exe')
+            with self._mock_basic(basic):
+                config.set_server_override(config.SERVER_CN)
+                self.assertEqual(config.calculate_pc_exe_path(), cn_path)
+                config.set_server_override(None)
+                with patch.object(config, "_find_most_recently_run_pc_exe", return_value='C:/auto.exe'):
+                    self.assertEqual(config.calculate_pc_exe_path(), 'C:/auto.exe')
+        finally:
+            os.unlink(cn_path)
+
+    def test_server_options_in_basic_config(self):
+        cfg_type = config.basic_config_option.config_type
+        self.assertEqual(cfg_type[config.SERVER_KEY]['type'], 'drop_down')
+        self.assertEqual(cfg_type[config.SERVER_KEY]['options'], ['国服', '国际服'])
+        for key in config.SERVER_PATH_KEYS.values():
+            self.assertEqual(cfg_type[key]['type'], 'file_selector')
 
 
 if __name__ == "__main__":

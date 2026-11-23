@@ -145,7 +145,61 @@ def _find_pc_exe_near_registered_path(registered_path):
     return None
 
 
-def calculate_pc_exe_path(running_path):
+# 客户端服选择：国服 / 国际服。两台客户端 exe 同名（Wuthering Waves.exe），
+# 只是安装目录不同，因此用「服务器 → 完整路径」配置区分，空值回退自动探测。
+SERVER_CN = '国服'
+SERVER_GLOBAL = '国际服'
+SERVER_OPTIONS = (SERVER_CN, SERVER_GLOBAL)
+SERVER_KEY = 'Game Server'
+SERVER_PATH_KEYS = {SERVER_CN: 'CN Client Path', SERVER_GLOBAL: 'Global Client Path'}
+# 多账号执行时按账号临时切换服；None 表示跟随全局配置。
+_server_override = None
+
+
+def set_server_override(server):
+    """Temporarily select a server (used per-account); None restores global."""
+    global _server_override
+    _server_override = server if server in SERVER_OPTIONS else None
+
+
+def get_current_server():
+    """Resolve the active server: per-account override first, then global config."""
+    if _server_override in SERVER_OPTIONS:
+        return _server_override
+    try:
+        from Mon import og
+        value = og.global_config.get_config('Basic Options').get(SERVER_KEY)
+        if value in SERVER_OPTIONS:
+            return value
+    except Exception:
+        pass
+    return SERVER_CN
+
+
+def configured_client_path(server=None):
+    """Return the user-configured launcher path for a server, if it still exists."""
+    server = server or get_current_server()
+    key = SERVER_PATH_KEYS.get(server)
+    if not key:
+        return None
+    try:
+        from Mon import og
+        value = og.global_config.get_config('Basic Options').get(key)
+    except Exception:
+        return None
+    if isinstance(value, str) and value.strip():
+        path = Path(os.path.expandvars(value.strip().strip('"')))
+        if path.is_file():
+            return str(path)
+    return None
+
+
+def calculate_pc_exe_path(running_path=None):
+    # An explicit per-server path always wins: it is the whole point of the
+    # dual-client config. Fall back to auto-detection only when unset/missing.
+    explicit = configured_client_path()
+    if explicit:
+        return explicit
     if running_path is None:
         return _find_most_recently_run_pc_exe() or _find_pc_exe_from_registry()
     game_exe_folder = Path(running_path).parents[3]
@@ -194,6 +248,21 @@ for _k in _CLICK_JITTER_KEYS:
 _basic_desc.update({
     'Enable Click Jitter': '开启后点击坐标在极小范围内抖动，提升按钮命中率；关闭则恢复固定坐标',
     'Click Jitter Radius (px)': '抖动半径（像素），默认 2，最大 8；中心仍是原坐标，不会系统性偏移',
+})
+
+# 客户端服选择与路径：放在 Game 分组，紧邻「Auto Start Game When App Starts」。
+# 留空则沿用原有的「最近运行 → 注册表」自动探测，老用户无需改动即可保持原行为。
+_SERVER_OPTION_KEYS = (SERVER_KEY, *SERVER_PATH_KEYS.values())
+basic_config_option.default_config.update({SERVER_KEY: SERVER_CN,
+                                           SERVER_PATH_KEYS[SERVER_CN]: '',
+                                           SERVER_PATH_KEYS[SERVER_GLOBAL]: ''})
+_basic_type[SERVER_KEY] = {'group': 'Game', 'type': 'drop_down', 'options': list(SERVER_OPTIONS)}
+for _path_key in SERVER_PATH_KEYS.values():
+    _basic_type[_path_key] = {'group': 'Game', 'type': 'file_selector', 'selector_type': 'file'}
+_basic_desc.update({
+    SERVER_KEY: '选择要启动的鸣潮客户端服务器（国服/国际服）；多账号任务可按账号单独覆盖',
+    SERVER_PATH_KEYS[SERVER_CN]: '国服客户端 Wuthering Waves.exe 完整路径；留空则自动探测',
+    SERVER_PATH_KEYS[SERVER_GLOBAL]: '国际服客户端 Wuthering Waves.exe 完整路径；留空则自动探测',
 })
 
 key_config_option = ConfigOption('Game Hotkey', {

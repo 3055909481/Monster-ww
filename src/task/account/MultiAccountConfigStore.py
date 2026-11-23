@@ -91,6 +91,9 @@ def validate_accounts(accounts, executor=None):
                 resolve_task(executor, reference)
         if not isinstance(account.get('config'), dict):
             raise ValueError(_tr('Task configuration for account {account} must be an object.').format(account=key))
+        server = account.get('server')
+        if server is not None and server not in ('国服', '国际服'):
+            raise ValueError(_tr('Server for account {account} must be 国服 or 国际服.').format(account=key))
 
 
 class MultiAccountConfigStore:

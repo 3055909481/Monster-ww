@@ -75,6 +75,10 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
             for index, (account, task) in enumerate(plan):
                 try:
                     self._target_account_key = account['account_key']
+                    # Per-account client server: make this account's exe path
+                    # override the global Game Server while its task runs.
+                    from config import set_server_override
+                    set_server_override(account.get('server'))
                     with isolated_task_configs(self.executor.get_all_tasks()):
                         if index == 0:
                             WWOneTimeTask.run(self)
@@ -109,6 +113,10 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
             self.info_set('状态', '执行失败')
             self.info_set('Error', str(error))
             raise
+        finally:
+            # Never leak a per-account override into later manual launches.
+            from config import set_server_override
+            set_server_override(None)
 
     def _find_target_account(self, account_key):
         matches = [box for box in self.ocr()

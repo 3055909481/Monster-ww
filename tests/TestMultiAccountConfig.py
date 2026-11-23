@@ -956,5 +956,41 @@ class TestMultiAccountConfigUI(unittest.TestCase):
             card.deleteLater()
 
 
+class TestAccountServer(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_server_roundtrip_in_snapshot(self):
+        base = account(key='abc')
+        base['server'] = '国际服'
+        card = AccountTaskCard(base, [], Mock())
+        try:
+            self.assertEqual(card.server_combo.currentData(), '国际服')
+            self.assertEqual(card.snapshot()['server'], '国际服')
+            card.server_combo.setCurrentIndex(0)  # 跟随全局
+            self.assertIsNone(card.snapshot()['server'])
+        finally:
+            card.deleteLater()
+
+    def test_validate_accepts_known_servers_and_rejects_unknown(self):
+        good = account(key='a'); good['server'] = '国服'
+        validate_accounts([good])
+        blank = account(key='b'); blank['server'] = None
+        validate_accounts([blank])  # legacy / follow-global
+        bad = account(key='c'); bad['server'] = '台服'
+        with self.assertRaises(ValueError):
+            validate_accounts([bad])
+
+    def test_store_preserves_server_field(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = MultiAccountConfigStore(folder)
+            acc = account(key='d'); acc['server'] = '国际服'
+            store.save([acc])
+            loaded = store.load()
+        self.assertEqual(loaded[0]['server'], '国际服')
+
+
 if __name__ == '__main__':
     unittest.main()
