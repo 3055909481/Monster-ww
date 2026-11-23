@@ -229,5 +229,22 @@ class TestConfigMigration(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(appdata, 'Monster-ww')))
 
 
+class TestThreadNameSanitizing(unittest.TestCase):
+
+    def test_log_filter_scrubs_thread_name(self):
+        import logging
+        record = logging.LogRecord('Mon', logging.INFO, __file__, 1, 'hello', (), None)
+        record.threadName = 'ok-mcp'
+        ident._SanitizingFilter().filter(record)
+        self.assertEqual(record.threadName, 'monster-ww-mcp')
+
+    def test_unbranded_thread_name_untouched(self):
+        import logging
+        record = logging.LogRecord('Mon', logging.INFO, __file__, 1, 'hello', (), None)
+        record.threadName = 'MainThread'
+        ident._SanitizingFilter().filter(record)
+        self.assertEqual(record.threadName, 'MainThread')
+
+
 if __name__ == '__main__':
     unittest.main()
