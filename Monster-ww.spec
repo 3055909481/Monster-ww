@@ -53,11 +53,10 @@ hiddenimports = collect_submodules('src')
 hiddenimports += ['src.identity', 'src.schedule_patch', 'src.adaptive_interval',
                   'src.team_overlay', 'src.click_jitter']
 binaries = collect_dynamic_libs('openvino')
-# The standalone updater (MonsterUpdate.exe) owns download/extract; py7zr is
-# no longer bundled into the main app. update_core.py stays plain source at the
-# repo root and is imported by src/updater.py at runtime, so ship it explicitly.
-if (root / 'update_core.py').is_file():
-    datas.append((str(root / 'update_core.py'), '.'))
+# The standalone updater (MonsterUpdate.exe) owns download/extract. src/updater.py
+# only needs update_core for updater_path()/launch_updater(), so freeze it into
+# the .pyz instead of also dropping a readable update_core.py next to the exe
+# (the release tree must not carry readable business source).
 hiddenimports += ['update_core']
 # Our framework fork is named Mon (upstream is ok). Workshop character code
 # still imports "ok"; identity.py aliases ok -> Mon at runtime, so we only

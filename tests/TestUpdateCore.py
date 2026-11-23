@@ -1,5 +1,7 @@
 """独立更新程序核心逻辑测试：进度回调、校验、解压、安装与回滚。"""
 import hashlib
+import importlib.util
+import os
 import tempfile
 import unittest
 import zipfile
@@ -7,6 +9,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import update_core as c
+
+HAVE_PY7ZR = importlib.util.find_spec('py7zr') is not None
 
 
 class TestProgress(unittest.TestCase):
@@ -96,6 +100,17 @@ class TestDownloadAndVerify(unittest.TestCase):
             c.verify(archive, 'a' * 64, 'A' * 64, progress=lambda *a: seen.append(a))
         self.assertEqual(seen[-1][0], '校验通过')
 
+    def test_verify_without_checksum_is_reported_not_silent(self):
+        """A missing .sha256 must be visible: skipping verification quietly is
+        how a swapped download goes unnoticed."""
+        with tempfile.TemporaryDirectory() as work:
+            archive = Path(work) / 'ok.7z'
+            archive.write_bytes(b'ok')
+            seen = []
+            c.verify(archive, None, 'a' * 64, progress=lambda *a: seen.append(a))
+            self.assertTrue(archive.exists(), 'nothing to delete without a checksum')
+        self.assertTrue(seen[-1][0].startswith('校验已跳过'), seen[-1])
+
 
 class TestExtract(unittest.TestCase):
 
@@ -127,6 +142,33 @@ class TestExtract(unittest.TestCase):
         with self.assertRaises(c.UpdateError) as ctx:
             c.extract(Path('x.rar'), Path('out'))
         self.assertIn('不支持', str(ctx.exception))
+
+    @unittest.skipUnless(HAVE_PY7ZR, 'py7zr not installed')
+    def test_7z_extract_reports_file_progress(self):
+        """Regression: the py7zr callback subclass omitted an abstract method,
+        so instantiating it raised TypeError and every .7z update (the only
+        asset shape published) failed at the extraction step."""
+        import py7zr
+
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = root / 'build' / 'Monster-ww'
+            app.mkdir(parents=True)
+            (app / 'Monster-ww.exe').write_text('fake')
+            (app / 'version.txt').write_text('v9')
+            (app / 'lib').mkdir()
+            (app / 'lib' / 'a.dll').write_text('dll')
+            archive = root / 'app.7z'
+            with py7zr.SevenZipFile(archive, 'w') as zf:
+                zf.writeall(str(app), 'Monster-ww')
+            seen = []
+            extracted = c.extract(archive, root / 'out',
+                                  progress=lambda *a: seen.append(a))
+            self.assertTrue((extracted / 'Monster-ww.exe').is_file())
+            self.assertTrue((extracted / 'lib' / 'a.dll').is_file())
+        self.assertTrue(any('正在解压' in a[0] for a in seen))
+        self.assertGreater(len(seen), 1, 'callback never reported any file')
+        self.assertIn('个文件', seen[-1][2])
 
 
 class TestInstall(unittest.TestCase):
@@ -163,6 +205,50 @@ class TestInstall(unittest.TestCase):
             self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
             self.assertFalse((Path(str(app) + '.old')).exists())
 
+    def test_install_discards_partial_new_tree_before_restoring(self):
+        """A cross-volume move is copy+delete: when it dies halfway the new
+        directory exists but is incomplete. Rolling back must delete it first,
+        otherwise the user keeps a broken mix while being told it was restored."""
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = root / 'Monster-ww'
+            app.mkdir()
+            (app / 'Monster-ww.exe').write_text('old')
+            (app / 'old.dll').write_text('old')
+            staged = root / 'staged' / 'Monster-ww'
+            staged.mkdir(parents=True)
+            (staged / 'Monster-ww.exe').write_text('new')
+
+            def half_move(src, dst, *args, **kwargs):
+                Path(dst).mkdir(parents=True, exist_ok=True)
+                (Path(dst) / 'Monster-ww.exe').write_text('new')  # partial copy
+                raise OSError('disk full')
+
+            with patch.object(c.shutil, 'move', side_effect=half_move):
+                with self.assertRaises(c.UpdateError) as ctx:
+                    c.install(staged, app)
+            self.assertIn('已恢复原版本', str(ctx.exception))
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+            self.assertTrue((app / 'old.dll').is_file(),
+                            'the half-written new tree must be removed')
+            self.assertFalse((Path(str(app) + '.old')).exists())
+
+    def test_install_does_not_claim_restore_when_rename_never_happened(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = root / 'Monster-ww'
+            app.mkdir()
+            (app / 'Monster-ww.exe').write_text('old')
+            staged = root / 'staged' / 'Monster-ww'
+            staged.mkdir(parents=True)
+            (staged / 'Monster-ww.exe').write_text('new')
+            with patch.object(Path, 'rename', side_effect=OSError('in use')), \
+                 patch.object(c.time, 'sleep', return_value=None):
+                with self.assertRaises(c.UpdateError) as ctx:
+                    c.install(staged, app)
+            self.assertIn('原版本未改动', str(ctx.exception))
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+
 
 class TestHandoff(unittest.TestCase):
 
@@ -190,6 +276,63 @@ class TestHandoff(unittest.TestCase):
             self.assertIn('--version', args)
             self.assertEqual(popen.call_args.kwargs['creationflags'],
                              c.subprocess.CREATE_NEW_PROCESS_GROUP)
+
+    def test_launch_updater_survives_a_locked_temp_copy(self):
+        """A previous updater window still holding the fixed temp exe must not
+        break the hand-off: fall back to a per-run file name."""
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = root / 'Monster-ww'
+            app.mkdir()
+            (app / c.UPDATER_NAME).write_bytes(b'fake-updater')
+            temp = root / 'temp'
+            temp.mkdir()
+            real_copy = c.shutil.copy2
+            calls = []
+
+            def flaky_copy(src, dst, *args, **kwargs):
+                calls.append(Path(dst))
+                if len(calls) == 1:
+                    raise PermissionError('file is in use')
+                return real_copy(src, dst)
+
+            with patch.object(c.shutil, 'copy2', side_effect=flaky_copy), \
+                 patch.object(c.tempfile, 'gettempdir', return_value=str(temp)), \
+                 patch.object(c.subprocess, 'Popen', Mock()), \
+                 patch.object(c.os, 'name', 'nt'):
+                launched = c.launch_updater(app / c.UPDATER_NAME, 'v9', app, 1)
+            self.assertNotEqual(launched.name, c.UPDATER_NAME)
+            self.assertEqual(launched.read_bytes(), b'fake-updater')
+
+
+class TestProcessRecovery(unittest.TestCase):
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows-only process probing')
+    def test_process_alive_detects_current_process(self):
+        self.assertTrue(c.process_alive(os.getpid()))
+        self.assertFalse(c.process_alive(0))
+
+    def test_revive_restores_backup_when_new_tree_is_unusable(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = root / 'Monster-ww'
+            app.mkdir()
+            (app / 'half-copied.dll').write_text('new')  # no exe: unusable
+            backup = Path(str(app) + '.old')
+            backup.mkdir()
+            (backup / 'Monster-ww.exe').write_text('old')
+            launched = []
+            with patch.object(c, 'relaunch',
+                              side_effect=lambda d, e=c.EXE_NAME: launched.append(d)):
+                self.assertTrue(c.revive(app))
+            self.assertEqual(len(launched), 1)
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+
+    def test_revive_reports_failure_when_nothing_is_runnable(self):
+        with tempfile.TemporaryDirectory() as work:
+            app = Path(work) / 'Monster-ww'
+            app.mkdir()
+            self.assertFalse(c.revive(app))
 
 
 if __name__ == '__main__':

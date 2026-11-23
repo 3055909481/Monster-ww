@@ -220,7 +220,17 @@ def update_to_version(version, exit_event=None, language=None):
     if os.name != "nt":
         raise RuntimeError("自动更新仅支持 Windows")
 
-    import update_core
+    try:
+        import update_core
+    except ImportError as error:
+        raise RuntimeError(
+            f"更新组件缺失（update_core），请前往 {RELEASE_PAGE} 手动下载完整安装包"
+        ) from error
+    if update_core is None:
+        # Cython-compiled modules return None instead of raising when the
+        # imported module is missing from the package.
+        raise RuntimeError(
+            f"更新组件缺失（update_core），请前往 {RELEASE_PAGE} 手动下载完整安装包")
 
     app_dir = _app_dir()
     updater_exe = update_core.updater_path(app_dir)

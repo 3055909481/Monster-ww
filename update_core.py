@@ -16,7 +16,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.error
@@ -166,7 +165,14 @@ def download(asset, destination, progress=None, is_cancelled=None, phase_base=5.
 def verify(destination, expected, actual, progress=None, is_cancelled=None):
     _check_cancel(is_cancelled)
     emit_progress(progress, "正在校验安装包…", 62, "SHA-256")
-    if expected and actual.lower() != expected.lower():
+    if not expected:
+        # Never pretend the package was verified: say so in the window's phase
+        # label and in the log, so a tampered/mixed-up download is visible.
+        LOG.warning("no SHA-256 published for %s; integrity check skipped",
+                    Path(destination).name)
+        emit_progress(progress, "校验已跳过（发布页未提供 SHA-256）", 65, "")
+        return
+    if actual.lower() != expected.lower():
         try:
             Path(destination).unlink(missing_ok=True)
         except OSError:
@@ -174,7 +180,7 @@ def verify(destination, expected, actual, progress=None, is_cancelled=None):
         raise UpdateError(
             f"安装包校验失败（期望 {expected[:12]}…，实际 {actual[:12]}…），文件已删除，请重试"
         )
-    emit_progress(progress, "校验通过", 65, expected[:12] + "…" if expected else "未提供校验值")
+    emit_progress(progress, "校验通过", 65, expected[:12] + "…")
 
 
 # --------------------------------------------------------------------------
@@ -200,6 +206,10 @@ def extract(archive, target, progress=None, is_cancelled=None, phase_base=65.0,
             state = {"done": 0}
 
             class _Reporter(ExtractCallback):
+                # py7zr declares six abstract callbacks; a subclass that omits
+                # any of them (report_postprocess included) raises TypeError at
+                # construction time, so every callback must be implemented even
+                # when it does nothing.
                 def report_start_preparation(self):
                     pass
 
@@ -217,6 +227,9 @@ def extract(archive, target, progress=None, is_cancelled=None, phase_base=65.0,
 
                 def report_warning(self, message):
                     LOG.warning("7z warning: %s", message)
+
+                def report_postprocess(self):
+                    pass
 
             emit_progress(progress, "正在解压更新包…", phase_base, f"共 {total} 个文件")
             zf.extractall(path=target, callback=_Reporter())
@@ -279,6 +292,52 @@ def wait_for_exit(pid, timeout=90, progress=None, is_cancelled=None, percent=2.0
         ctypes.windll.kernel32.CloseHandle(handle)
 
 
+def process_alive(pid):
+    """True while the given pid is still running (Windows only)."""
+    if not pid or os.name != "nt":
+        return False
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        return False  # already gone
+    try:
+        code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True  # cannot tell; assume it is still there
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _restore_backup(app_dir, backup):
+    """Discard a possibly-partial new install and put the old one back.
+
+    Returns True only when the old version is actually in place again, so the
+    caller never claims a rollback that did not happen.
+    """
+    app_dir, backup = Path(app_dir), Path(backup)
+    if not backup.exists():
+        return False
+    if app_dir.exists():
+        # Cross-volume moves are copy+delete, so a failure leaves a half-written
+        # directory here. The backup is authoritative; drop it.
+        try:
+            shutil.rmtree(app_dir)
+        except OSError as error:
+            LOG.error("cannot remove partial install %s: %s", app_dir, error)
+            return False
+    try:
+        backup.rename(app_dir)
+    except OSError as error:
+        LOG.error("restore from %s failed: %s", backup, error)
+        return False
+    return True
+
+
 def install(extracted_app, app_dir, progress=None, is_cancelled=None):
     """Back up, swap directories, roll back on failure."""
     extracted_app, app_dir = Path(extracted_app), Path(app_dir)
@@ -287,6 +346,7 @@ def install(extracted_app, app_dir, progress=None, is_cancelled=None):
     backup = Path(str(app_dir) + ".old")
     if backup.exists():
         shutil.rmtree(backup, ignore_errors=True)
+    moved_old = False
     try:
         # The old process may have just exited; Windows can still hold a
         # transient handle on its directory. Retry the rename briefly.
@@ -294,6 +354,7 @@ def install(extracted_app, app_dir, progress=None, is_cancelled=None):
             try:
                 if app_dir.exists():
                     app_dir.rename(backup)
+                    moved_old = True
                 break
             except OSError:
                 if attempt == 9:
@@ -305,18 +366,24 @@ def install(extracted_app, app_dir, progress=None, is_cancelled=None):
         emit_progress(progress, "正在安装更新…", 94, "写入新版本")
         shutil.move(str(extracted_app), str(app_dir))
     except UpdateCancelled:
-        if not app_dir.exists() and backup.exists():
-            backup.rename(app_dir)
+        if moved_old and not _restore_backup(app_dir, backup):
+            raise UpdateError(
+                f"已取消，但原版本恢复失败；原版本完整保存在 {backup}，请手动改回 {app_dir}"
+            ) from None
         raise
     except Exception as error:
-        # Roll back so the user is never left with no runnable app.
-        if not app_dir.exists() and backup.exists():
-            try:
-                backup.rename(app_dir)
-            except Exception as rollback_error:
-                LOG.error("rollback failed: %s", rollback_error)
+        if not moved_old:
+            # The rename never happened, so the running install is untouched.
+            raise UpdateError(
+                f"安装失败，原版本未改动：{error}。请确认没有其他程序占用 {app_dir} 后重试"
+            ) from error
+        if _restore_backup(app_dir, backup):
+            raise UpdateError(
+                f"安装失败，已恢复原版本：{error}。请关闭杀毒软件或手动解压覆盖后重试"
+            ) from error
         raise UpdateError(
-            f"安装失败，已恢复原版本：{error}。请关闭杀毒软件或手动解压覆盖后重试"
+            f"安装失败，且自动恢复原版本也失败：{error}。"
+            f"原版本完整保存在 {backup}，请手动将其改名为 {app_dir} 后重试"
         ) from error
     emit_progress(progress, "安装完成", 98, "清理旧版本")
     # Old backup is disposable; remove it in the background on next run only.
@@ -329,6 +396,30 @@ def relaunch(app_dir, exe_name=EXE_NAME):
         raise UpdateError(f"未找到 {exe_name}，请手动启动 {app_dir}")
     subprocess.Popen([str(exe)], cwd=str(app_dir), close_fds=True)
     return exe
+
+
+def revive(app_dir, exe_name=EXE_NAME):
+    """Restart *something runnable* after a failed/cancelled update.
+
+    The app quits the moment the hand-off returns, so a failure during the
+    download leaves the user with nothing on screen. Put the backup back when
+    the new install is not runnable, then start it. Returns True on success.
+    """
+    app_dir = Path(app_dir)
+    backup = Path(str(app_dir) + ".old")
+    exe = app_dir / exe_name
+    if not exe.is_file() and backup.is_dir():
+        LOG.warning("no runnable app in %s; restoring backup %s", app_dir, backup)
+        if _restore_backup(app_dir, backup):
+            exe = app_dir / exe_name
+    if not exe.is_file():
+        return False
+    try:
+        relaunch(app_dir, exe_name)
+    except (UpdateError, OSError) as error:
+        LOG.error("restart after failed update failed: %s", error)
+        return False
+    return True
 
 
 def staging_root():
@@ -358,8 +449,14 @@ def launch_updater(updater_exe, version, app_dir, pid, exe_name=EXE_NAME):
     temp_exe = temp_dir / UPDATER_NAME
     try:
         shutil.copy2(updater_exe, temp_exe)
-    except Exception as error:
-        raise UpdateError(f"无法启动更新程序：{error}") from error
+    except OSError:
+        # A previous updater window is still open and holds this exact file;
+        # fall back to a per-run name instead of failing the whole update.
+        temp_exe = temp_dir / f"MonsterUpdate-{os.getpid()}-{int(time.time())}.exe"
+        try:
+            shutil.copy2(updater_exe, temp_exe)
+        except Exception as error:
+            raise UpdateError(f"无法启动更新程序：{error}") from error
 
     args = [str(temp_exe), *updater_arguments(version, app_dir, pid, exe_name)]
     try:
@@ -386,35 +483,41 @@ def run_full_update(version, app_dir, pid, exe_name=EXE_NAME, progress=None,
     _check_cancel(is_cancelled)
     emit_progress(progress, "准备更新…", 1, str(version))
 
-    asset = resolve_asset(version, progress, is_cancelled)
     staging = staging_root()
     staging.mkdir(parents=True, exist_ok=True)
-    archive = staging / asset["name"]
-
-    actual = download(asset, archive, progress, is_cancelled)
-    checksum = expected_checksum(asset)
-    verify(archive, checksum, actual, progress, is_cancelled)
-
-    extracted = staging / APP_DIR_NAME
-    if extracted.exists():
-        shutil.rmtree(extracted, ignore_errors=True)
-    extracted_app = extract(archive, staging, progress, is_cancelled)
-
-    # Only the directory swap needs the app gone; downloading and extracting
-    # happen in a separate staging folder, so progress starts immediately.
-    wait_for_exit(pid, progress=progress, is_cancelled=is_cancelled, percent=85.0)
-    emit_progress(progress, "主程序已退出，开始安装…", 86, "")
-
-    backup = install(extracted_app, app_dir, progress, is_cancelled)
-    if auto_relaunch:
-        emit_progress(progress, "正在重新启动…", 99, EXE_NAME)
-        relaunch(app_dir, exe_name)
-    emit_progress(progress, "更新完成", 100, str(version))
-
-    # Best-effort cleanup; failures are harmless and must not fail the update.
+    backup = None
+    succeeded = False
     try:
-        shutil.rmtree(backup, ignore_errors=True)
+        asset = resolve_asset(version, progress, is_cancelled)
+        archive = staging / asset["name"]
+
+        actual = download(asset, archive, progress, is_cancelled)
+        checksum = expected_checksum(asset)
+        verify(archive, checksum, actual, progress, is_cancelled)
+
+        extracted = staging / APP_DIR_NAME
+        if extracted.exists():
+            shutil.rmtree(extracted, ignore_errors=True)
+        extracted_app = extract(archive, staging, progress, is_cancelled)
+
+        # Only the directory swap needs the app gone; downloading and
+        # extracting happen in a separate staging folder, so progress starts
+        # immediately.
+        wait_for_exit(pid, progress=progress, is_cancelled=is_cancelled, percent=85.0)
+        emit_progress(progress, "主程序已退出，开始安装…", 86, "")
+
+        backup = install(extracted_app, app_dir, progress, is_cancelled)
+        if auto_relaunch:
+            emit_progress(progress, "正在重新启动…", 99, EXE_NAME)
+            relaunch(app_dir, exe_name)
+        succeeded = True
+        emit_progress(progress, "更新完成", 100, str(version))
+        return True
+    finally:
+        # Never leak a ~250 MB archive or a half-extracted tree, even on
+        # failure: the next attempt re-downloads anyway. The .old backup is
+        # kept unless the whole update succeeded, so a failed install stays
+        # recoverable through revive() or a manual rename.
+        if succeeded and backup is not None:
+            shutil.rmtree(backup, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)
-    except Exception:
-        pass
-    return True

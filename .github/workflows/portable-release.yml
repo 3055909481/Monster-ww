@@ -198,6 +198,10 @@ jobs:
             $_.Name -notin @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py')
           }
           if ($leaks) { $leaks | ForEach-Object { Write-Host "LEAK: $($_.FullName)" }; throw 'Readable business source leaked into package.' }
+          # The package root must stay clean too: update_core.py used to be
+          # copied here as a plain .py and slipped past the src-only scan.
+          $rootPy = Get-ChildItem -Filter '*.py' 'dist/Monster-ww'
+          if ($rootPy) { $rootPy | ForEach-Object { Write-Host "LEAK: $($_.FullName)" }; throw 'Readable source at the package root.' }
           $required = @('dist/Monster-ww/Monster-ww.exe', 'dist/Monster-ww/src/identity.py',
                         'dist/Monster-ww/workshop_bundle/teams.json')
           foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing required file: $f" } }
