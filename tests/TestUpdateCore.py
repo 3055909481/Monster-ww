@@ -13,6 +13,19 @@ import update_core as c
 HAVE_PY7ZR = importlib.util.find_spec('py7zr') is not None
 
 
+def make_app_tree(root, exe='new'):
+    """Create a directory that passes ``update_core.missing_files``."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'Monster-ww.exe').write_text(exe)
+    (root / 'version.txt').write_text('v9')
+    (root / 'assets' / 'data').mkdir(parents=True, exist_ok=True)
+    (root / 'assets' / 'data' / 'domain_catalog.json').write_text('{}')
+    (root / 'workshop_bundle').mkdir(parents=True, exist_ok=True)
+    (root / 'workshop_bundle' / 'teams.json').write_text('{}')
+    return root
+
+
 class TestProgress(unittest.TestCase):
 
     def test_emit_progress_clamps_and_is_safe(self):
@@ -176,12 +189,8 @@ class TestInstall(unittest.TestCase):
     def test_install_swaps_directories(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
-            app = root / 'Monster-ww'
-            app.mkdir()
-            (app / 'Monster-ww.exe').write_text('old')
-            staged = root / 'staged' / 'Monster-ww'
-            staged.mkdir(parents=True)
-            (staged / 'Monster-ww.exe').write_text('new')
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            staged = make_app_tree(root / 'staged' / 'Monster-ww', 'new')
             seen = []
             backup = c.install(staged, app, progress=lambda *a: seen.append(a))
             self.assertEqual((app / 'Monster-ww.exe').read_text(), 'new')
@@ -189,65 +198,144 @@ class TestInstall(unittest.TestCase):
             self.assertEqual((backup / 'Monster-ww.exe').read_text(), 'old')
         self.assertEqual(seen[-1][0], '安装完成')
 
+    def test_install_refuses_an_incomplete_new_tree(self):
+        """v1.0.39 shipped an install missing assets/data/domain_catalog.json:
+        the exe was there, so the app started and crashed immediately. The live
+        install must not be touched by a tree like that."""
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            staged = root / 'staged' / 'Monster-ww'
+            staged.mkdir(parents=True)
+            (staged / 'Monster-ww.exe').write_text('new')
+            with self.assertRaises(c.UpdateError) as ctx:
+                c.install(staged, app)
+            self.assertIn('更新包不完整', str(ctx.exception))
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+            self.assertFalse((Path(str(app) + '.old')).exists())
+
     def test_install_rolls_back_on_failure(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
-            app = root / 'Monster-ww'
-            app.mkdir()
-            (app / 'Monster-ww.exe').write_text('old')
-            staged = root / 'staged' / 'Monster-ww'
-            staged.mkdir(parents=True)
-            (staged / 'Monster-ww.exe').write_text('new')
-            with patch.object(c.shutil, 'move', side_effect=OSError('locked')):
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            staged = make_app_tree(root / 'staged' / 'Monster-ww', 'new')
+            with patch.object(c, 'move_tree', side_effect=OSError('locked')):
                 with self.assertRaises(c.UpdateError) as ctx:
                     c.install(staged, app)
             self.assertIn('已恢复原版本', str(ctx.exception))
             self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
             self.assertFalse((Path(str(app) + '.old')).exists())
 
-    def test_install_discards_partial_new_tree_before_restoring(self):
-        """A cross-volume move is copy+delete: when it dies halfway the new
-        directory exists but is incomplete. Rolling back must delete it first,
-        otherwise the user keeps a broken mix while being told it was restored."""
+    def test_install_sets_partial_tree_aside_instead_of_deleting_it(self):
+        """Deleting a 244 MB partial tree can stall on one file a scanner still
+        holds, and that turned a recoverable update into a lost install. The
+        partial tree is renamed aside so the backup can simply be renamed back."""
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
-            app = root / 'Monster-ww'
-            app.mkdir()
-            (app / 'Monster-ww.exe').write_text('old')
-            (app / 'old.dll').write_text('old')
-            staged = root / 'staged' / 'Monster-ww'
-            staged.mkdir(parents=True)
-            (staged / 'Monster-ww.exe').write_text('new')
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            staged = make_app_tree(root / 'staged' / 'Monster-ww', 'new')
 
-            def half_move(src, dst, *args, **kwargs):
+            def half_move(src, dst):
                 Path(dst).mkdir(parents=True, exist_ok=True)
                 (Path(dst) / 'Monster-ww.exe').write_text('new')  # partial copy
-                raise OSError('disk full')
+                raise OSError('access denied')
 
-            with patch.object(c.shutil, 'move', side_effect=half_move):
+            with patch.object(c, 'move_tree', side_effect=half_move):
                 with self.assertRaises(c.UpdateError) as ctx:
                     c.install(staged, app)
             self.assertIn('已恢复原版本', str(ctx.exception))
             self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
-            self.assertTrue((app / 'old.dll').is_file(),
-                            'the half-written new tree must be removed')
             self.assertFalse((Path(str(app) + '.old')).exists())
+            self.assertTrue((Path(str(app) + '.failed')).exists(),
+                            'the partial tree must be kept aside, not deleted')
 
     def test_install_does_not_claim_restore_when_rename_never_happened(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
-            app = root / 'Monster-ww'
-            app.mkdir()
-            (app / 'Monster-ww.exe').write_text('old')
-            staged = root / 'staged' / 'Monster-ww'
-            staged.mkdir(parents=True)
-            (staged / 'Monster-ww.exe').write_text('new')
-            with patch.object(Path, 'rename', side_effect=OSError('in use')), \
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            staged = make_app_tree(root / 'staged' / 'Monster-ww', 'new')
+            real_rename = c.os.rename
+
+            def refuse_backup_name(src, dst, *args, **kwargs):
+                if str(dst).endswith('.old'):
+                    raise OSError('in use')
+                return real_rename(src, dst, *args, **kwargs)
+
+            with patch.object(c.os, 'rename', side_effect=refuse_backup_name), \
                  patch.object(c.time, 'sleep', return_value=None):
                 with self.assertRaises(c.UpdateError) as ctx:
                     c.install(staged, app)
             self.assertIn('原版本未改动', str(ctx.exception))
             self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+
+
+@unittest.skipUnless(HAVE_PY7ZR, 'py7zr not installed')
+class TestArchiveToInstall(unittest.TestCase):
+
+    def test_7z_round_trip_unpacks_next_to_the_app_and_swaps(self):
+        """Regression: the tree is unpacked beside the app, so the swap is a
+        rename of a complete directory - no second 250 MB copy, no half-written
+        app directory when anything fails."""
+        import py7zr
+
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            build = make_app_tree(root / 'build' / 'Monster-ww', 'new')
+            archive = root / 'pkg.7z'
+            with py7zr.SevenZipFile(archive, 'w') as zf:
+                zf.writeall(str(build), 'Monster-ww')
+
+            new_root = c.extract_root(app)
+            self.assertEqual(new_root, Path(str(app) + '.new'))
+            extracted = c.extract(archive, new_root)
+            self.assertEqual(extracted, new_root / 'Monster-ww')
+            self.assertEqual(c.missing_files(extracted), [])
+
+            backup = c.install(extracted, app)
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'new')
+            self.assertEqual((backup / 'Monster-ww.exe').read_text(), 'old')
+            self.assertEqual(c.missing_files(app), [])
+
+
+class TestSwapHandshake(unittest.TestCase):
+    """The app must stay alive while the package downloads; it quits only when
+    the updater is about to replace its files."""
+
+    def test_swap_request_roundtrip(self):
+        with tempfile.TemporaryDirectory() as work, \
+                patch.object(c, 'staging_root', return_value=Path(work)):
+            self.assertFalse(c.swap_request_path().exists())
+            c.request_swap()
+            self.assertTrue(c.swap_request_path().exists())
+            c.clear_swap_request()
+            self.assertFalse(c.swap_request_path().exists())
+
+    def test_full_update_requests_swap_before_waiting_for_exit(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            new_root = root / 'Monster-ww.new'
+            order = []
+
+            def fake_extract(archive, target, *args, **kwargs):
+                return make_app_tree(Path(target) / 'Monster-ww', 'new')
+
+            with patch.object(c, 'staging_root', return_value=root / 'staging'), \
+                 patch.object(c, 'extract_root', return_value=new_root), \
+                 patch.object(c, 'resolve_asset',
+                              return_value={'name': 'pkg.7z', 'url': 'u'}), \
+                 patch.object(c, 'download', return_value='a' * 64), \
+                 patch.object(c, 'expected_checksum', return_value=None), \
+                 patch.object(c, 'extract', side_effect=fake_extract), \
+                 patch.object(c, 'request_swap',
+                              side_effect=lambda: order.append('swap')), \
+                 patch.object(c, 'wait_for_exit',
+                              side_effect=lambda *a, **k: order.append('wait')), \
+                 patch.object(c, 'relaunch'):
+                self.assertTrue(c.run_full_update('v9', app, pid=0))
+            self.assertEqual(order, ['swap', 'wait'])
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'new')
 
 
 class TestHandoff(unittest.TestCase):
@@ -319,14 +407,24 @@ class TestProcessRecovery(unittest.TestCase):
             app.mkdir()
             (app / 'half-copied.dll').write_text('new')  # no exe: unusable
             backup = Path(str(app) + '.old')
-            backup.mkdir()
-            (backup / 'Monster-ww.exe').write_text('old')
+            make_app_tree(backup, 'old')
             launched = []
             with patch.object(c, 'relaunch',
                               side_effect=lambda d, e=c.EXE_NAME: launched.append(d)):
                 self.assertTrue(c.revive(app))
             self.assertEqual(len(launched), 1)
             self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+
+    def test_revive_refuses_an_incomplete_install_without_backup(self):
+        """The v1.0.39 crash: the exe was there, the assets were not. Relaunching
+        that tree only shows the user the same crash again."""
+        with tempfile.TemporaryDirectory() as work:
+            app = Path(work) / 'Monster-ww'
+            app.mkdir()
+            (app / 'Monster-ww.exe').write_text('new')
+            with patch.object(c, 'relaunch') as relaunched:
+                self.assertFalse(c.revive(app))
+            relaunched.assert_not_called()
 
     def test_revive_reports_failure_when_nothing_is_runnable(self):
         with tempfile.TemporaryDirectory() as work:

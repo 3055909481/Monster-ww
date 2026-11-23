@@ -8,9 +8,11 @@ GitHub REST API, so anonymous rate limits cannot break update checks.
 
 Installing an update is delegated to the standalone MonsterUpdate.exe window
 (see ``update_core.py`` / ``updater_app.py``): ``update_to_version`` just
-launches it with the target version and our PID, then lets the framework quit.
-That updater shows download/verify/extract/install/restart progress on its own
-window, which stays alive while this process exits and replaces its files.
+launches it with the target version and our PID. That updater shows
+download/verify/extract/install/restart progress on its own window while this
+app keeps running, and asks the app to quit (a swap-request file we poll) only
+right before the files are replaced - killing the app at hand-off left the user
+with nothing on screen for the whole download.
 
 User data lives in %APPDATA% and is never touched by the swap.
 """
@@ -20,6 +22,7 @@ import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 LOG = logging.getLogger(__name__)
@@ -209,13 +212,85 @@ def entry_notes(entry, language=None):
     return notes if isinstance(notes, list) else [notes]
 
 
+_SWAP_TIMER = None
+# Give up watching after half an hour: a stuck updater must not leave the app
+# waiting forever (the updater window keeps its own error path).
+_SWAP_WATCH_LIMIT_MS = 30 * 60 * 1000
+
+
+def _toast(message):
+    """Tell the user the update runs in the background window."""
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        from Mon.ui.qt.kit.feedback import show_toast
+
+        show_toast(QApplication.activeWindow(), message, tone="accent")
+    except Exception:
+        LOG.debug("toast unavailable", exc_info=True)
+
+
+def _watch_for_swap_request(max_wait_ms=_SWAP_WATCH_LIMIT_MS):
+    """Quit the app once the updater is ready to replace its files.
+
+    Download and unpack take minutes. The updater keeps the app alive while it
+    does that and writes a swap request only immediately before the directory
+    swap - the single moment the app has to be gone. Polling it here means a
+    failed download never closes the app at all.
+    """
+    global _SWAP_TIMER
+    try:
+        import update_core
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+    except Exception:
+        LOG.warning("update watchdog unavailable", exc_info=True)
+        return
+    app = QApplication.instance()
+    if app is None:
+        return
+    try:
+        flag = update_core.swap_request_path()
+    except Exception:
+        LOG.debug("cannot resolve swap request path", exc_info=True)
+        return
+
+    started = time.monotonic()
+    timer = QTimer(app)
+    timer.setInterval(800)
+
+    def check():
+        global _SWAP_TIMER
+        if flag.exists():
+            timer.stop()
+            _SWAP_TIMER = None
+            LOG.info("updater is ready to swap; closing so the files can be replaced")
+            try:
+                from Mon.core.events import communicate
+
+                communicate.quit.emit()
+            except Exception:
+                LOG.warning("framework quit unavailable; falling back to QApplication",
+                            exc_info=True)
+                app.quit()
+        elif (time.monotonic() - started) * 1000 > max_wait_ms:
+            timer.stop()
+            _SWAP_TIMER = None
+            LOG.warning("updater never requested a swap within %s ms", max_wait_ms)
+
+    timer.timeout.connect(check)
+    timer.start()
+    _SWAP_TIMER = timer
+
+
 def update_to_version(version, exit_event=None, language=None):
-    """Hand off to the standalone updater window, then let the app quit.
+    """Hand off to the standalone updater window; the app stays up meanwhile.
 
     All visible progress (download %, verify, extract %, install, restart) is
-    rendered by MonsterUpdate.exe, which survives this process exiting. Doing
-    the work in-app never worked: the framework emits quit immediately after
-    this returns, so no progress UI could be shown during download/extract.
+    rendered by MonsterUpdate.exe. ``restart_required`` stays False on purpose:
+    the framework quits the app when it is True, which used to kill it before
+    the download had even finished. The watchdog above quits the app later,
+    when the updater actually needs the files free.
     """
     if os.name != "nt":
         raise RuntimeError("自动更新仅支持 Windows")
@@ -235,8 +310,15 @@ def update_to_version(version, exit_event=None, language=None):
     app_dir = _app_dir()
     updater_exe = update_core.updater_path(app_dir)
     LOG.info("launching standalone updater %s for %s", updater_exe, version)
+    # A request left over from an earlier attempt would close the app instantly.
+    try:
+        update_core.clear_swap_request()
+    except Exception:
+        LOG.debug("cannot clear a stale swap request", exc_info=True)
     update_core.launch_updater(updater_exe, version, app_dir, os.getpid(), EXE_NAME)
-    return {"updated": True, "restart_required": True}
+    _watch_for_swap_request()
+    _toast("更新包正在后台下载，替换文件前会自动关闭并重启程序")
+    return {"updated": True, "restart_required": False}
 
 
 def install():

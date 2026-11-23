@@ -45,7 +45,8 @@ class TestLogging(unittest.TestCase):
 
 
 class TestRecoverAfterFailure(unittest.TestCase):
-    """The app quits on hand-off, so a failed update must bring it back."""
+    """The app is asked to quit right before the swap, so a failure can leave
+    the user with nothing on screen - but never while it is still running."""
 
     def _window_stub(self, pid):
         return SimpleNamespace(pid=pid, app_dir=Path('C:/app/Monster-ww'),

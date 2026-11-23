@@ -30,6 +30,18 @@ USER_AGENT = "Monster-ww-updater"
 APP_DIR_NAME = "Monster-ww"
 EXE_NAME = "Monster-ww.exe"
 UPDATER_NAME = "MonsterUpdate.exe"
+SWAP_REQUEST_NAME = "swap-request"
+
+# A tree counts as installed only when every entry below is there. A half
+# copied tree can still hold the exe and then crash on first start (that is
+# exactly how v1.0.39 shipped broken), so this is checked twice: before the
+# swap and before anything is relaunched.
+REQUIRED_FILES = (
+    EXE_NAME,
+    "version.txt",
+    "assets/data/domain_catalog.json",
+    "workshop_bundle/teams.json",
+)
 
 
 class UpdateError(RuntimeError):
@@ -57,6 +69,72 @@ def emit_progress(callback, phase, percent, detail=""):
 def _check_cancel(is_cancelled):
     if is_cancelled is not None and is_cancelled():
         raise UpdateCancelled()
+
+
+# --------------------------------------------------------------------------
+# Filesystem helpers
+# --------------------------------------------------------------------------
+def missing_files(app_dir):
+    """Relative paths a runnable install must have; empty list means usable."""
+    app_dir = Path(app_dir)
+    return [name for name in REQUIRED_FILES if not (app_dir / name).is_file()]
+
+
+def _sibling(app_dir, suffix):
+    """``<app_dir><suffix>``: a sibling on the same volume, never a child."""
+    return Path(str(Path(app_dir)) + suffix)
+
+
+def extract_root(app_dir):
+    """Directory the new tree is unpacked into.
+
+    Unpacking next to the install (instead of %TEMP%) makes the final swap a
+    rename: a 244 MB tree is copied exactly once, and a rename can never leave
+    a half-written directory where the app used to be.
+    """
+    return _sibling(app_dir, ".new")
+
+
+def _retry_os(action, attempts=10, delay=0.4):
+    """Run an OS call, retrying transient locks (scanners touch fresh files)."""
+    last = None
+    for attempt in range(attempts):
+        try:
+            return action()
+        except OSError as error:
+            last = error
+            if attempt < attempts - 1:
+                time.sleep(delay)
+    raise last
+
+
+def _copy2_retry(src, dst):
+    """``copy2`` that tolerates a scanner holding a freshly written file."""
+    _retry_os(lambda: shutil.copyfile(src, dst))
+    try:
+        shutil.copystat(src, dst, follow_symlinks=False)
+    except OSError as error:
+        LOG.warning("cannot copy attributes of %s: %s", dst, error)
+
+
+def _same_volume(path, directory):
+    try:
+        return os.stat(str(path)).st_dev == os.stat(str(directory)).st_dev
+    except OSError:
+        return False
+
+
+def move_tree(src, dst):
+    """Move a directory: a rename when possible, else a copy we can retry."""
+    src, dst = Path(src), Path(dst)
+    if _same_volume(src, dst.parent):
+        _retry_os(lambda: os.rename(str(src), str(dst)))
+        return
+    LOG.info("cross-volume install: copying %s to %s", src, dst)
+    shutil.copytree(str(src), str(dst), copy_function=_copy2_retry)
+    # Dropping the source is cleanup, not part of the install: one locked file
+    # in there (v1.0.39's failure) must not turn a finished copy into an error.
+    shutil.rmtree(str(src), ignore_errors=True)
 
 
 # --------------------------------------------------------------------------
@@ -314,57 +392,79 @@ def process_alive(pid):
 
 
 def _restore_backup(app_dir, backup):
-    """Discard a possibly-partial new install and put the old one back.
+    """Put the old version back, tolerating a lock on the new tree.
 
-    Returns True only when the old version is actually in place again, so the
-    caller never claims a rollback that did not happen.
+    Deleting the new tree can stall on a single file another process still
+    holds (v1.0.39 turned this into a lost install), so the partial tree is
+    renamed aside first and only deleted when setting it aside is impossible.
+    Returns True only when the old version is actually in place again.
     """
     app_dir, backup = Path(app_dir), Path(backup)
     if not backup.exists():
         return False
     if app_dir.exists():
-        # Cross-volume moves are copy+delete, so a failure leaves a half-written
-        # directory here. The backup is authoritative; drop it.
+        failed = _sibling(app_dir, ".failed")
         try:
-            shutil.rmtree(app_dir)
+            shutil.rmtree(failed, ignore_errors=True)
+            _retry_os(lambda: os.rename(str(app_dir), str(failed)))
+            LOG.warning("partial install moved aside: %s", failed)
         except OSError as error:
-            LOG.error("cannot remove partial install %s: %s", app_dir, error)
-            return False
+            LOG.error("cannot move partial install %s aside: %s", app_dir, error)
+            try:
+                _retry_os(lambda: shutil.rmtree(str(app_dir)))
+            except OSError as remove_error:
+                LOG.error("cannot remove partial install %s: %s", app_dir, remove_error)
+                return False
     try:
-        backup.rename(app_dir)
+        _retry_os(lambda: os.rename(str(backup), str(app_dir)))
     except OSError as error:
         LOG.error("restore from %s failed: %s", backup, error)
         return False
+    LOG.info("restored original install from %s", backup)
     return True
 
 
 def install(extracted_app, app_dir, progress=None, is_cancelled=None):
-    """Back up, swap directories, roll back on failure."""
+    """Swap the new tree in, keeping the old one recoverable.
+
+    The swap is a rename of an already complete tree, so a failure can cost at
+    most the rename itself - never a half-written app directory.
+    """
     extracted_app, app_dir = Path(extracted_app), Path(app_dir)
     _check_cancel(is_cancelled)
+
+    # Never touch the live install with a tree that cannot start on its own.
+    missing = missing_files(extracted_app)
+    if missing:
+        raise UpdateError(
+            "更新包不完整（缺少 " + "、".join(missing) + "），原版本未改动，请重新下载")
+
     emit_progress(progress, "正在安装更新…", 88, "备份当前版本")
-    backup = Path(str(app_dir) + ".old")
-    if backup.exists():
-        shutil.rmtree(backup, ignore_errors=True)
+    backup = _sibling(app_dir, ".old")
+    shutil.rmtree(backup, ignore_errors=True)
+    shutil.rmtree(_sibling(app_dir, ".failed"), ignore_errors=True)
     moved_old = False
     try:
-        # The old process may have just exited; Windows can still hold a
-        # transient handle on its directory. Retry the rename briefly.
-        for attempt in range(10):
-            try:
-                if app_dir.exists():
-                    app_dir.rename(backup)
+        if app_dir.exists():
+            # The old process may have just exited; Windows can still hold a
+            # transient handle on its directory. Retry the rename briefly.
+            for attempt in range(10):
+                try:
+                    os.rename(str(app_dir), str(backup))
                     moved_old = True
-                break
-            except OSError:
-                if attempt == 9:
-                    raise
-                time.sleep(0.5)
-                emit_progress(progress, "正在安装更新…", 88,
-                              f"等待文件释放（{attempt + 1}/10）")
+                    break
+                except OSError:
+                    if attempt == 9:
+                        raise
+                    time.sleep(0.5)
+                    emit_progress(progress, "正在安装更新…", 88,
+                                  f"等待文件释放（{attempt + 1}/10）")
         _check_cancel(is_cancelled)
         emit_progress(progress, "正在安装更新…", 94, "写入新版本")
-        shutil.move(str(extracted_app), str(app_dir))
+        move_tree(extracted_app, app_dir)
+        missing = missing_files(app_dir)
+        if missing:
+            raise UpdateError("新版本缺少文件（" + "、".join(missing) + "）")
     except UpdateCancelled:
         if moved_old and not _restore_backup(app_dir, backup):
             raise UpdateError(
@@ -379,14 +479,13 @@ def install(extracted_app, app_dir, progress=None, is_cancelled=None):
             ) from error
         if _restore_backup(app_dir, backup):
             raise UpdateError(
-                f"安装失败，已恢复原版本：{error}。请关闭杀毒软件或手动解压覆盖后重试"
+                f"安装失败，已恢复原版本：{error}。可稍后重试，或手动下载完整安装包覆盖"
             ) from error
         raise UpdateError(
             f"安装失败，且自动恢复原版本也失败：{error}。"
             f"原版本完整保存在 {backup}，请手动将其改名为 {app_dir} 后重试"
         ) from error
     emit_progress(progress, "安装完成", 98, "清理旧版本")
-    # Old backup is disposable; remove it in the background on next run only.
     return backup
 
 
@@ -401,18 +500,18 @@ def relaunch(app_dir, exe_name=EXE_NAME):
 def revive(app_dir, exe_name=EXE_NAME):
     """Restart *something runnable* after a failed/cancelled update.
 
-    The app quits the moment the hand-off returns, so a failure during the
-    download leaves the user with nothing on screen. Put the backup back when
-    the new install is not runnable, then start it. Returns True on success.
+    The app may have quit already (it is asked to quit right before the swap),
+    so a failure can leave the user with nothing on screen. Put the backup
+    back when what is on disk is not a complete install, then start it.
+    Returns True on success.
     """
     app_dir = Path(app_dir)
-    backup = Path(str(app_dir) + ".old")
-    exe = app_dir / exe_name
-    if not exe.is_file() and backup.is_dir():
-        LOG.warning("no runnable app in %s; restoring backup %s", app_dir, backup)
-        if _restore_backup(app_dir, backup):
-            exe = app_dir / exe_name
-    if not exe.is_file():
+    backup = _sibling(app_dir, ".old")
+    if missing_files(app_dir) and backup.is_dir() and not missing_files(backup):
+        LOG.warning("install in %s is incomplete; restoring %s", app_dir, backup)
+        _restore_backup(app_dir, backup)
+    if missing_files(app_dir) or not (app_dir / exe_name).is_file():
+        LOG.error("nothing runnable in %s", app_dir)
         return False
     try:
         relaunch(app_dir, exe_name)
@@ -424,6 +523,33 @@ def revive(app_dir, exe_name=EXE_NAME):
 
 def staging_root():
     return Path(tempfile.gettempdir()) / "Monster-ww-update"
+
+
+def swap_request_path():
+    """Flag the running app polls: once it appears, the app quits by itself.
+
+    The app must survive while the package downloads, so it is not killed at
+    hand-off any more; this file is the "close now, your files are about to be
+    replaced" signal.
+    """
+    return staging_root() / SWAP_REQUEST_NAME
+
+
+def request_swap():
+    path = swap_request_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("1", encoding="utf-8")
+        LOG.info("swap requested through %s", path)
+    except OSError as error:
+        LOG.warning("cannot write swap request %s: %s", path, error)
+
+
+def clear_swap_request():
+    try:
+        swap_request_path().unlink()
+    except OSError:
+        pass
 
 
 def updater_path(app_dir):
@@ -485,6 +611,7 @@ def run_full_update(version, app_dir, pid, exe_name=EXE_NAME, progress=None,
 
     staging = staging_root()
     staging.mkdir(parents=True, exist_ok=True)
+    new_root = extract_root(app_dir)
     backup = None
     succeeded = False
     try:
@@ -495,15 +622,22 @@ def run_full_update(version, app_dir, pid, exe_name=EXE_NAME, progress=None,
         checksum = expected_checksum(asset)
         verify(archive, checksum, actual, progress, is_cancelled)
 
-        extracted = staging / APP_DIR_NAME
-        if extracted.exists():
-            shutil.rmtree(extracted, ignore_errors=True)
-        extracted_app = extract(archive, staging, progress, is_cancelled)
+        # Unpack next to the install: the swap then becomes a rename of a
+        # complete tree instead of a second 244 MB copy of it.
+        shutil.rmtree(new_root, ignore_errors=True)
+        new_root.mkdir(parents=True, exist_ok=True)
+        extracted_app = extract(archive, new_root, progress, is_cancelled)
 
-        # Only the directory swap needs the app gone; downloading and
-        # extracting happen in a separate staging folder, so progress starts
-        # immediately.
-        wait_for_exit(pid, progress=progress, is_cancelled=is_cancelled, percent=85.0)
+        missing = missing_files(extracted_app)
+        if missing:
+            raise UpdateError(
+                "更新包不完整（缺少 " + "、".join(missing) + "），请重新下载完整安装包")
+
+        # Downloading and unpacking happen while the app keeps running; only
+        # the swap itself needs it gone, so ask for the quit right here.
+        emit_progress(progress, "正在请求主程序退出…", 85, "")
+        request_swap()
+        wait_for_exit(pid, progress=progress, is_cancelled=is_cancelled, percent=85.5)
         emit_progress(progress, "主程序已退出，开始安装…", 86, "")
 
         backup = install(extracted_app, app_dir, progress, is_cancelled)
@@ -514,10 +648,16 @@ def run_full_update(version, app_dir, pid, exe_name=EXE_NAME, progress=None,
         emit_progress(progress, "更新完成", 100, str(version))
         return True
     finally:
-        # Never leak a ~250 MB archive or a half-extracted tree, even on
-        # failure: the next attempt re-downloads anyway. The .old backup is
-        # kept unless the whole update succeeded, so a failed install stays
-        # recoverable through revive() or a manual rename.
+        # The app quits on this flag, so it must never outlive the attempt that
+        # set it: a stale flag would shut the app down on its next start.
+        clear_swap_request()
+        # Never leak a ~250 MB archive or a half-unpacked tree, even on failure:
+        # the next attempt re-downloads anyway. Cleanup is strictly best effort
+        # - one locked file here must not be reported as a failed install, which
+        # is what broke v1.0.39. The .old backup is kept unless the whole update
+        # succeeded, so a failed install stays recoverable through revive() or a
+        # manual rename.
+        shutil.rmtree(new_root, ignore_errors=True)
         if succeeded and backup is not None:
             shutil.rmtree(backup, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)

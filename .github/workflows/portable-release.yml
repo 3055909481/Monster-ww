@@ -170,19 +170,6 @@ jobs:
           $size = (Get-Item 'dist/Monster-ww/MonsterUpdate.exe').Length
           Write-Host "Bundled standalone updater ($([math]::Round($size/1MB,1)) MB)"
 
-      - name: Drop runtime caches from the package
-        # OpenVINO writes compiled .blob caches at runtime. collect_all() may
-        # pick up a cache/ folder from the build machine; it is regenerated on
-        # first launch and must not ship (31 MB in v1.0.27).
-        run: |
-          $cache = 'dist/Monster-ww/cache'
-          if (Test-Path $cache) {
-            $size = (Get-ChildItem $cache -Recurse -File | Measure-Object Length -Sum).Sum
-            Write-Host "Removing bundled runtime cache ($([math]::Round($size/1MB,1)) MB)"
-            Remove-Item $cache -Recurse -Force
-          }
-          Get-ChildItem -Recurse -Filter '__pycache__' 'dist/Monster-ww' | Remove-Item -Recurse -Force
-
       - name: Verify executable metadata
         run: |
           $exe = 'dist/Monster-ww/Monster-ww.exe'
@@ -247,6 +234,23 @@ jobs:
           }
           Stop-Process -Id $proc.Id -Force
           Write-Host "Packaged app started successfully (pid $($proc.Id))."
+
+      - name: Drop runtime caches from the package
+        # The smoke test above runs the real app, so OpenVINO writes compiled
+        # .blob caches into dist/Monster-ww/cache. This step has to run *after*
+        # the smoke test: dropping caches earlier shipped ~12 MB of freshly
+        # written blobs in v1.0.39 (256 MB archive instead of 244 MB), and
+        # those files are what antivirus locks long enough to break an
+        # in-flight update. Caches are regenerated on first launch.
+        run: |
+          $cache = 'dist/Monster-ww/cache'
+          if (Test-Path $cache) {
+            $size = (Get-ChildItem $cache -Recurse -File | Measure-Object Length -Sum).Sum
+            Write-Host "Removing bundled runtime cache ($([math]::Round($size/1MB,1)) MB)"
+            Remove-Item $cache -Recurse -Force
+          }
+          Get-ChildItem -Recurse -Filter '__pycache__' 'dist/Monster-ww' | Remove-Item -Recurse -Force
+          if (Test-Path $cache) { throw 'Runtime cache still present after cleanup.' }
 
       - name: Package portable archive
         run: |

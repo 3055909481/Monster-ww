@@ -142,9 +142,13 @@ class TestUpdateHandoff(unittest.TestCase):
              mock_patch('update_core.subprocess.Popen', popen), \
              mock_patch('update_core.tempfile.gettempdir',
                         return_value=str(app_dir / 'temp')), \
-             mock_patch.object(u.os, 'getpid', return_value=4242):
+             mock_patch.object(u.os, 'getpid', return_value=4242), \
+             mock_patch.object(u, '_watch_for_swap_request') as watch:
             result = u.update_to_version('v9.9.9')
-        self.assertEqual(result, {'updated': True, 'restart_required': True})
+        # restart_required must stay False: the framework quits the app when it
+        # is True, which killed it before the download had even started.
+        self.assertEqual(result, {'updated': True, 'restart_required': False})
+        watch.assert_called_once()
         args = popen.call_args.args[0]
         self.assertTrue(str(args[0]).endswith('MonsterUpdate.exe'))
         self.assertIn('--version', args)
@@ -155,6 +159,22 @@ class TestUpdateHandoff(unittest.TestCase):
         self.assertIn('4242', args)
         # The updater is copied out of app_dir so it can replace its own file.
         self.assertNotEqual(str(args[0]), str(app_dir / 'MonsterUpdate.exe'))
+
+    def test_stale_swap_request_is_cleared_before_handoff(self):
+        """A request left over from an earlier attempt would quit the app the
+        moment the watchdog starts polling."""
+        app_dir = Path(tempfile.mkdtemp())
+        (app_dir / 'MonsterUpdate.exe').write_bytes(b'fake')
+        with mock_patch.object(u, '_app_dir', return_value=app_dir), \
+             mock_patch.object(u.os, 'name', 'nt'), \
+             mock_patch('update_core.subprocess.Popen', Mock()), \
+             mock_patch('update_core.tempfile.gettempdir',
+                        return_value=str(app_dir / 'temp')), \
+             mock_patch.object(u.os, 'getpid', return_value=4242), \
+             mock_patch('update_core.clear_swap_request') as clear, \
+             mock_patch.object(u, '_watch_for_swap_request'):
+            u.update_to_version('v9.9.9')
+        clear.assert_called_once()
 
     def test_missing_updater_has_readable_error(self):
         app_dir = Path(tempfile.mkdtemp())

@@ -8,8 +8,9 @@ so an update never depends on the app's own UI still being alive.
 GUI uses tkinter (Python standard library, no Qt plugin/DLL issues) and runs
 the update in a worker thread, marshalling progress back to the Tk main loop.
 
-The main app quits the moment the hand-off returns, so this window owns two
-responsibilities beyond showing a progress bar:
+The app keeps running while this window downloads and unpacks, and only quits
+when the swap request appears (``update_core.request_swap``); so this window
+owns two responsibilities beyond showing a progress bar:
 
 * keep "cancel" available while only the download/extract runs, and hard-disable
   it once the directory swap starts (``swapping``);
@@ -172,6 +173,7 @@ class UpdaterWindow:
 
         self._append_log(f"目标版本 {version}")
         self._append_log(f"安装目录 {self.app_dir}")
+        self._append_log("下载与解压期间主程序保持运行；开始替换文件前会自动关闭并重启。")
         if self.log_file:
             self._append_log(f"日志文件 {self.log_file}")
 
@@ -222,7 +224,8 @@ class UpdaterWindow:
         self.bar["value"] = percent
         self.percent.set(f"{percent:.0f}%")
         self.detail.set(detail)
-        if not self.swapping and phase.startswith(("正在安装更新", "主程序已退出")):
+        if not self.swapping and phase.startswith(
+                ("正在请求主程序退出", "正在安装更新", "主程序已退出")):
             self.swapping = True
             try:
                 self.action_button.configure(state="disabled")
@@ -261,23 +264,29 @@ class UpdaterWindow:
                     self.root.after(4000, self._auto_close)
                 elif kind == "error":
                     self.done = True
-                    message, revived = item[1], item[2]
+                    message, revived, alive = item[1], item[2], item[3]
                     self.phase.set("更新失败")
                     self.action_button.configure(state="normal", text="关闭")
                     self._append_log("错误：" + message)
                     if revived:
                         self.detail.set("已重新启动原版本")
                         self._append_log("已重新启动原版本，可稍后重试。")
+                    elif alive:
+                        self.detail.set("主程序仍在运行")
+                        self._append_log("主程序未受影响，仍在运行；可稍后重试。")
                     else:
                         self.detail.set("请手动启动或重新下载")
                 elif kind == "cancelled":
                     self.done = True
-                    revived = item[1]
+                    revived, alive = item[1], item[2]
                     self.phase.set("更新已取消")
                     self.action_button.configure(state="normal", text="关闭")
                     if revived:
                         self.detail.set("已重新启动原版本")
                         self._append_log("已取消，已重新启动原版本。")
+                    elif alive:
+                        self.detail.set("主程序仍在运行")
+                        self._append_log("已取消，主程序未受影响。")
                     else:
                         self.detail.set("请手动启动程序")
         except queue.Empty:
@@ -298,9 +307,9 @@ class UpdaterWindow:
     def _recover(self):
         """Start the app again after a failed/cancelled update.
 
-        The app exits right after hand-off, so a failure here would leave the
-        user with nothing on screen. Never start a second instance: skip when
-        the original process is still alive.
+        A failure before the swap leaves the app running (it is only asked to
+        quit right before its files are replaced), so restarting it is both
+        unnecessary and confusing: check first, never start a second instance.
         """
         if self.pid and update_core.process_alive(self.pid):
             return False
@@ -309,6 +318,9 @@ class UpdaterWindow:
         except Exception:
             LOG.exception("restart after failed update failed")
             return False
+
+    def _app_alive(self):
+        return bool(self.pid and update_core.process_alive(self.pid))
 
     def _run(self):
         def cancelled():
@@ -319,14 +331,14 @@ class UpdaterWindow:
                             progress=self._progress, is_cancelled=cancelled)
             self.queue.put(("done",))
         except UpdateCancelled:
-            self.queue.put(("cancelled", self._recover()))
+            self.queue.put(("cancelled", self._recover(), self._app_alive()))
         except UpdateError as error:
-            self.queue.put(("error", str(error), self._recover()))
+            self.queue.put(("error", str(error), self._recover(), self._app_alive()))
         except Exception as error:
             LOG.exception("update failed")
             self.queue.put(("error",
                             f"更新出错（{type(error).__name__}: {error}），详情见日志",
-                            self._recover()))
+                            self._recover(), self._app_alive()))
 
     def start(self):
         self.worker = threading.Thread(target=self._run, name="MonsterUpdate-worker", daemon=True)
