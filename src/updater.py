@@ -377,7 +377,11 @@ def update_to_version(version, exit_event=None, language=None):
         ),
         encoding="utf-8",
     )
-    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    # CREATE_NO_WINDOW is the reliable way to keep cmd.exe's console hidden.
+    # DETACHED_PROCESS alone still lets the console-subsystem cmd allocate a
+    # new console, which flashed a black window titled `findstr /I /C:"<pid>"`
+    # (the wait-loop's active command) while the app was exiting.
+    flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
     subprocess.Popen(["cmd.exe", "/c", str(apply_script)], creationflags=flags,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      cwd=str(staging_root))

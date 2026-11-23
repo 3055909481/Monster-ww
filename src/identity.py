@@ -383,7 +383,7 @@ def install_update_status_bridge():
         return True
     try:
         from PySide6.QtCore import QObject, Signal, Slot
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QWidget
     except Exception as exc:
         logging.getLogger("Mon").warning("update status bridge skipped: %s", exc)
         return False
@@ -396,13 +396,29 @@ def install_update_status_bridge():
             app = QApplication.instance()
             if app is None:
                 return
-            for widget in app.topLevelWidgets():
-                try:
-                    setter = getattr(widget, "_set_status", None)
-                    if callable(setter) and hasattr(widget, "version_combo"):
-                        setter(message)
-                except Exception:
-                    pass
+            # UpdateCard is a child widget nested deep inside the About tab,
+            # never a top-level window. Walk each window's full child tree,
+            # de-duplicated, so the phase text actually reaches its label.
+            seen = set()
+            for top in app.topLevelWidgets():
+                for widget in [top, *top.findChildren(QWidget)]:
+                    if id(widget) in seen:
+                        continue
+                    seen.add(id(widget))
+                    try:
+                        setter = getattr(widget, "_set_status", None)
+                        if callable(setter) and hasattr(widget, "version_combo"):
+                            setter(message)
+                            # The framework only spins the progress ring while
+                            # checking versions, not while downloading. Show it
+                            # during the download/extract phases so users can
+                            # tell the update is actually working.
+                            spinner = getattr(widget, "_set_check_loading", None)
+                            if callable(spinner):
+                                done = any(k in message for k in ("就绪", "退出", "失败", "错误"))
+                                spinner(not done)
+                    except Exception:
+                        pass
 
     # Created on the GUI thread; AutoConnection therefore queues worker
     # emissions onto the event loop before touching any widget.

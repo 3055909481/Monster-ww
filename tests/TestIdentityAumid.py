@@ -246,5 +246,52 @@ class TestThreadNameSanitizing(unittest.TestCase):
         self.assertEqual(record.threadName, 'MainThread')
 
 
+class TestUpdateStatusBridge(unittest.TestCase):
+
+    def test_phase_reaches_nested_update_card(self):
+        """Phase messages must reach an UpdateCard nested deep in the UI tree.
+
+        Regression: the bridge only walked topLevelWidgets(), so a card embedded
+        in the About tab never got any status text.
+        """
+        from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
+        app = QApplication.instance() or QApplication([])
+
+        ident._STATUS_BRIDGE = None
+        self.assertTrue(ident.install_update_status_bridge())
+
+        class FakeUpdateCard(QWidget):
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.version_combo = object()  # marker the bridge looks for
+                self.messages = []
+                self.spinner = []
+
+            def _set_status(self, message):
+                self.messages.append(message)
+
+            def _set_check_loading(self, loading):
+                self.spinner.append(loading)
+
+        window = QWidget()
+        layout = QVBoxLayout(window)
+        container = QWidget(window)  # the About tab
+        layout.addWidget(container)
+        card = FakeUpdateCard(container)  # nested two levels deep
+
+        ident.report_update_status('正在下载 v9.9.9 更新包…')
+        app.processEvents()
+
+        self.assertEqual(card.messages, ['正在下载 v9.9.9 更新包…'])
+        self.assertEqual(card.spinner, [True], 'progress ring must spin while downloading')
+
+        ident.report_update_status('更新包已就绪，程序即将退出…')
+        app.processEvents()
+        self.assertEqual(card.spinner[-1], False, 'progress ring must stop when done')
+
+        ident._STATUS_BRIDGE = None
+        window.close()
+
+
 if __name__ == '__main__':
     unittest.main()

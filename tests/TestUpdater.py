@@ -206,5 +206,37 @@ class TestApplyScript(unittest.TestCase):
         self.assertIn('%APP_DIR%\\%EXE_NAME%', script)
 
 
+class TestApplyLaunch(unittest.TestCase):
+
+    def test_apply_script_runs_with_hidden_window(self):
+        """The apply cmd must not flash a findstr console while waiting for exit."""
+        import subprocess as sp
+        root = Path(tempfile.mkdtemp())
+        app = root / 'app'
+        app.mkdir()
+        staging = root / 'staging'
+
+        def fake_extract(_archive, target):
+            exe_dir = target / u.APP_DIR_NAME
+            exe_dir.mkdir(parents=True, exist_ok=True)
+            (exe_dir / u.EXE_NAME).write_bytes(b'')
+
+        popen = Mock()
+        with mock_patch.object(u, '_asset_for', return_value={'name': 'x.7z', 'url': 'u'}), \
+             mock_patch.object(u, '_sha256_for', return_value=None), \
+             mock_patch.object(u, '_download'), \
+             mock_patch.object(u, '_extract', side_effect=fake_extract), \
+             mock_patch.object(u, '_app_dir', return_value=app), \
+             mock_patch.object(u.tempfile, 'gettempdir', return_value=str(staging)), \
+             mock_patch.object(u.subprocess, 'Popen', popen):
+            u.update_to_version('v9.9.9')
+        kwargs = popen.call_args.kwargs
+        flags = kwargs['creationflags']
+        self.assertTrue(flags & sp.CREATE_NO_WINDOW,
+                        'apply script must use CREATE_NO_WINDOW')
+        self.assertFalse(flags & sp.DETACHED_PROCESS,
+                         'DETACHED_PROCESS still allocates a console for cmd.exe')
+
+
 if __name__ == '__main__':
     unittest.main()
