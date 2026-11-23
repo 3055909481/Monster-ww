@@ -66,7 +66,13 @@ for package in ('Mon', 'onnxocr'):
     package_data, package_binaries, package_imports = collect_all(package)
     datas += package_data
     binaries += package_binaries
-    hiddenimports += list(package_imports)
+    # Mon.gui is a compatibility namespace: its __init__ extends __path__ to
+    # Mon.ui.qt, so collect_submodules() lists 98 alias names that do not exist
+    # on disk (Mon.gui.MainWindow -> Mon.ui.qt.MainWindow). The real modules are
+    # collected under Mon.ui.qt.*; asking PyInstaller for the aliases only adds
+    # noise and can break the frozen import graph.
+    hiddenimports += [name for name in package_imports
+                      if not (package == 'Mon' and name.startswith('Mon.gui.'))]
 
 # PySide6 plugins (platforms/styles/imageformats) are found by PyInstaller's hook.
 # OpenCV and Playwright need their runtime data.
