@@ -68,7 +68,7 @@ ok-pyside-minimal==6.12.0.post2
     # via
     #   Mon-script
     #   Monster-ww (pyproject.toml)
-Mon-script[ocr,qt] @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.7-mon1.tar.gz
+Mon-script[ocr,qt] @ https://github.com/3055909481/Mon-script/archive/refs/tags/v3.0.10-mon1.tar.gz
     # via Monster-ww (pyproject.toml)
 onnxocr-ppocrv6==0.0.1
     # via
