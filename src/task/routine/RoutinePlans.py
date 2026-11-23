@@ -75,12 +75,52 @@ def _run_days_schema():
 
 @dataclass(frozen=True)
 class RoutineEntry:
+    """One selectable step.
+
+    ``description`` is the one-line "what does this step do" text shown under
+    the step title in the plan editor; ``icon`` is a bundled kit icon name and
+    ``stamina`` the per-run stamina cost (0 when the step costs none).
+    """
+
     task_id: str
     name: str
     group: str
     default_config: dict
     config_description: dict
     config_type: dict
+    description: str = ''
+    icon: str = 'tasks'
+    stamina: int = 0
+
+
+_TRUE_TEXT = '已开启'
+_FALSE_TEXT = '未开启'
+
+
+def describe_params(entry, params):
+    """Readable ``key value`` pairs for a step's current settings.
+
+    Used by the editor's step list and the routine page preview; values are
+    resolved against the entry defaults so a partially written params dict
+    still reads correctly.
+    """
+    pairs = []
+    values = params if isinstance(params, dict) else {}
+    for key, default in entry.default_config.items():
+        value = values.get(key, default)
+        if isinstance(value, bool):
+            text = _TRUE_TEXT if value else _FALSE_TEXT
+        elif value is None or value == '':
+            continue
+        else:
+            text = str(value)
+        pairs.append(f'{key} {text}')
+    return pairs
+
+
+def stamina_text(entry):
+    """``40 体力 / 次`` style caption, or an empty string for free steps."""
+    return f'{entry.stamina} 体力 / 次' if entry.stamina else ''
 
 
 def _count_schema():
@@ -98,11 +138,17 @@ def _build_entries():
     days_default, days_desc, days_type = _run_days_schema()
     entries = [
         RoutineEntry('claim_daily', '领取活跃度奖励 / 邮件', '奖励',
-                     {}, {}, {}),
+                     {}, {}, {},
+                     description='领取每日活跃度宝箱，并清空邮箱奖励；不消耗体力。',
+                     icon='bell'),
         RoutineEntry('battle_pass', '领取先约电台经验与等级奖励', '奖励',
-                     {}, {}, {}),
+                     {}, {}, {},
+                     description='收取先约电台的每日经验，并领取已解锁的等级奖励。',
+                     icon='pulse'),
         RoutineEntry('weekly_garden', '周度游历奖励（梦幻游园）', '奖励',
-                     deepcopy(days_default), deepcopy(days_desc), deepcopy(days_type)),
+                     deepcopy(days_default), deepcopy(days_desc), deepcopy(days_type),
+                     description='梦幻游园的周度游历奖励，只在设定的运行日执行。',
+                     icon='calendar'),
         RoutineEntry('simulation', '模拟领域', '清体力',
                      {'地区': catalog.simulation_regions()[0],
                       '材料': 'Shell Credit', **count_default},
@@ -110,7 +156,9 @@ def _build_entries():
                       '材料': '共鸣者经验 / 武器经验 / 贝币；一次 40 体力。', **count_desc},
                      {'地区': {'type': 'drop_down', 'options': catalog.simulation_regions()},
                       '材料': {'type': 'drop_down', 'options': catalog.simulation_options()},
-                      **count_type}),
+                      **count_type},
+                     description='在模拟领域消耗体力，换取共鸣者经验、武器经验或贝币。',
+                     icon='bolt', stamina=40),
         RoutineEntry('forgery', '凝素领域', '清体力',
                      {'地区': catalog.forgery_region_names()[0],
                       '武器类型': catalog.forgery_weapon_types()[0],
@@ -120,25 +168,33 @@ def _build_entries():
                       **count_desc},
                      {'地区': {'type': 'drop_down', 'options': catalog.forgery_region_names()},
                       '武器类型': {'type': 'drop_down', 'options': catalog.forgery_weapon_types()},
-                      **count_type}),
+                      **count_type},
+                     description='凝素领域产出武器与技能素材，按地区与武器类型选择副本。',
+                     icon='layers', stamina=40),
         RoutineEntry('tacet', '无音清剿', '清体力',
                      {'无音区': catalog.tacet_zones()[0], **count_default},
                      {'无音区': '从 F2 手册从上往下选择；一次 60 体力。', **count_desc},
                      {'无音区': {'type': 'drop_down', 'options': catalog.tacet_zones()},
-                      **count_type}),
+                      **count_type},
+                     description='无音清剿产出声骸与调谐素材，无音区按 F2 手册顺序选择。',
+                     icon='grid', stamina=60),
         RoutineEntry('boss_challenge', '讨伐强敌', '清体力',
                      {'BOSS': catalog.boss_challenges()[0], '次数': 1},
                      {'BOSS': '获取共鸣者突破材料；一次 60 体力。',
                       '次数': '重复挑战次数；填 0 表示一直刷。'},
                      {'BOSS': {'type': 'drop_down', 'options': catalog.boss_challenges()},
-                      '次数': count_type['次数']}),
+                      '次数': count_type['次数']},
+                     description='反复讨伐同一个强敌，获取共鸣者突破材料。',
+                     icon='scan', stamina=60),
         RoutineEntry('weekly_boss', '战歌重奏', '周常',
                      {'周本': catalog.weekly_display_names()[0], '次数': 3,
                       **days_default},
                      {'周本': '按 BOSS 名称展示，实际按副本名称查找；一次 60 体力。',
                       '次数': '每周最多 3 次。', **days_desc},
                      {'周本': {'type': 'drop_down', 'options': catalog.weekly_display_names()},
-                      '次数': {'min': 0, 'max': 3}, **days_type}),
+                      '次数': {'min': 0, 'max': 3}, **days_type},
+                     description='战歌重奏为周常副本，每周最多挑战三次。',
+                     icon='history', stamina=60),
         RoutineEntry('training_guide', '培养目标自动补齐', '清体力',
                      {'目标角色': '', '体力预算': 240,
                       '补凝素领域': True, '补讨伐强敌': True, '补战歌重奏': False},
@@ -149,7 +205,9 @@ def _build_entries():
                       '补战歌重奏': '自动补齐技能升级材料缺口。'},
                      {'目标角色': {'type': 'line_edit'},
                       '体力预算': {'min': 0, 'max': 100000},
-                      '补凝素领域': {}, '补讨伐强敌': {}, '补战歌重奏': {}}),
+                      '补凝素领域': {}, '补讨伐强敌': {}, '补战歌重奏': {}},
+                     description='读成长目标与材料缺口，自动安排要刷的副本。',
+                     icon='tasks'),
     ]
     return entries
 

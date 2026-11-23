@@ -1,31 +1,61 @@
 """Editor dialog for daily routine plans.
 
-Left: checkable, drag-reorderable step list. Right: config rows for the
-selected step, rendered with the framework's own config editors.
+Layout follows the app's task page: a narrow, checkable step list on the left
+(drag to reorder) and a detail panel on the right with a title, a one-line
+description, underline tabs and the kit's own config rows underneath.
 """
 
 from copy import deepcopy
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt
+from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QInputDialog, QLabel, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QFrame, QHBoxLayout, QInputDialog, QListWidget,
+    QListWidgetItem, QScrollArea, QSizePolicy, QStyle, QStyledItemDelegate,
+    QVBoxLayout, QWidget,
 )
 
 from Mon.ui.qt.kit.buttons import Button
+from Mon.ui.qt.kit.cards import Card, SettingRow
 from Mon.ui.qt.kit.dialogs import Dialog
 from Mon.ui.qt.kit.feedback import show_toast
+from Mon.ui.qt.kit.icons import icon as kit_icon
 from Mon.ui.qt.kit.inputs import ComboBox
+from Mon.ui.qt.kit.labels import Label
+from Mon.ui.qt.kit.tabs import TabStrip
+from Mon.ui.qt.kit.theme import theme
 from Mon.ui.qt.tasks.config_form import ConfigForm
 
 from src.task.routine.RoutinePlans import (
     DEFAULT_PLAN_NAME, ENTRIES, ENTRIES_BY_ID, PLAN_SELECTOR, PlanItemConfig,
-    RoutinePlanStore, default_items, new_item, normalize_items,
+    RoutinePlanStore, default_items, describe_params, new_item, normalize_items,
+    stamina_text,
 )
 
 ID_ROLE = Qt.UserRole
 PARAMS_ROLE = Qt.UserRole + 1
 UID_ROLE = Qt.UserRole + 2
+
+# Geometry mirrors the kit's list items (8px side padding, 8px radius) and its
+# 16px rounded check box, so the rows read like the app's other lists.
+ROW_HEIGHT = 40
+CHECK_SIZE = 16
+GRIP_LEFT = 12
+CHECK_LEFT = 30
+ICON_LEFT = 56
+TEXT_LEFT = 78
+
+
+def _accent_fill(alpha: float):
+    """Accent wash with the same alphas the kit stylesheet uses.
+
+    The kit derives ``accent_soft_strong`` as ``rgba(accent, 0.18)``; that value
+    is not exposed through ``theme.color``, so mirror it here instead of baking
+    a literal colour.
+    """
+    color = theme.color('accent')
+    color.setAlphaF(alpha)
+    return color
 
 
 class _PlanItemStub:
@@ -43,10 +73,107 @@ class _PlanItemStub:
         return None
 
 
+class _StepDelegate(QStyledItemDelegate):
+    """Paints a step row: drag grip, check box, icon, name and settings summary.
+
+    The list keeps Qt's own drag-reorder and selection behaviour; only the
+    painting and the check-box hit area are custom, so the row matches the app's
+    task cards instead of the native list look.
+    """
+
+    def __init__(self, view, parent=None):
+        super().__init__(parent)
+        self.view = view
+
+    def _row_rect(self, rect):
+        # 3px side padding + 2px gap between rows, like the kit's list items.
+        return QRectF(rect).adjusted(3, 1, -3, -1)
+
+    def _checkbox_rect(self, rect):
+        inner = self._row_rect(rect)
+        return QRectF(inner.left() + CHECK_LEFT,
+                      inner.center().y() - CHECK_SIZE / 2, CHECK_SIZE, CHECK_SIZE)
+
+    def sizeHint(self, option, index):
+        return QSize(0, ROW_HEIGHT)
+
+    def paint(self, painter, option, index):
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        inner = self._row_rect(option.rect)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        if selected or hovered:
+            # Same fills the kit uses for list items: accent wash when selected,
+            # control_hover on hover, 8px radius.
+            fill = _accent_fill(0.18) if selected else theme.color('control_hover')
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(inner, 8, 8)
+
+        entry = ENTRIES_BY_ID.get(index.data(ID_ROLE))
+        # QVariant returns a plain int here, so compare through the enum.
+        checked = Qt.CheckState(index.data(Qt.ItemDataRole.CheckStateRole)) == Qt.CheckState.Checked
+
+        # Drag affordance: two dots per row, three rows.
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(theme.color('text_tertiary'))
+        for row in range(3):
+            for column in range(2):
+                painter.drawEllipse(QRectF(inner.left() + GRIP_LEFT + column * 5,
+                                           inner.center().y() - 6 + row * 6, 2.4, 2.4))
+
+        # Check box drawn to match QCheckBox::indicator: 16px, radius 5,
+        # control fill with a switch_off border, accent fill when checked.
+        box = self._checkbox_rect(option.rect)
+        if checked:
+            painter.setBrush(theme.color('accent'))
+            painter.setPen(theme.color('accent'))
+            painter.drawRoundedRect(box, 5, 5)
+            kit_icon('check', 'on_accent').paint(painter, box.toRect(), Qt.AlignmentFlag.AlignCenter)
+        else:
+            painter.setBrush(theme.color('control'))
+            painter.setPen(theme.color('switch_off'))
+            painter.drawRoundedRect(box, 5, 5)
+
+        if entry is not None:
+            icon_rect = QRectF(inner.left() + ICON_LEFT, inner.center().y() - 8, 16, 16)
+            kit_icon(entry.icon, 'text_secondary').paint(painter, icon_rect.toRect(),
+                                                       Qt.AlignmentFlag.AlignCenter)
+
+            name_left = inner.left() + TEXT_LEFT
+            name_width = inner.right() - 14 - name_left
+            painter.setPen(theme.color('text') if checked else theme.color('text_secondary'))
+            metrics = QFontMetrics(option.font)
+            painter.drawText(QRectF(name_left, inner.top(), max(0.0, name_width), inner.height()),
+                             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                             metrics.elidedText(entry.name, Qt.TextElideMode.ElideRight,
+                                                max(0, int(name_width))))
+        painter.restore()
+
+    def editorEvent(self, event, model, option, index):
+        # The check box is drawn at a custom offset, so toggle it by hand: the
+        # base class only looks at the style's own indicator geometry.
+        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+            position = event.position()
+            if self._checkbox_rect(option.rect).adjusted(-2, -2, 2, 2).contains(position):
+                self.view.setCurrentIndex(index)
+                if (event.type() == QEvent.Type.MouseButtonRelease
+                        and event.button() == Qt.MouseButton.LeftButton):
+                    state = Qt.CheckState(index.data(Qt.ItemDataRole.CheckStateRole))
+                    model.setData(index,
+                                  Qt.CheckState.Unchecked if state == Qt.CheckState.Checked
+                                  else Qt.CheckState.Checked,
+                                  Qt.ItemDataRole.CheckStateRole)
+                return True
+        return super().editorEvent(event, model, option, index)
+
+
 class RoutinePlanDialog(Dialog):
     def __init__(self, parent, task):
         super().__init__(parent, task.tr('日常一条龙'),
-                         ok_text=task.tr('保存并关闭'), cancel_text=task.tr('取消'), width=1000)
+                         ok_text=task.tr('保存并关闭'), cancel_text=task.tr('取消'), width=1080)
         self.task = task
         self.store = RoutinePlanStore(task.executor.config_folder if task.executor else 'configs')
         self.plans = self.store.load()
@@ -54,76 +181,174 @@ class RoutinePlanDialog(Dialog):
         if self.active_name not in self.plans:
             self.active_name = DEFAULT_PLAN_NAME
         self._loading = True
+        self._form = None
 
         root = QWidget(self.panel)
         layout = QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(16)
 
-        left = QWidget(root)
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        plan_row = QHBoxLayout()
-        self.plan_combo = ComboBox(list(self.plans))
-        self.plan_combo.setCurrentText(self.active_name)
-        self.plan_combo.currentTextChanged.connect(self._plan_changed)
-        plan_row.addWidget(QLabel(task.tr('计划')), 0)
-        plan_row.addWidget(self.plan_combo, 1)
-        self.new_button = Button(task.tr('新建'), parent=left)
-        self.new_button.clicked.connect(self._new_plan)
-        self.delete_button = Button(task.tr('删除'), variant='subtle', parent=left)
-        self.delete_button.clicked.connect(self._delete_plan)
-        plan_row.addWidget(self.new_button)
-        plan_row.addWidget(self.delete_button)
-        left_layout.addLayout(plan_row)
-
-        self.step_list = QListWidget(left)
-        self.step_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.step_list.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.step_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.step_list.currentItemChanged.connect(self._item_changed)
-        self.step_list.itemChanged.connect(self._item_checked)
-        left_layout.addWidget(self.step_list, 1)
-
-        order_row = QHBoxLayout()
-        self.add_combo = ComboBox([entry.name for entry in ENTRIES])
-        self.add_combo.setToolTip(task.tr('选择要添加的步骤'))
-        order_row.addWidget(self.add_combo, 1)
-        self.add_button = QPushButton(task.tr('添加步骤'), left)
-        self.add_button.clicked.connect(self._add_step)
-        order_row.addWidget(self.add_button)
-        left_layout.addLayout(order_row)
-
-        order_row2 = QHBoxLayout()
-        self.up_button = QPushButton(task.tr('上移'), left)
-        self.down_button = QPushButton(task.tr('下移'), left)
-        self.delete_step_button = QPushButton(task.tr('删除步骤'), left)
-        self.up_button.clicked.connect(lambda: self._move(-1))
-        self.down_button.clicked.connect(lambda: self._move(1))
-        self.delete_step_button.clicked.connect(self._delete_step)
-        order_row2.addWidget(self.up_button)
-        order_row2.addWidget(self.down_button)
-        order_row2.addWidget(self.delete_step_button)
-        left_layout.addLayout(order_row2)
-
-        right = QWidget(root)
-        self.right_layout = QVBoxLayout(right)
-        self.right_layout.setContentsMargins(0, 0, 0, 0)
-        self.config_host = QWidget(right)
-        self.config_layout = QVBoxLayout(self.config_host)
-        self.config_layout.setContentsMargins(0, 0, 0, 0)
-        self.right_layout.addWidget(self.config_host, 1)
-        self.hint = QLabel(task.tr('勾选步骤以纳入；拖拽可排序，从上到下依次执行。'), right)
-        self.hint.setWordWrap(True)
-        self.right_layout.addWidget(self.hint)
-
-        layout.addWidget(left, 1)
-        layout.addWidget(right, 1)
+        layout.addWidget(self._build_step_column(root), 0)
+        layout.addWidget(self._build_detail_column(root), 1)
         self.body.addWidget(root)
         self._load_steps()
         self._loading = False
 
-    # -------------------------------------------------------------- helpers
+    # ------------------------------------------------------------- left column
+    def _build_step_column(self, parent):
+        column = QWidget(parent)
+        column.setFixedWidth(344)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        card = Card(look='inset')
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(14, 14, 14, 12)
+        inner.setSpacing(10)
+
+        plan_row = QHBoxLayout()
+        plan_row.setSpacing(6)
+        plan_row.addWidget(Label(self.task.tr('计划'), 'secondary'), 0)
+        self.plan_combo = ComboBox(list(self.plans))
+        self.plan_combo.setCurrentText(self.active_name)
+        self.plan_combo.currentTextChanged.connect(self._plan_changed)
+        plan_row.addWidget(self.plan_combo, 1)
+        self.new_button = Button(icon='plus', variant='subtle', parent=card)
+        self.new_button.setToolTip(self.task.tr('新建计划'))
+        self.new_button.clicked.connect(self._new_plan)
+        plan_row.addWidget(self.new_button)
+        self.delete_button = Button(icon='trash', variant='subtle', parent=card)
+        self.delete_button.setToolTip(self.task.tr('删除当前计划'))
+        self.delete_button.clicked.connect(self._delete_plan)
+        plan_row.addWidget(self.delete_button)
+        inner.addLayout(plan_row)
+
+        list_row = QHBoxLayout()
+        list_row.setSpacing(6)
+        list_row.addWidget(Label(self.task.tr('执行顺序'), 'section'), 0)
+        list_row.addStretch(1)
+        self.all_on_button = Button(self.task.tr('全部启用'), variant='subtle', size='small', parent=card)
+        self.all_on_button.clicked.connect(lambda: self._set_all_checked(True))
+        self.all_off_button = Button(self.task.tr('全部停用'), variant='subtle', size='small', parent=card)
+        self.all_off_button.clicked.connect(lambda: self._set_all_checked(False))
+        list_row.addWidget(self.all_on_button)
+        list_row.addWidget(self.all_off_button)
+        inner.addLayout(list_row)
+
+        self.step_list = QListWidget(card)
+        self.step_list.setObjectName('routineStepList')
+        self.step_list.setStyleSheet(
+            'QListWidget#routineStepList { background: transparent; border: 0; }')
+        self.step_list.setItemDelegate(_StepDelegate(self.step_list, self.step_list))
+        self.step_list.setUniformItemSizes(True)
+        self.step_list.setMouseTracking(True)
+        self.step_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.step_list.setSpacing(0)
+        self.step_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.step_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.step_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.step_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.step_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.step_list.setMinimumHeight(260)
+        self.step_list.currentItemChanged.connect(self._item_changed)
+        self.step_list.itemChanged.connect(self._item_checked)
+        self.step_list.model().rowsMoved.connect(self._rows_moved)
+        inner.addWidget(self.step_list, 1)
+
+        add_row = QHBoxLayout()
+        add_row.setSpacing(6)
+        self.add_combo = ComboBox([entry.name for entry in ENTRIES])
+        self.add_combo.setToolTip(self.task.tr('选择要添加的步骤'))
+        add_row.addWidget(self.add_combo, 1)
+        self.add_button = Button(self.task.tr('添加'), icon='plus', variant='tonal', size='small', parent=card)
+        self.add_button.clicked.connect(self._add_step)
+        add_row.addWidget(self.add_button)
+        inner.addLayout(add_row)
+
+        order_row = QHBoxLayout()
+        order_row.setSpacing(6)
+        self.up_button = Button(self.task.tr('上移'), icon='chevron-up', variant='subtle', size='small', parent=card)
+        self.up_button.clicked.connect(lambda: self._move(-1))
+        self.down_button = Button(self.task.tr('下移'), icon='chevron-down', variant='subtle', size='small', parent=card)
+        self.down_button.clicked.connect(lambda: self._move(1))
+        self.delete_step_button = Button(self.task.tr('删除步骤'), icon='trash', variant='subtle', size='small',
+                                         parent=card)
+        self.delete_step_button.clicked.connect(self._delete_step)
+        order_row.addWidget(self.up_button)
+        order_row.addWidget(self.down_button)
+        order_row.addStretch(1)
+        order_row.addWidget(self.delete_step_button)
+        inner.addLayout(order_row)
+
+        layout.addWidget(card, 1)
+        return column
+
+    # ------------------------------------------------------------ right column
+    def _build_detail_column(self, parent):
+        column = QWidget(parent)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        card = Card(look='inset')
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(20, 18, 20, 16)
+        inner.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.setSpacing(16)
+        text = QVBoxLayout()
+        text.setSpacing(4)
+        self.step_title = Label('', 'title', card)
+        self.step_description = Label('', 'secondary', card, word_wrap=True)
+        text.addWidget(self.step_title)
+        text.addWidget(self.step_description)
+        header.addLayout(text, 1)
+        self.reset_button = Button(self.task.tr('恢复默认'), icon='reset', variant='subtle', size='small', parent=card)
+        self.reset_button.setToolTip(self.task.tr('把该步骤的设置恢复成默认值'))
+        self.reset_button.clicked.connect(self._reset_step)
+        header.addWidget(self.reset_button, 0, Qt.AlignmentFlag.AlignTop)
+        inner.addLayout(header)
+
+        self.tabs = TabStrip('underline')
+        self.tabs.add_tab('settings', self.task.tr('设置'), icon='gear')
+        self.tabs.add_tab('info', self.task.tr('说明'), icon='info')
+        self.tabs.current_changed.connect(self._show_tab)
+        inner.addWidget(self.tabs)
+
+        self.pages = QWidget(card)
+        pages_layout = QVBoxLayout(self.pages)
+        pages_layout.setContentsMargins(0, 0, 0, 0)
+        pages_layout.setSpacing(0)
+
+        self.form_scroll = QScrollArea(self.pages)
+        self.form_scroll.setWidgetResizable(True)
+        self.form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        pages_layout.addWidget(self.form_scroll)
+
+        self.info_scroll = QScrollArea(self.pages)
+        self.info_scroll.setWidgetResizable(True)
+        self.info_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.info_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.info_page = QWidget(self.info_scroll)
+        self.info_layout = QVBoxLayout(self.info_page)
+        self.info_layout.setContentsMargins(0, 0, 0, 0)
+        self.info_layout.setSpacing(10)
+        self.info_scroll.setWidget(self.info_page)
+        self.info_scroll.hide()
+        pages_layout.addWidget(self.info_scroll)
+        inner.addWidget(self.pages, 1)
+
+        self.hint = Label(self.task.tr('勾选纳入执行；拖拽或使用上移/下移调整顺序，从上到下依次执行。'),
+                          'caption', card, word_wrap=True)
+        inner.addWidget(self.hint)
+
+        layout.addWidget(card, 1)
+        return column
+
+    # --------------------------------------------------------------- helpers
     def _current_items(self):
         return self.plans.get(self.active_name, default_items())
 
@@ -138,10 +363,11 @@ class RoutinePlanDialog(Dialog):
             widget_item.setData(ID_ROLE, item['id'])
             widget_item.setData(UID_ROLE, item.get('uid'))
             widget_item.setData(PARAMS_ROLE, deepcopy(item['params']))
-            widget_item.setToolTip(entry.name)
+            widget_item.setToolTip(entry.description or entry.name)
             self.step_list.addItem(widget_item)
         self.step_list.blockSignals(False)
-        self._render_config(self.step_list.item(0) if self.step_list.count() else None)
+        self.step_list.setCurrentRow(0 if self.step_list.count() else -1)
+        self._render_detail(self.step_list.item(0) if self.step_list.count() else None)
 
     def _collect_steps(self):
         items = []
@@ -157,42 +383,162 @@ class RoutinePlanDialog(Dialog):
                           'params': params})
         return normalize_items(items)
 
-    def _render_config(self, widget_item):
-        while self.config_layout.count():
-            old = self.config_layout.takeAt(0)
-            if old.widget() is not None:
-                old.widget().deleteLater()
+    def _clear_layout(self, layout):
+        while layout.count():
+            old = layout.takeAt(0)
+            widget = old.widget()
+            if widget is not None:
+                # Detach now so the old row cannot paint over the rebuilt page
+                # before deleteLater runs.
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def _render_detail(self, widget_item):
+        if self._form is not None:
+            self.form_scroll.takeWidget()
+            self._form.setParent(None)
+            self._form.deleteLater()
+            self._form = None
+        self._clear_layout(self.info_layout)
+        if widget_item is None:
+            self.step_title.setText(self.task.tr('未选择步骤'))
+            self.step_description.setText(self.task.tr('在左侧选择一个步骤来编辑它的设置。'))
+            self.reset_button.setEnabled(False)
+            self.tabs.setEnabled(False)
+            self.pages.setEnabled(False)
+            self.form_scroll.setWidget(QWidget(self.form_scroll))
+            return
+        self.tabs.setEnabled(True)
+        self.pages.setEnabled(True)
+        entry = ENTRIES_BY_ID[widget_item.data(ID_ROLE)]
+        self.step_title.setText(entry.name)
+        self.step_description.setText(entry.description or '')
+        self.reset_button.setEnabled(bool(entry.default_config))
+
+        params = deepcopy(widget_item.data(PARAMS_ROLE) or entry.default_config)
+        if entry.default_config:
+            def on_change(new_values):
+                widget_item.setData(PARAMS_ROLE, deepcopy(new_values))
+
+            config = PlanItemConfig(params, entry.default_config, on_change)
+            self._form = ConfigForm(_PlanItemStub(entry), config, entry.default_config,
+                                    entry.config_description, entry.config_type, self.form_scroll)
+            self.form_scroll.setWidget(self._form)
+        else:
+            self._form = QWidget(self.form_scroll)
+            empty_layout = QVBoxLayout(self._form)
+            empty_layout.setContentsMargins(0, 8, 0, 0)
+            empty_layout.setSpacing(6)
+            empty_layout.addWidget(Label(self.task.tr('此步骤无需设置，勾选后即会执行。'), 'secondary',
+                                         self._form, word_wrap=True))
+            empty_layout.addStretch(1)
+            self.form_scroll.setWidget(self._form)
+
+        self._fill_info(entry, params)
+        self._show_tab(self.tabs.current_key() or 'settings')
+
+    def _fill_info(self, entry, params):
+        if entry.description:
+            self.info_layout.addWidget(Label(entry.description, 'secondary', self.info_page, word_wrap=True))
+        group = Card(look='inset')
+        rows = QVBoxLayout(group)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.setSpacing(0)
+        settings = []
+        stamina = stamina_text(entry)
+        if stamina:
+            settings.append((self.task.tr('体力消耗'), self.task.tr('每执行一次副本消耗的体力。'), stamina))
+        for key, default in entry.default_config.items():
+            current = params.get(key, default)
+            description = entry.config_description.get(key, '')
+            # Keep the read-only page on one line per row: the full hint lives
+            # in the settings tab, a clipped first clause is enough here.
+            hint = description.split('。')[0].split('；')[0] if description else ''
+            if isinstance(current, bool):
+                shown = '已开启' if current else '未开启'
+            elif current in ('', None):
+                shown = self.task.tr('未设置')
+            else:
+                shown = str(current)
+            settings.append((key, hint, shown))
+        if not settings:
+            settings.append((self.task.tr('无需设置'), self.task.tr('该步骤没有可配置的参数。'), ''))
+        for index, (title, description, value) in enumerate(settings):
+            control = None
+            if value:
+                control = Label(value, 'secondary')
+                # Right-align like the reference's value column instead of
+                # letting the text hug the left edge of the control slot.
+                control.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            row = SettingRow(title, description, control, control_width=220, indent=False)
+            row.set_first(index == 0)
+            rows.addWidget(row)
+        self.info_layout.addWidget(group)
+        self.info_layout.addStretch(1)
+
+    def _show_tab(self, key):
+        info = key == 'info'
+        self.info_scroll.setVisible(info)
+        self.form_scroll.setVisible(not info)
+
+    def _set_all_checked(self, checked):
+        self.step_list.blockSignals(True)
+        for index in range(self.step_list.count()):
+            item = self.step_list.item(index)
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        self.step_list.blockSignals(False)
+        if self.step_list.count():
+            self.step_list.viewport().update()
+        self.plans[self.active_name] = self._collect_steps()
+
+    def _reset_step(self):
+        widget_item = self.step_list.currentItem()
         if widget_item is None:
             return
         entry = ENTRIES_BY_ID[widget_item.data(ID_ROLE)]
-        if not entry.default_config:
-            label = QLabel(self.task.tr('此步骤无需设置。'), self.config_host)
-            label.setWordWrap(True)
-            self.config_layout.addWidget(label)
-            return
-        params = deepcopy(widget_item.data(PARAMS_ROLE) or entry.default_config)
+        widget_item.setData(PARAMS_ROLE, deepcopy(entry.default_config))
+        self._render_detail(widget_item)
+        self.plans[self.active_name] = self._collect_steps()
+        show_toast(self, self.task.tr('已恢复该步骤的默认设置'), tone='success')
 
-        def on_change(new_values):
-            widget_item.setData(PARAMS_ROLE, deepcopy(new_values))
-
-        config = PlanItemConfig(params, entry.default_config, on_change)
-        form = ConfigForm(_PlanItemStub(entry), config, entry.default_config,
-                          entry.config_description, entry.config_type, self.config_host)
-        self.config_layout.addWidget(form)
-        self.config_layout.addStretch(1)
-
-    # -------------------------------------------------------------- slots
+    # --------------------------------------------------------------- slots
     def _item_changed(self, current, previous):
         if self._loading:
             return
         if previous is not None:
             previous.setData(PARAMS_ROLE, previous.data(PARAMS_ROLE))
         self.plans[self.active_name] = self._collect_steps()
-        self._render_config(current)
+        self._render_detail(current)
+        self._sync_buttons()
 
     def _item_checked(self, widget_item):
-        if not self._loading:
-            self.plans[self.active_name] = self._collect_steps()
+        if self._loading:
+            return
+        self.plans[self.active_name] = self._collect_steps()
+        self._update_summary(widget_item)
+        self.step_list.viewport().update()
+
+    def _update_summary(self, widget_item):
+        entry = ENTRIES_BY_ID[widget_item.data(ID_ROLE)]
+        pairs = describe_params(entry, widget_item.data(PARAMS_ROLE) or {})
+        lines = [entry.description or '']
+        if pairs:
+            lines.append(' · '.join(pairs))
+        widget_item.setToolTip('\n'.join(line for line in lines if line))
+
+    def _rows_moved(self, *_):
+        if self._loading:
+            return
+        self.plans[self.active_name] = self._collect_steps()
+        self._sync_buttons()
+
+    def _sync_buttons(self):
+        row = self.step_list.currentRow()
+        count = self.step_list.count()
+        self.up_button.setEnabled(row > 0)
+        self.down_button.setEnabled(0 <= row < count - 1)
+        self.delete_step_button.setEnabled(count > 0)
 
     def _move(self, delta):
         row = self.step_list.currentRow()
@@ -205,6 +551,7 @@ class RoutinePlanDialog(Dialog):
         self.step_list.setCurrentRow(target)
         self._loading = False
         self.plans[self.active_name] = self._collect_steps()
+        self._sync_buttons()
 
     def _add_step(self):
         name = self.add_combo.currentText()
@@ -212,16 +559,18 @@ class RoutinePlanDialog(Dialog):
         if task_id is None:
             return
         item = new_item(task_id)
-        widget_item = QListWidgetItem(ENTRIES_BY_ID[task_id].name)
+        entry = ENTRIES_BY_ID[task_id]
+        widget_item = QListWidgetItem(entry.name)
         widget_item.setFlags(widget_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         widget_item.setCheckState(Qt.CheckState.Checked)
         widget_item.setData(ID_ROLE, task_id)
         widget_item.setData(UID_ROLE, item['uid'])
         widget_item.setData(PARAMS_ROLE, deepcopy(item['params']))
-        widget_item.setToolTip(ENTRIES_BY_ID[task_id].name)
+        widget_item.setToolTip(entry.description or entry.name)
         self.step_list.addItem(widget_item)
         self.step_list.setCurrentItem(widget_item)
         self.plans[self.active_name] = self._collect_steps()
+        self._sync_buttons()
 
     def _delete_step(self):
         row = self.step_list.currentRow()
@@ -234,7 +583,8 @@ class RoutinePlanDialog(Dialog):
         if self.step_list.count():
             self.step_list.setCurrentRow(min(row, self.step_list.count() - 1))
         else:
-            self._render_config(None)
+            self._render_detail(None)
+        self._sync_buttons()
 
     def _plan_changed(self, name):
         if self._loading or not name:
@@ -244,6 +594,7 @@ class RoutinePlanDialog(Dialog):
         self.active_name = name
         self._load_steps()
         self._loading = False
+        self._sync_buttons()
 
     def _new_plan(self):
         name, ok = QInputDialog.getText(self, self.task.tr('新建计划'), self.task.tr('计划名称'))
@@ -263,6 +614,8 @@ class RoutinePlanDialog(Dialog):
         self.active_name = name
         self._load_steps()
         self._loading = False
+        self._sync_buttons()
+        show_toast(self, self.task.tr('已新建计划：') + name, tone='success')
 
     def _delete_plan(self):
         if len(self.plans) <= 1:
@@ -277,14 +630,22 @@ class RoutinePlanDialog(Dialog):
         self.active_name = self.plan_combo.currentText()
         self._load_steps()
         self._loading = False
+        self._sync_buttons()
+        show_toast(self, self.task.tr('已删除计划：') + name, tone='success')
 
     # -------------------------------------------------------------- dialog
     def _fit(self):
         window = self.parentWidget()
-        if window is not None:
-            self.panel.setFixedWidth(min(1040, max(560, window.width() - 48)))
-        self.step_list.setMinimumHeight(280)
+        if window is None:
+            super()._fit()
+            return
+        self.panel.setFixedWidth(min(1140, max(760, window.width() - 96)))
+        self.panel.setMinimumHeight(min(780, max(520, window.height() - 96)))
         super()._fit()
+
+    def open(self):
+        self._sync_buttons()
+        super().open()
 
     def validate(self):
         self.plans[self.active_name] = self._collect_steps()
@@ -293,5 +654,7 @@ class RoutinePlanDialog(Dialog):
         config_type = self.task.config_type.get(PLAN_SELECTOR)
         if isinstance(config_type, dict) and 'options' in config_type:
             config_type['options'] = list(self.plans)
-        show_toast(self.parentWidget(), self.task.tr('流水线计划已保存'), tone='success')
+        enabled = sum(1 for row in self.plans[self.active_name] if row['enabled'])
+        show_toast(self, self.task.tr('流水线计划已保存：') + f'{self.active_name} · {enabled} 个启用步骤',
+                   tone='success')
         return True
