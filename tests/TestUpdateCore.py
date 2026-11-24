@@ -340,6 +340,15 @@ class TestSwapHandshake(unittest.TestCase):
 
 class TestHandoff(unittest.TestCase):
 
+    def test_missing_updater_has_readable_error(self):
+        with tempfile.TemporaryDirectory() as work:
+            app = Path(work) / 'Monster-ww'
+            app.mkdir()
+            with self.assertRaises(c.UpdateError) as ctx:
+                c.launch_updater(app / c.UPDATER_NAME, 'v9', app, 1)
+        self.assertIn('MonsterUpdate.exe', str(ctx.exception))
+        self.assertIn('手动下载', str(ctx.exception))
+
     def test_updater_arguments(self):
         args = c.updater_arguments('v1.0.40', 'C:/app', 4242)
         self.assertEqual(args, ['--version', 'v1.0.40', '--app-dir', 'C:/app',

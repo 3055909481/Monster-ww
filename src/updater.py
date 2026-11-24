@@ -223,9 +223,16 @@ def _toast(message):
     try:
         from PySide6.QtWidgets import QApplication
 
+        window = QApplication.instance() and QApplication.activeWindow()
+        if window is None:
+            # No active window (headless/offscreen CI, or app still starting):
+            # show_toast(None, ...) crashes inside Qt's native layer, which a
+            # Python try/except cannot catch (STATUS_STACK_BUFFER_OVERRUN).
+            LOG.debug("toast skipped: no active window")
+            return
         from Mon.ui.qt.kit.feedback import show_toast
 
-        show_toast(QApplication.activeWindow(), message, tone="accent")
+        show_toast(window, message, tone="accent")
     except Exception:
         LOG.debug("toast unavailable", exc_info=True)
 

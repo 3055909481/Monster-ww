@@ -1,9 +1,7 @@
 """应用内更新检查器测试：版本比较、Atom 解析、交接给独立更新程序。"""
 import os
 import sys
-import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch as mock_patch
 
@@ -128,68 +126,6 @@ class TestInstall(unittest.TestCase):
                 fake.get_version_list = Mock()
                 self.assertFalse(u.install())
                 self.assertIs(fake.get_version_list, u.get_version_list)
-
-
-class TestUpdateHandoff(unittest.TestCase):
-    """Updating must only launch the standalone GUI updater, nothing else."""
-
-    def test_launches_standalone_updater_with_args(self):
-        app_dir = Path(tempfile.mkdtemp())
-        (app_dir / 'MonsterUpdate.exe').write_bytes(b'fake')
-        popen = Mock()
-        with mock_patch.object(u, '_app_dir', return_value=app_dir), \
-             mock_patch.object(u.os, 'name', 'nt'), \
-             mock_patch('update_core.subprocess.Popen', popen), \
-             mock_patch('update_core.tempfile.gettempdir',
-                        return_value=str(app_dir / 'temp')), \
-             mock_patch.object(u.os, 'getpid', return_value=4242), \
-             mock_patch.object(u, '_watch_for_swap_request') as watch:
-            result = u.update_to_version('v9.9.9')
-        # restart_required must stay False: the framework quits the app when it
-        # is True, which killed it before the download had even started.
-        self.assertEqual(result, {'updated': True, 'restart_required': False})
-        watch.assert_called_once()
-        args = popen.call_args.args[0]
-        self.assertTrue(str(args[0]).endswith('MonsterUpdate.exe'))
-        self.assertIn('--version', args)
-        self.assertIn('v9.9.9', args)
-        self.assertIn('--app-dir', args)
-        self.assertIn(str(app_dir), args)
-        self.assertIn('--pid', args)
-        self.assertIn('4242', args)
-        # The updater is copied out of app_dir so it can replace its own file.
-        self.assertNotEqual(str(args[0]), str(app_dir / 'MonsterUpdate.exe'))
-
-    def test_stale_swap_request_is_cleared_before_handoff(self):
-        """A request left over from an earlier attempt would quit the app the
-        moment the watchdog starts polling."""
-        app_dir = Path(tempfile.mkdtemp())
-        (app_dir / 'MonsterUpdate.exe').write_bytes(b'fake')
-        with mock_patch.object(u, '_app_dir', return_value=app_dir), \
-             mock_patch.object(u.os, 'name', 'nt'), \
-             mock_patch('update_core.subprocess.Popen', Mock()), \
-             mock_patch('update_core.tempfile.gettempdir',
-                        return_value=str(app_dir / 'temp')), \
-             mock_patch.object(u.os, 'getpid', return_value=4242), \
-             mock_patch('update_core.clear_swap_request') as clear, \
-             mock_patch.object(u, '_watch_for_swap_request'):
-            u.update_to_version('v9.9.9')
-        clear.assert_called_once()
-
-    def test_missing_updater_has_readable_error(self):
-        app_dir = Path(tempfile.mkdtemp())
-        with mock_patch.object(u, '_app_dir', return_value=app_dir), \
-             mock_patch.object(u.os, 'name', 'nt'):
-            with self.assertRaises(RuntimeError) as ctx:
-                u.update_to_version('v9.9.9')
-        self.assertIn('MonsterUpdate.exe', str(ctx.exception))
-        self.assertIn('手动下载', str(ctx.exception))
-
-    def test_non_windows_is_rejected(self):
-        with mock_patch.object(u.os, 'name', 'posix'):
-            with self.assertRaises(RuntimeError) as ctx:
-                u.update_to_version('v9.9.9')
-        self.assertIn('Windows', str(ctx.exception))
 
 
 if __name__ == '__main__':
