@@ -208,6 +208,16 @@ jobs:
           python .github/scripts/patch_launcher_manifest.py --verify $updater
           Write-Host 'Standalone updater present and elevated.'
 
+      - name: Verify ADB runtime is bundled
+        # The ADB validation task needs both the Python package and adb.exe.
+        # adbutils ships its own binary, so no Android SDK is required on the
+        # user machine; fail the build if collection missed it.
+        run: |
+          python -c "import adbutils; print(f'adbutils {adbutils.__version__}')"
+          $adb = @(Get-ChildItem -Recurse -Filter 'adb.exe' 'dist/Monster-ww' -ErrorAction SilentlyContinue)
+          if ($adb.Count -eq 0) { throw 'adb.exe missing from packaged tree.' }
+          $adb | ForEach-Object { Write-Host "Bundled ADB binary: $($_.FullName)" }
+
       - name: Smoke-test packaged app
         # GitHub-hosted runners already run elevated, so the requireAdministrator
         # manifest does not trigger an interactive UAC prompt here. Limit PATH
@@ -305,6 +315,7 @@ jobs:
             - **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去
             - **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响
             - **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN
+            - **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图
             - **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码
             - Python 环境与依赖已随包提供，首次运行无需联网下载
             - 7z 请用 7-Zip 或 Windows 11 23H2+ 解压

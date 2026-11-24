@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pyappify
 
+from adb_probe import adb_config
 from Mon import Box, ConfigOption, Icon
 from Mon.util.GlobalConfig import create_basic_options
 from src.game_launcher import get_game_launch_arguments
@@ -321,6 +322,7 @@ config = {
         'group:Daily Activities': {'light': '#2668AA', 'dark': '#8ABCF0'},
         'group:Echo Management': {'light': '#8C651A', 'dark': '#E8C27C'},
         'group:Multi-account': {'light': '#7650A5', 'dark': '#C2A3EA'},
+        'group:Diagnostics': {'light': '#3F6C8C', 'dark': '#8EBAD6'},
         'group:版本活动': {'light': '#B4682A', 'dark': '#F0AE72'},
     },
     'config_folder': CONFIG_FOLDER,
@@ -386,6 +388,11 @@ config = {
         'check_night_light': True,
         'force_no_night_light': False,
     },
+    # 本地安卓模拟器 / ADB 设备入口。 frameworks enumerate emulators only when
+    # this section exists. Default to the generic (slow) screencap channel;
+    # MuMu12 users can switch to the small-case "ipc" value in the device
+    # connection dialog for a much faster capture path.
+    'adb': adb_config(),
     # 云游戏（需要 Win11 并安装 Chrome 或 Edge）。框架的 browser 设备据此启用。
     'browser': {
         'url': 'https://mc.kurogames.com/cloud/#/',
@@ -455,6 +462,8 @@ config = {
         # 版本活动（3.8）：单列分组，不并入日常活动
         ["src.task.GalGameTask", "GalGameTask"],
         ["src.task.RahaiBlocksTask", "RahaiBlocksTask"],
+        # ADB / Android-emulator technical validation (capture + OCR + tap only).
+        ["src.task.AdbDiagnosisTask", "AdbDiagnosisTask"],
         # ["src.task.DiagnosisTask", "DiagnosisTask"],
     ], 'trigger_tasks': [
         ["src.task.AutoCombatTask", "AutoCombatTask"],

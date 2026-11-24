@@ -52,6 +52,9 @@ for name in ('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interv
 hiddenimports = collect_submodules('src')
 hiddenimports += ['src.identity', 'src.schedule_patch', 'src.adaptive_interval',
                   'src.team_overlay', 'src.click_jitter']
+# config.py (compiled to config.pyd) imports this pure helper; PyInstaller
+# cannot see through the .pyd, so name it explicitly.
+hiddenimports += ['adb_probe']
 binaries = collect_dynamic_libs('openvino')
 # The standalone updater (MonsterUpdate.exe) owns download/extract. src/updater.py
 # only needs update_core for updater_path()/launch_updater(), so freeze it into
@@ -61,7 +64,9 @@ hiddenimports += ['update_core']
 # Our framework fork is named Mon (upstream is ok). Workshop character code
 # still imports "ok"; identity.py aliases ok -> Mon at runtime, so we only
 # need to bundle Mon here.
-for package in ('Mon', 'onnxocr'):
+# adbutils ships adb.exe as package data; collect_all keeps the binary next to
+# the frozen app so ADB device discovery works without an Android SDK.
+for package in ('Mon', 'onnxocr', 'adbutils'):
     package_data, package_binaries, package_imports = collect_all(package)
     datas += package_data
     binaries += package_binaries

@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import adb_probe
 import config
 
 
@@ -127,6 +128,20 @@ class TestGameServerPath(unittest.TestCase):
         self.assertEqual(cfg_type[config.SERVER_KEY]['options'], ['国服', '国际服'])
         for key in config.SERVER_PATH_KEYS.values():
             self.assertEqual(cfg_type[key]['type'], 'file_selector')
+
+
+class TestAdbValidationRegistration(unittest.TestCase):
+
+    def test_adb_section_enables_device_discovery(self):
+        adb = config.config['adb']
+        self.assertEqual(list(adb_probe.ADB_PACKAGES), adb['packages'])
+        self.assertEqual('adb', adb['capture_method'])
+
+    def test_validation_task_is_registered(self):
+        self.assertIn(
+            ['src.task.AdbDiagnosisTask', 'AdbDiagnosisTask'],
+            config.config['onetime_tasks'],
+        )
 
 
 if __name__ == "__main__":
