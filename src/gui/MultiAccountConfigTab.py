@@ -94,6 +94,10 @@ class AccountTaskCard(Card):
         super().__init__(parent)
         self.expanded = False
         self.header = QWidget(self)
+        # The header must never absorb the card's extra vertical space: doing
+        # so spreads the title, status and expand button across a tall card
+        # when the details are shown/hidden. Let the content decide its height.
+        self.header.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.header_layout = QHBoxLayout(self.header)
         self.title_label = QLabel('新账号')
         self.title_label.setProperty('role', 'strong')
@@ -167,6 +171,9 @@ class AccountTaskCard(Card):
         self.viewLayout.addWidget(row)
 
         self.config_container = QWidget()
+        # Never let a previously rendered ConfigForm keep the container tall
+        # after switching back to "无" (no per-account task).
+        self.config_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.config_layout = QVBoxLayout(self.config_container)
         self.config_layout.setContentsMargins(0, 0, 0, 0)
         self.viewLayout.addWidget(self.config_container)
@@ -195,6 +202,9 @@ class AccountTaskCard(Card):
             self.values = effective_config(task, self.values)
             self.content = AccountConfigContent(task, self.values, self)
             self.config_layout.addWidget(self.content)
+        self.config_layout.invalidate()
+        self.config_layout.activate()
+        self.config_container.updateGeometry()
         self.schedule_resize()
 
     def schedule_resize(self):
@@ -205,14 +215,33 @@ class AccountTaskCard(Card):
         self.details.setVisible(expanded)
         self.expand_button.set_icon("chevron-up" if expanded else "chevron-down")
         self.resize_content()
+        # A second pass after the layout event loop settles catches ConfigForm
+        # rows whose height-for-width is computed lazily on first show.
+        self.schedule_resize()
 
     def resize_content(self):
+        # Do not freeze the card at a sizeHint sampled mid-layout. During
+        # expand/collapse (and ConfigForm's deferred resize callback) that
+        # hint can still describe the previous visibility state, leaving a
+        # huge empty card with a stretched header. Let Qt lay the card out
+        # naturally from its visible children instead.
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
+        self.details.setSizePolicy(
+            QSizePolicy.Preferred,
+            QSizePolicy.Maximum if self.details.isHidden() else QSizePolicy.Preferred,
+        )
         self.viewLayout.invalidate()
         self.viewLayout.activate()
         self.layout().invalidate()
         self.layout().activate()
-        self.setFixedHeight(self.layout().sizeHint().height())
         self.updateGeometry()
+        # Freeze only after the layouts above have been recalculated. The old
+        # code sampled sizeHint before that step and could lock a collapsed
+        # card at its previously expanded height.
+        height = self.sizeHint().height()
+        if height > 0:
+            self.setFixedHeight(height)
 
     def update_result(self, result):
         if not result:

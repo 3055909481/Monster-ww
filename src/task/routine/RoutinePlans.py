@@ -24,6 +24,11 @@ DEFAULT_PLAN_NAME = '默认'
 PLAN_SELECTOR = 'Routine Plan'
 EDIT_PLANS = 'Configure Routine Plans'
 
+NIGHTMARE_MODE_ALL = '全部'
+NIGHTMARE_MODE_CAPTURE = '仅补日常声骸'
+NIGHTMARE_MODES = (NIGHTMARE_MODE_ALL, NIGHTMARE_MODE_CAPTURE)
+NIGHTMARE_TARGETS = ('Nightmare Purification', 'Tacet Discord Nest')
+
 WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 ANY_DAY = '不限制'
 RUN_DAYS_KEY = '运行日'
@@ -133,6 +138,25 @@ def _count_schema():
     }
 
 
+def nightmare_nest_runtime_config(params):
+    """Translate a routine step's params into NightmareNestTask settings.
+
+    Kept here as a pure helper so the mapping can be tested without touching
+    the compiled RoutineTask module or a live executor.
+    """
+    values = params if isinstance(params, dict) else {}
+    raw_targets = values.get('刷取目标', list(NIGHTMARE_TARGETS))
+    if not isinstance(raw_targets, (list, tuple)):
+        raw_targets = [raw_targets]
+    targets = [target for target in raw_targets if target in NIGHTMARE_TARGETS]
+    if not targets:
+        raise ValueError('请至少选择一个梦魇巢穴刷取目标。')
+    mode = values.get('模式', NIGHTMARE_MODE_ALL)
+    if mode not in NIGHTMARE_MODES:
+        mode = NIGHTMARE_MODE_ALL
+    return {'Which to Farm': targets}, mode
+
+
 def _build_entries():
     count_default, count_desc, count_type = _count_schema()
     days_default, days_desc, days_type = _run_days_schema()
@@ -178,6 +202,17 @@ def _build_entries():
                       **count_type},
                      description='无音清剿产出声骸与调谐素材，无音区按 F2 手册顺序选择。',
                      icon='grid', stamina=60),
+        RoutineEntry('nightmare_nest', '梦魇巢穴', '声骸',
+                     {'模式': NIGHTMARE_MODE_ALL,
+                      '刷取目标': list(NIGHTMARE_TARGETS),
+                      **days_default},
+                     {'模式': '全部刷取所有可用巢穴；仅补日常声骸则拿到 1 个声骸即停。',
+                      '刷取目标': '梦魇拔除 / 残象探寻；可多选，至少保留一项。', **days_desc},
+                     {'模式': {'type': 'drop_down', 'options': list(NIGHTMARE_MODES)},
+                      '刷取目标': {'type': 'multi_selection', 'options': list(NIGHTMARE_TARGETS)},
+                      **days_type},
+                     description='自动清梦魇巢穴或仅补一个日常声骸，不消耗体力。',
+                     icon='nightmare', stamina=0),
         RoutineEntry('boss_challenge', '讨伐强敌', '清体力',
                      {'BOSS': catalog.boss_challenges()[0], '次数': 1},
                      {'BOSS': '获取共鸣者突破材料；一次 60 体力。',

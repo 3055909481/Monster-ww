@@ -28,6 +28,7 @@ from src.task.TrainingGuideTask import (
     TrainingGuideTask,
 )
 from src.task.MouseResetTask import MouseResetTask
+from src.task.NightmareNestTask import NightmareNestTask
 from src.task.MultiAccountDailyTask import (
     combo_items, combo_selected_item, find_login_combo, select_combo_item,
 )
@@ -36,8 +37,9 @@ from src.task.account.MultiAccountConfigStore import account_key_from_ocr, displ
 from src.task.account.RuntimeTaskConfig import account_task_config
 from src.task.routine import RoutineCatalog as catalog
 from src.task.routine.RoutinePlans import (
-    DEFAULT_PLAN_NAME, EDIT_PLANS, PLAN_SELECTOR, RoutinePlanAccountStore, RoutinePlanStore,
-    is_scheduled_today, normalize_items,
+    DEFAULT_PLAN_NAME, EDIT_PLANS, NIGHTMARE_MODE_ALL, PLAN_SELECTOR,
+    RoutinePlanAccountStore, RoutinePlanStore, is_scheduled_today,
+    nightmare_nest_runtime_config, normalize_items,
 )
 from src.task.task_icons import task_icon
 
@@ -331,6 +333,14 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             serial = catalog.tacet_serial(params.get('无音区', catalog.tacet_zones()[0]))
             with account_task_config(task, {'Which Tacet Suppression to Farm': serial}):
                 task.farm_tacet(max_runs=max_runs)
+        elif entry_id == 'nightmare_nest':
+            task = self.get_task_by_class(NightmareNestTask)
+            task_config, mode = nightmare_nest_runtime_config(params)
+            with account_task_config(task, task_config):
+                if mode == NIGHTMARE_MODE_ALL:
+                    task.run()
+                else:
+                    task.run_capture_mode()
         elif entry_id == 'boss_challenge':
             boss = params.get('BOSS', catalog.boss_challenges()[0])
             self._farm_echo({
