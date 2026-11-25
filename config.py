@@ -12,13 +12,16 @@ from src.task.process_feature import process_feature
 from src.task.task_icons import task_icon
 
 # The framework enables its update card when this launcher API is callable.
-# Install our GitHub-release-backed updater so the existing update UI works:
-# check button, version picker, automatic startup check and update-then-restart.
+# Incremental online update (coco-ww style): pyappify itself exposes
+# get_version_list / update_to_version / calculate_update_notes. It compares
+# the compiled build tree against a per-file SHA256 manifest published on the
+# update-index branch and downloads only changed files via raw/jsDelivr.
+# The standalone MonsterUpdate.exe remains the manual full-package path.
 # Pure runtime use (workshop, tasks) stays offline; only an explicit update
 # check or the framework's startup check touches the network.
 try:
-    from src import updater as _updater
-    _updater.install()
+    if not callable(getattr(pyappify, "get_version_list", None)):
+        raise RuntimeError("incremental updater API unavailable")
 except Exception:
     # Never let an updater problem prevent the application from starting.
     pyappify.get_version_list = None
@@ -335,6 +338,7 @@ config = {
     'custom_tabs': [
         ["src.gui.CharacterCodeTab", "CharacterCodeTab"],
         ["src.gui.RoutineTab", "RoutineTab"],
+        ["src.recorder.RecorderTab", "AxisRecorderTab"],
     ],
     'ocr': {
         'lib': 'onnxocr',
@@ -472,11 +476,10 @@ config = {
         ["src.task.SkipDialogTask", "AutoDialogTask"],
         ["src.task.FastTravelTask", "FastTravelTask"],
         ["src.task.MouseResetTask", "MouseResetTask"],
+        ["src.recorder.AxisRecorder", "AxisRecorderTask"],
     ], 'scene': ["src.scene.WWScene", "WWScene"],
-    'update_pyappify': {
-        'to_version': '1.2.3',
-        'zip_url': 'https://github.com/3055909481/Monster-ww/releases/latest',
-        'sha256': '447207edbfb6944beb994347048e155df99775eb18c87dcae54dda125071c94a',
-    }
+    # No `update_pyappify`: the standalone exe is the launcher, and the
+    # incremental updater replaces files itself. Keeping that legacy config
+    # would make MainWindow call pyappify.upgrade() on every start.
 
 }

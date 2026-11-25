@@ -424,11 +424,98 @@ def _restore_backup(app_dir, backup):
     return True
 
 
+def _rel_files(root):
+    """Relative paths of every file below root (POSIX separators, sorted)."""
+    root = Path(root)
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file())
+
+
+def _install_filewise(new_tree, app_dir, backup, progress=None, is_cancelled=None):
+    """Install file by file when the whole directory cannot be renamed.
+
+    Windows refuses to rename a directory while *any* handle below it is open
+    (an OpenVINO blob held by a scanner/driver, a stale process, ...). That made
+    the v1.0.39 update fail even though almost every file was replaceable.
+    Mirroring coco-ww's approach: move each old file to the backup, place each
+    new file with os.replace, and journal every step so a failure restores the
+    exact previous state. A single locked file now fails alone and rolls back,
+    instead of blocking the rename of the entire install.
+    """
+    new_tree, app_dir, backup = Path(new_tree), Path(app_dir), Path(backup)
+    journal = []  # (rel, had_old, placed_new)
+    emit_progress(progress, "正在安装更新…", 90, "逐个文件替换（目录被占用）")
+    try:
+        # 1) Retire old files into the backup tree.
+        old_files = _rel_files(app_dir) if app_dir.exists() else []
+        total = max(1, len(old_files) + len(_rel_files(new_tree)))
+        for index, rel in enumerate(old_files):
+            _check_cancel(is_cancelled)
+            src, dst = app_dir / rel, backup / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            _retry_os(lambda s=src, d=dst: os.replace(str(s), str(d)))
+            journal.append([rel, True, False])
+            if index % 10 == 0:
+                emit_progress(progress, "正在安装更新…", 90 + int(4 * index / total),
+                              f"备份旧文件 {index + 1}/{len(old_files)}")
+
+        # 2) Place the new files.
+        new_files = _rel_files(new_tree)
+        for index, rel in enumerate(new_files):
+            _check_cancel(is_cancelled)
+            src, dst = new_tree / rel, app_dir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            existing = rel in old_files
+            if existing:
+                os.replace(str(src), str(dst))
+                # Find the journal row we just retired and mark it placed.
+                for row in journal:
+                    if row[0] == rel and row[2] is False:
+                        row[2] = True
+                        break
+            else:
+                _retry_os(lambda s=src, d=dst: os.replace(str(s), str(d)))
+                journal.append([rel, False, True])
+            if index % 10 == 0:
+                emit_progress(progress, "正在安装更新…", 94 + int(4 * index / total),
+                              f"写入新文件 {index + 1}/{len(new_files)}")
+    except Exception:
+        # Roll back in reverse order: new files back to the tree, old files home.
+        # A backup file that cannot be restored is a lost install, so surface it
+        # instead of silently leaving a half-updated app that starts and crashes.
+        rollback_errors = []
+        for rel, had_old, placed_new in reversed(journal):
+            try:
+                if placed_new:
+                    (app_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+                    _retry_os(lambda s=app_dir / rel, d=new_tree / rel: os.replace(str(s), str(d)),
+                              attempts=5)
+                if had_old:
+                    (backup / rel).parent.mkdir(parents=True, exist_ok=True)
+                    _retry_os(lambda s=backup / rel, d=app_dir / rel: os.replace(str(s), str(d)),
+                              attempts=5)
+            except OSError as error:
+                rollback_errors.append(f"{rel}: {error}")
+        if rollback_errors:
+            raise UpdateError(
+                "安装失败且部分文件未能还原：" + "；".join(rollback_errors[:5]) +
+                f"。原版本备份在 {backup}，请勿关闭程序并重试") from None
+        raise
+    # Remove directories left empty in the old install (files deleted upstream).
+    for folder in sorted((p for p in app_dir.rglob('*') if p.is_dir()),
+                         key=lambda p: len(p.parts), reverse=True):
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
+    return app_dir
+
+
 def install(extracted_app, app_dir, progress=None, is_cancelled=None):
     """Swap the new tree in, keeping the old one recoverable.
 
-    The swap is a rename of an already complete tree, so a failure can cost at
-    most the rename itself - never a half-written app directory.
+    Fast path: rename the complete tree (one atomic operation). If Windows
+    refuses because a file below the directory is locked, fall back to a
+    journaled per-file replace so one stubborn handle cannot block the update.
     """
     extracted_app, app_dir = Path(extracted_app), Path(app_dir)
     _check_cancel(is_cancelled)
@@ -444,6 +531,7 @@ def install(extracted_app, app_dir, progress=None, is_cancelled=None):
     shutil.rmtree(backup, ignore_errors=True)
     shutil.rmtree(_sibling(app_dir, ".failed"), ignore_errors=True)
     moved_old = False
+    filewise = False
     try:
         if app_dir.exists():
             # The old process may have just exited; Windows can still hold a
@@ -453,15 +541,28 @@ def install(extracted_app, app_dir, progress=None, is_cancelled=None):
                     os.rename(str(app_dir), str(backup))
                     moved_old = True
                     break
-                except OSError:
+                except OSError as error:
                     if attempt == 9:
-                        raise
+                        # Whole-directory rename is blocked by a persistent
+                        # handle; degrade to per-file replacement instead of
+                        # giving up (the v1.0.39 failure mode).
+                        LOG.warning("directory rename blocked (%s); using filewise install", error)
+                        filewise = True
+                        break
                     time.sleep(0.5)
                     emit_progress(progress, "正在安装更新…", 88,
                                   f"等待文件释放（{attempt + 1}/10）")
         _check_cancel(is_cancelled)
         emit_progress(progress, "正在安装更新…", 94, "写入新版本")
-        move_tree(extracted_app, app_dir)
+        if filewise:
+            backup.mkdir(parents=True, exist_ok=True)
+            # _install_filewise rolls its own journal back on failure; the only
+            # case needing the outer restore is when the whole old tree was
+            # moved aside, which a per-file install never does by itself.
+            _install_filewise(extracted_app, app_dir, backup, progress, is_cancelled)
+            moved_old = False  # per-file path restored itself or left app intact
+        else:
+            move_tree(extracted_app, app_dir)
         missing = missing_files(app_dir)
         if missing:
             raise UpdateError("新版本缺少文件（" + "、".join(missing) + "）")
@@ -489,11 +590,44 @@ def install(extracted_app, app_dir, progress=None, is_cancelled=None):
     return backup
 
 
+def _detached_flags():
+    """Windows creation flags that keep a spawned process out of the parent's
+    console/job, so it survives when the updater or the old app exits (as in
+    coco-ww's _spawn_helper). Falls back to a new process group where a flag is
+    unavailable on this Windows build."""
+    if os.name != "nt":
+        return 0
+    flags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+    for name in ('DETACHED_PROCESS', 'CREATE_BREAKAWAY_FROM_JOB'):
+        extra = getattr(subprocess, name, 0)
+        if extra:
+            flags |= extra
+    return flags
+
+
+def _spawn_detached(args, cwd):
+    """Spawn a process that outlives its parent, with a safe fallback."""
+    if os.name != "nt":
+        return subprocess.Popen(args, cwd=str(cwd), start_new_session=True,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, close_fds=True)
+    try:
+        return subprocess.Popen(args, cwd=str(cwd), creationflags=_detached_flags(),
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, close_fds=True)
+    except OSError:
+        # Some job objects refuse breakaway; still try a plain new group.
+        return subprocess.Popen(
+            args, cwd=str(cwd), creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, close_fds=True)
+
+
 def relaunch(app_dir, exe_name=EXE_NAME):
     exe = Path(app_dir) / exe_name
     if not exe.is_file():
         raise UpdateError(f"未找到 {exe_name}，请手动启动 {app_dir}")
-    subprocess.Popen([str(exe)], cwd=str(app_dir), close_fds=True)
+    _spawn_detached([str(exe)], app_dir)
     return exe
 
 
@@ -586,17 +720,9 @@ def launch_updater(updater_exe, version, app_dir, pid, exe_name=EXE_NAME):
 
     args = [str(temp_exe), *updater_arguments(version, app_dir, pid, exe_name)]
     try:
-        if os.name == "nt":
-            # The updater is a GUI window app; no console, new process group
-            # so it survives the parent's shutdown.
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen(args, creationflags=flags, cwd=str(temp_dir),
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, close_fds=True)
-        else:
-            subprocess.Popen(args, cwd=str(temp_dir), start_new_session=True,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, close_fds=True)
+        # Detached from the parent's console/job so the updater survives the
+        # app's shutdown (coco-ww _spawn_helper pattern).
+        _spawn_detached(args, temp_dir)
     except Exception as error:
         raise UpdateError(f"无法启动更新程序：{error}") from error
     return temp_exe

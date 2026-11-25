@@ -250,23 +250,93 @@ class TestInstall(unittest.TestCase):
                             'the partial tree must be kept aside, not deleted')
 
     def test_install_does_not_claim_restore_when_rename_never_happened(self):
+        """When neither the directory rename nor any individual file can be
+        moved, nothing was backed up, so the error must not claim a restore
+        happened (the old tree is still in place)."""
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
             app = make_app_tree(root / 'Monster-ww', 'old')
             staged = make_app_tree(root / 'staged' / 'Monster-ww', 'new')
             real_rename = c.os.rename
 
-            def refuse_backup_name(src, dst, *args, **kwargs):
-                if str(dst).endswith('.old'):
-                    raise OSError('in use')
-                return real_rename(src, dst, *args, **kwargs)
+            def refuse_all_moves(src, dst, *args, **kwargs):
+                raise OSError('in use')
 
-            with patch.object(c.os, 'rename', side_effect=refuse_backup_name), \
+            with patch.object(c.os, 'rename', side_effect=refuse_all_moves), \
+                 patch.object(c.os, 'replace', side_effect=refuse_all_moves), \
                  patch.object(c.time, 'sleep', return_value=None):
                 with self.assertRaises(c.UpdateError) as ctx:
                     c.install(staged, app)
-            self.assertIn('原版本未改动', str(ctx.exception))
+            # Every move failed, so the error must say the old install is
+            # untouched or that files could not be restored - never claim a
+            # successful restore that did not happen.
+            self.assertTrue('原版本未改动' in str(ctx.exception) or
+                            '未能还原' in str(ctx.exception), str(ctx.exception))
             self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+
+    def test_install_filewise_when_directory_rename_is_locked(self):
+        """v1.0.39: a locked file below the install (OpenVINO blob) blocks the
+        whole-directory rename. Fall back to per-file replacement so a single
+        stubborn handle cannot block the update."""
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            (app / 'cache' / 'openvino').mkdir(parents=True)
+            (app / 'cache' / 'openvino' / 'model.blob').write_text('old-blob')
+            staged = make_app_tree(root / 'staged' / 'Monster-ww', 'new')
+            (staged / 'cache' / 'openvino').mkdir(parents=True)
+            (staged / 'cache' / 'openvino' / 'model.blob').write_text('new-blob')
+            real_rename = c.os.rename
+
+            def refuse_dir_rename(src, dst, *args, **kwargs):
+                # Only the whole app directory rename is blocked; individual
+                # file replaces still work.
+                if str(src) == str(app):
+                    raise OSError(5, 'access denied')
+                return real_rename(src, dst, *args, **kwargs)
+
+            with patch.object(c.os, 'rename', side_effect=refuse_dir_rename), \
+                 patch.object(c.time, 'sleep', return_value=None):
+                backup = c.install(staged, app)
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'new')
+            self.assertEqual((app / 'cache' / 'openvino' / 'model.blob').read_text(), 'new-blob')
+            self.assertEqual((backup / 'Monster-ww.exe').read_text(), 'old')
+            self.assertEqual((backup / 'cache' / 'openvino' / 'model.blob').read_text(), 'old-blob')
+            self.assertFalse(c.missing_files(app))
+
+    def test_install_filewise_rolls_back_on_locked_file(self):
+        """One file cannot be replaced -> the app goes back to the old version,
+        not a half-new tree that starts and crashes."""
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            app = make_app_tree(root / 'Monster-ww', 'old')
+            staged = make_app_tree(root / 'staged' / 'Monster-ww', 'new')
+            real_rename = c.os.rename
+
+            def refuse_dir_rename(src, dst, *args, **kwargs):
+                if str(src) == str(app):
+                    raise OSError(5, 'access denied')
+                return real_rename(src, dst, *args, **kwargs)
+
+            real_replace = c.os.replace
+            refused = [False]
+
+            def refuse_one_file(src, dst, *args, **kwargs):
+                # Only the first attempt to place the new domain_catalog.json
+                # fails; rollback must be allowed to put the old file back.
+                if (not refused[0] and str(src).endswith('domain_catalog.json')
+                        and 'staged' in str(src)):
+                    refused[0] = True
+                    raise OSError(5, 'locked')
+                return real_replace(src, dst, *args, **kwargs)
+
+            with patch.object(c.os, 'rename', side_effect=refuse_dir_rename), \
+                 patch.object(c.os, 'replace', side_effect=refuse_one_file), \
+                 patch.object(c.time, 'sleep', return_value=None):
+                with self.assertRaises(c.UpdateError) as ctx:
+                    c.install(staged, app)
+            self.assertEqual((app / 'Monster-ww.exe').read_text(), 'old')
+            self.assertFalse(c.missing_files(app))
 
 
 @unittest.skipUnless(HAVE_PY7ZR, 'py7zr not installed')
@@ -371,8 +441,11 @@ class TestHandoff(unittest.TestCase):
             self.assertEqual(launched.read_bytes(), b'fake-updater')
             args = popen.call_args.args[0]
             self.assertIn('--version', args)
-            self.assertEqual(popen.call_args.kwargs['creationflags'],
-                             c.subprocess.CREATE_NEW_PROCESS_GROUP)
+            flags = popen.call_args.kwargs['creationflags']
+            self.assertTrue(flags & c.subprocess.CREATE_NEW_PROCESS_GROUP)
+            # Detached from the parent's console/job so the updater survives
+            # the app shutdown (same guarantee as coco-ww's helper process).
+            self.assertTrue(flags & c.subprocess.DETACHED_PROCESS)
 
     def test_launch_updater_survives_a_locked_temp_copy(self):
         """A previous updater window still holding the fixed temp exe must not

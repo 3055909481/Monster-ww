@@ -46,6 +46,19 @@ for name in ('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interv
     src = root / 'src' / name
     if src.is_file():
         datas.append((str(src), 'src'))
+# 跑轴记录的 recorder.py 用嵌套函数给框架类打 patch, 必须保留源码; 它在子目录,
+# 上面的根目录循环收不到, 这里显式收进 src/recorder/。
+recorder_source = root / 'src' / 'recorder' / 'recorder.py'
+if recorder_source.is_file():
+    datas.append((str(recorder_source), 'src/recorder'))
+# Incremental online update backend. It spawns a helper process and uses
+# thread pools / nested functions; keep it as source (same reason as the
+# patch modules) and ship it next to the exe so `import pyappify` works.
+for pyappify_source in sorted((root / 'pyappify').glob('*.py')):
+    datas.append((str(pyappify_source), 'pyappify'))
+# src/net_ssl.py is compiled to a .pyd like other src modules; no source copy.
+# The helper is launched by path from pyappify/__init__.py (HELPER_SCRIPT);
+# datas above already places it in pyappify/, matching APP_ROOT/pyappify.
 
 # .pyd 模块由 datas 原样复制到 exe 同级 src/ 下，运行时靠 sys.path 加载
 # （xjtu 同款模式）。patch 模块是源码，显式列出确保被记录。
