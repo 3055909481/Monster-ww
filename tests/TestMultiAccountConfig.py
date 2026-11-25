@@ -496,11 +496,17 @@ class TestMultiAccountConfig(unittest.TestCase):
                 executor = executor_for([task], folder)
                 runner = self.make_runner(executor)
                 MultiAccountConfigStore(folder).save([account(task=task), account('2342345')])
-                with patch.object(WWOneTimeTask, 'run'), self.assertRaises(type(error)):
-                    MultiAccountConfigTask.run(runner)
+                if isinstance(error, TaskDisabledException):
+                    # 用户主动停止：仍中断整个队列。
+                    with patch.object(WWOneTimeTask, 'run'), self.assertRaises(TaskDisabledException):
+                        MultiAccountConfigTask.run(runner)
+                    self.assertEqual(runner._login_target_account.call_count, 1)
+                else:
+                    # 单账号失败：记录 failed 后继续下一个账号，不中断队列。
+                    with patch.object(WWOneTimeTask, 'run'):
+                        MultiAccountConfigTask.run(runner)
+                    self.assertEqual(runner._login_target_account.call_count, 2)
                 self.assertIs(task.config, original)
-                self.assertEqual(runner._login_target_account.call_count, 1)
-                self.assertEqual(runner.info['已完成'], [])
                 result = MultiAccountConfigStore(folder).load_results()['1231234']
                 self.assertEqual(result['status'], 'cancelled' if isinstance(error, TaskDisabledException) else 'failed')
                 self.assertTrue(result['finished_at'])

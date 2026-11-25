@@ -1,8 +1,9 @@
 import re
 
 from Mon import Logger
-from Mon.task.exceptions import WaitFailedException
-from src.task.BaseCombatTask import BaseCombatTask, CharRevivedException
+from src.task.BaseCombatTask import (
+    BaseCombatTask, CharRevivedException, ClaimRewardException,
+)
 from src.task.WWOneTimeTask import WWOneTimeTask
 from src.task.task_icons import task_icon
 
@@ -122,12 +123,36 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                     self.log_info(self.tr('farm_tacet: death recovered, re-enter from F2 book'))
                     self.realm_entry_at_heal_point = True  # 恢复后站在信标上, 从 F2 直接进本
                     break
+                except ClaimRewardException as claim_error:
+                    # 领奖识别失败：计入重试上限，退本回主页后从 F2 重新进本，
+                    # 而不是冒泡到框架直接停任务。
+                    recovery_retries += 1
+                    if recovery_retries >= max_recovery_retries:
+                        self.log_info(self.tr('farm_tacet: exceeded recovery retries ({max_recovery_retries}), stop farming').format(max_recovery_retries=max_recovery_retries),
+                                      notify=True)
+                        self.ensure_main(time_out=120)
+                        return None
+                    self.log_warning(self.tr('farm_tacet: claim reward failed ({error}), exiting domain to retry').format(error=claim_error))
+                    self.ensure_main(time_out=120)
+                    self.realm_entry_at_heal_point = False
+                    break
                 self.pick_f(handle_claim=False)
                 self.sleep(2)
                 if not self.has_claim_stamina():
+                    # 领奖标记未出现也计一次恢复。连续失败时退本重进，避免
+                    # 原逻辑 esc_cancel()+continue 在同一状态无限循环。
+                    recovery_retries += 1
+                    if recovery_retries >= max_recovery_retries:
+                        self.log_info(self.tr('farm_tacet: exceeded recovery retries ({max_recovery_retries}), stop farming').format(max_recovery_retries=max_recovery_retries),
+                                      notify=True)
+                        self.ensure_main(time_out=120)
+                        return None
                     self.esc_cancel()
-                    self.log_info(self.tr('is not claim treasure, restart challenge'))
-                    continue
+                    self.log_info(self.tr('is not claim treasure, re-enter from F2 book ({attempt}/{max})').format(
+                        attempt=recovery_retries, max=max_recovery_retries))
+                    self.ensure_main(time_out=120)
+                    self.realm_entry_at_heal_point = False
+                    break
                 can_continue, used = self.use_stamina(once=self.stamina_once, must_use=must_use)
                 self.info_incr('used stamina', used)
                 self.sleep(4)
@@ -157,16 +182,27 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 must_use -= used
 
     def clear_tacet_and_reach_reward(self):
-        """打完无音区并走到领奖点；领奖点超时但仍在副本且战斗未结束时续战再走。"""
+        """打完无音区并走到领奖点；领奖点超时但仍在副本且战斗未结束时续战再走。
+
+        续战一次后仍识别不到领奖点时抛 ClaimRewardException，交由 farm_tacet
+        的恢复循环退本重进（不再把普通识别失败冒泡到框架停任务）。
+        """
         self.combat_once(target=True)
         try:
             self.walk_to_treasure()
-        except WaitFailedException:
-            if not self.in_realm() or not self.wait_combat(target=True, time_out=5, raise_if_not_found=False):
+        except Exception as first_error:
+            if isinstance(first_error, CharRevivedException):
                 raise
+            if not self.in_realm() or not self.wait_combat(target=True, time_out=5, raise_if_not_found=False):
+                raise ClaimRewardException(str(first_error)) from first_error
             logger.info('Tacet reward is unavailable and combat is still active. Resuming in the same arena.')
             self.combat_once(target=True, wait_combat_time=5)
-            self.walk_to_treasure()
+            try:
+                self.walk_to_treasure()
+            except Exception as second_error:
+                if isinstance(second_error, CharRevivedException):
+                    raise
+                raise ClaimRewardException(str(second_error)) from second_error
 
     def find_rechallenge_button(self):
         buttons = self.ocr(0.54, 0.81, 0.72, 0.90, match=RECHALLENGE_TEXT)

@@ -30,11 +30,25 @@ class WWOneTimeTask:
         account_key = scheduled_account()
         if not account_key or type(self).__name__ in ('RoutineTask', 'MultiAccountConfigTask'):
             return
-        try:
-            from src.task.RoutineTask import RoutineTask
-            # Reuse the proven login helpers against this task instance: they
-            # only need generic task methods (ocr/click/sleep/ensure_main).
-            RoutineTask._switch_to_login(self)
-            RoutineTask._login_target_account(self, account_key)
-        except Exception as error:
-            logger.warning('scheduled account login failed for %s: %s', account_key, error)
+        from src.task.RoutineTask import RoutineTask
+        # Reuse the proven login helpers against this task instance: they
+        # only need generic task methods (ocr/click/sleep/ensure_main).
+        # A scheduled run must never proceed on the wrong account, so retry
+        # once and then fail loudly instead of silently running on whoever is
+        # currently logged in.
+        from Mon.task.exceptions import TaskDisabledException
+        last_error = None
+        for attempt in range(2):
+            try:
+                RoutineTask._switch_to_login(self)
+                RoutineTask._login_target_account(self, account_key)
+                return
+            except TaskDisabledException:
+                raise  # 用户主动停止，不重试
+            except Exception as error:
+                last_error = error
+                logger.warning('scheduled account login failed for %s (attempt %d/2): %s',
+                               account_key, attempt + 1, error)
+        raise RuntimeError(
+            f'scheduled account login failed for {account_key}; aborting to avoid '
+            f'running on the wrong account: {last_error}') from last_error

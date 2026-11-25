@@ -64,6 +64,34 @@ class TestDomainRecoveryLoop(unittest.TestCase):
         )
         self.assertTrue(has_make_sure_in_world_call)
 
+    def test_farm_in_domain_catches_claim_reward_failure(self):
+        # 领奖识别失败(ClaimRewardException)必须被 farm_in_domain 捕获，
+        # 转成 (False, must_use) 交回恢复循环，而不是冒泡到框架停任务。
+        class_node = next(
+            node for node in ast.parse(Path("src/task/DomainTask.py").read_text(encoding="utf-8")).body
+            if isinstance(node, ast.ClassDef) and node.name == "DomainTask"
+        )
+        method = next(
+            node for node in class_node.body
+            if isinstance(node, ast.FunctionDef) and node.name == "farm_in_domain"
+        )
+        catches_claim = any(
+            isinstance(node, ast.ExceptHandler)
+            and isinstance(node.type, ast.Name)
+            and node.type.id == "ClaimRewardException"
+            for node in ast.walk(method)
+        )
+        self.assertTrue(catches_claim, "farm_in_domain must catch ClaimRewardException")
+
+        source = Path("src/task/DomainTask.py").read_text(encoding="utf-8")
+        self.assertIn("ClaimRewardException", source)
+        self.assertIn("_last_recovery_reason = 'claim'", source)
+
+    def test_recovery_loop_distinguishes_claim_from_death(self):
+        source = Path("src/task/DomainTask.py").read_text(encoding="utf-8")
+        # 领奖失败退出副本后不在信标点，需重新传送；死亡恢复才跳过传送。
+        self.assertIn("realm_entry_at_heal_point = getattr(self, '_last_recovery_reason', 'death') == 'death'", source)
+
     def test_loop_unpacks_must_use_from_farm_in_domain(self):
         has_unpack = any(
             isinstance(node, ast.Assign)

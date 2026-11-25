@@ -68,8 +68,10 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
             except (OSError, ValueError) as error:
                 self.log_warning(self.tr('Failed to save account run history: {error}').format(error=error))
         completed = []
+        failed = []
         self.info_set('状态', '执行中')
         self.info_set('已完成', completed.copy())
+        self.info_set('失败账号', failed)
         try:
             # Reset for every account, including configs of indirectly called tasks.
             for index, (account, task) in enumerate(plan):
@@ -97,15 +99,30 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
                         self.ensure_main(time_out=100)
                         self._switch_to_login()
                 except TaskDisabledException:
+                    # 用户主动停止：记录后仍中断，尊重停止操作。
                     record_result(account, 'cancelled', '任务已停止')
                     raise
                 except Exception as error:
+                    # 单个账号失败不应中断整个队列：记录失败结果，尽力回到
+                    # 登录页后继续下一个账号。后续账号有独立的 config/server
+                    # 隔离，不受失败账号影响。
                     record_result(account, 'failed', str(error))
-                    raise
+                    self.log_error(self.tr('Account {account} failed: {error}; continuing with the next account.').format(
+                        account=display_account(account['account_key']), error=error))
+                    failed.append(display_account(account['account_key']))
+                    self.info_set('失败账号', failed.copy())
+                    try:
+                        self.logged_in = False
+                        self.ensure_main(time_out=100)
+                        self._switch_to_login()
+                    except Exception as cleanup_error:
+                        self.log_warning(self.tr('Failed to return to login screen after account failure: {error}').format(error=cleanup_error))
+                    continue
                 record_result(account, 'success')
                 completed.append(display_account(account['account_key']))
                 self.info_set('已完成', completed.copy())
-            self.info_set('状态', '全部完成')
+            self.info_set('状态', '全部完成' if not failed else
+                          self.tr('完成（{ok} 成功 / {bad} 失败）').format(ok=len(completed), bad=len(failed)))
         except TaskDisabledException:
             self.info_set('状态', '已停止')
             raise
@@ -204,7 +221,15 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
                 else:
                     self.click_relative(0.5, 0.568, hcenter=True, vcenter=True, after_sleep=3)
                 self.logged_in = False
-                self.ensure_main(time_out=180)
+                # 登录后进入大世界偶发超时（动画/加载慢）：重试一次，仍失败
+                # 才让该账号标记为 failed，由队列隔离继续下一个账号。
+                try:
+                    self.ensure_main(time_out=180)
+                except TaskDisabledException:
+                    raise  # 用户主动停止，不重试
+                except Exception as first_error:
+                    self.log_warning(self.tr('Login did not reach the game world ({error}); retrying once.').format(error=first_error))
+                    self.ensure_main(time_out=180)
                 self.log_info(self.tr('{account} logged in successfully').format(account=display_account(account_key)))
             finally:
                 self._login_cursor_active = previous_cursor_mode

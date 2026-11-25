@@ -2,7 +2,9 @@ import re
 
 
 from Mon import Logger
-from src.task.BaseCombatTask import BaseCombatTask, NotInCombatException, CharDeadException
+from src.task.BaseCombatTask import (
+    BaseCombatTask, NotInCombatException, CharDeadException, ClaimRewardException,
+)
 from src.task.WWOneTimeTask import WWOneTimeTask
 
 logger = Logger.get_logger(__name__)
@@ -63,6 +65,7 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
         stamina_waited = False
         stamina_retry = False
         self.realm_entry_at_heal_point = False
+        self._last_recovery_reason = 'death'
         while True:
             current, _, _ = self.open_F2_book_and_get_stamina()
             if current < self.stamina_once or current < must_use:
@@ -102,8 +105,11 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
                               notify=True)
                 self.make_sure_in_world()
                 return
-            self.log_info(self.tr('farm_domain: death recovered, re-enter from F2 book'))
-            self.realm_entry_at_heal_point = True  # 恢复后站在信标上, 从 F2 直接进本
+            self.log_info(self.tr('farm_domain: recovered ({reason}), re-enter from F2 book').format(
+                reason=getattr(self, '_last_recovery_reason', 'death')))
+            # 死亡恢复站在信标上可从 F2 直接进本；领奖失败可能停在副本内
+            # 任意位置，需先退出副本再传送，因此只在死亡时跳过传送回血。
+            self.realm_entry_at_heal_point = getattr(self, '_last_recovery_reason', 'death') == 'death'
             self.sleep(1)
 
     def farm_in_domain(self, must_use=0, max_runs=0):
@@ -122,10 +128,23 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
             try:
                 self.combat_once()
                 self.sleep(3)
-                self.walk_to_treasure()
-                self.pick_f(handle_claim=False)
+                # 领奖识别失败属于可恢复错误：转成专用异常，交给外层恢复循环
+                # 走「退本 → 回大世界 → F2 重进」，而不是冒泡到框架直接停任务。
+                try:
+                    self.walk_to_treasure()
+                    self.pick_f(handle_claim=False)
+                except Exception as claim_error:
+                    if isinstance(claim_error, (NotInCombatException, CharDeadException)):
+                        raise
+                    raise ClaimRewardException(str(claim_error)) from claim_error
             except (NotInCombatException, CharDeadException):
+                self._last_recovery_reason = 'death'
                 self.log_info(self.tr('farm_in_domain: death recovered, exiting domain'))
+                self.make_sure_in_world()
+                return False, must_use
+            except ClaimRewardException as claim_error:
+                self._last_recovery_reason = 'claim'
+                self.log_warning(self.tr('farm_in_domain: claim reward failed ({error}), exiting domain to retry').format(error=claim_error))
                 self.make_sure_in_world()
                 return False, must_use
             can_continue, used = self.use_stamina(once=self.stamina_once, must_use=must_use)

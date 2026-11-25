@@ -7,7 +7,7 @@ import win32gui
 import win32process
 
 from Mon import Box
-from Mon.task.exceptions import WaitFailedException
+from Mon.task.exceptions import WaitFailedException, TaskDisabledException
 from src.task.DailyTask import DailyTask
 from src.task.WWOneTimeTask import WWOneTimeTask
 from src.task.BaseCombatTask import BaseCombatTask
@@ -139,10 +139,23 @@ class MultiAccountDailyTask(WWOneTimeTask, BaseCombatTask):
 
         while next_account := self._select_and_login_account():
             self.info_set('Completed', self.done_set)
-            self.run_task_by_class(DailyTask)
-            self._mark_done(next_account)
-            self.ensure_main(time_out=100)
-            self._switch_to_login()
+            try:
+                self.run_task_by_class(DailyTask)
+                self._mark_done(next_account)
+            except TaskDisabledException:
+                # 用户主动停止：尊重停止操作。
+                raise
+            except Exception as error:
+                # 单账号日常失败不中断队列：记录后回到登录页继续下一个。
+                self.log_error(self.tr('Daily task failed for {account}: {error}; continuing.').format(
+                    account=next_account, error=error))
+                self.info_set('Failed', (self.info.get('Failed') or []) + [next_account])
+            try:
+                self.ensure_main(time_out=100)
+                self._switch_to_login()
+            except Exception as cleanup_error:
+                self.log_warning(self.tr('Failed to return to login screen after account failure: {error}').format(error=cleanup_error))
+                break
 
     def configure_accounts(self):
         # Config button callbacks run on the Qt thread; game work stays in run().

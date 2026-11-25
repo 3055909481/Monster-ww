@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 from Mon.task.exceptions import WaitFailedException
+from src.task.BaseCombatTask import ClaimRewardException
 from src.task.TacetTask import TacetTask
 
 
@@ -32,21 +33,31 @@ class TestClearTacetAndReachReward(unittest.TestCase):
         self.assertEqual(2, task.walk_to_treasure.call_count)
         task.wait_combat.assert_called_once_with(target=True, time_out=5, raise_if_not_found=False)
 
-    def test_reraises_when_reward_missing_and_arena_inactive(self):
+    def test_raises_claim_reward_when_reward_missing_and_arena_inactive(self):
         task = make_task()
         task.walk_to_treasure.side_effect = WaitFailedException()
         task.wait_combat.return_value = False
-        with self.assertRaises(WaitFailedException):
+        # 领奖识别失败转成可恢复异常，交给 farm_tacet 退本重进。
+        with self.assertRaises(ClaimRewardException):
             task.clear_tacet_and_reach_reward()
         self.assertEqual(1, task.combat_once.call_count)
 
-    def test_reraises_when_not_in_realm(self):
+    def test_raises_claim_reward_when_not_in_realm(self):
         task = make_task()
         task.walk_to_treasure.side_effect = WaitFailedException()
         task.in_realm.return_value = False
-        with self.assertRaises(WaitFailedException):
+        with self.assertRaises(ClaimRewardException):
             task.clear_tacet_and_reach_reward()
         task.wait_combat.assert_not_called()
+
+    def test_raises_claim_reward_after_one_resume_still_fails(self):
+        task = make_task()
+        # 续战一次后再次找不到领奖点 → 可恢复异常，不再无限重试。
+        task.walk_to_treasure.side_effect = [WaitFailedException(), WaitFailedException()]
+        with self.assertRaises(ClaimRewardException):
+            task.clear_tacet_and_reach_reward()
+        self.assertEqual(2, task.combat_once.call_count)
+        self.assertEqual(2, task.walk_to_treasure.call_count)
 
 
 class TestRechallengeTacet(unittest.TestCase):

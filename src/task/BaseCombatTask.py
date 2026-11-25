@@ -35,6 +35,15 @@ class CharRevivedException(CharDeadException):
     pass
 
 
+class ClaimRewardException(Exception):
+    """领奖识别失败（找不到宝箱/领奖点，或领奖后未确认）。
+
+    与死亡恢复一样属于副本内可恢复错误：由副本恢复循环接住，走
+    「退出副本 → 回大世界 → F2 重新进本」闭环，并计入重试上限。
+    """
+    pass
+
+
 mismatched_names = {
     "Douling": "Buling",
     "Xigelika": "Sigrika",
