@@ -38,10 +38,23 @@ from urllib.request import Request
 
 from src.net_ssl import open_url
 
-# 框架在 ok/__init__.py 里读这些名字; app_version 有值会覆盖 config 里的版本号, 所以保持 None。
-# 更新后重启时, 「更新成功 a -> b」和更新说明走 PYAPPIFY_APP_STARTING_VERSION /
-# PYAPPIFY_APP_VERSION / PYAPPIFY_UPDATE_NOTE 环境变量 (apply_update.py 设), 框架自己会读。
-app_version = None
+APP_ROOT = Path(__file__).resolve().parent.parent
+
+# 框架在 Mon/__init__.py 里读这些名字: app_version 有值会覆盖 config 里的版本号。
+# 便携版把 config.py 编译成 config.pyd 且其中的 version 仍是 "dev", 若保持 None,
+# 「关于」页会一直显示 dev, UpdateCard 也无法判断有新版本。这里从随包发布的
+# version.txt 读取真实版本, 让版本比较/更新提示正常工作。
+# 更新后重启时「更新成功 a -> b」和更新说明走 PYAPPIFY_APP_STARTING_VERSION /
+# PYAPPIFY_APP_VERSION / PYAPPIFY_UPDATE_NOTE 环境变量 (apply_update.py 设), 相互独立。
+def _read_version_file():
+    try:
+        text = (APP_ROOT / "version.txt").read_text(encoding="utf-8").strip()
+        return text or None
+    except OSError:
+        return None
+
+
+app_version = _read_version_file()
 app_starting_version = None
 app_profile = None
 app_ref = None
@@ -83,7 +96,6 @@ DOWNLOAD_WORKERS = 6
 # 连不上、超时、证书问题、连接中途断开
 NETWORK_ERRORS = (OSError, HTTPException)
 
-APP_ROOT = Path(__file__).resolve().parent.parent
 STAGING_ROOT = APP_ROOT / "cache" / "update"
 HELPER_SCRIPT = Path(__file__).resolve().parent / "apply_update.py"
 

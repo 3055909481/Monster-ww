@@ -381,5 +381,28 @@ class OnlineUpdateTest(unittest.TestCase):
             pyappify._index_releases({"format": 2, "releases": [good]})
 
 
+class TestPortableVersion(unittest.TestCase):
+
+    def test_reads_version_from_version_txt(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, 'version.txt').write_text('v1.2.3', encoding='utf-8')
+            with patch.object(pyappify, 'APP_ROOT', Path(folder)):
+                self.assertEqual('v1.2.3', pyappify._read_version_file())
+
+    def test_returns_none_without_version_txt(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(pyappify, 'APP_ROOT', Path(folder)):
+                self.assertIsNone(pyappify._read_version_file())
+
+    def test_source_uses_version_file_for_app_version(self):
+        from pathlib import Path
+        source = Path('pyappify/__init__.py').read_text(encoding='utf-8')
+        self.assertIn('app_version = _read_version_file()', source)
+
+
 if __name__ == "__main__":
     unittest.main()
