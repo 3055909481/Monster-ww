@@ -2,7 +2,7 @@ import re
 
 from Mon import Logger
 from src.task.BaseCombatTask import (
-    BaseCombatTask, CharRevivedException, ClaimRewardException,
+    BaseCombatTask, CharDeadException, CharRevivedException, ClaimRewardException,
 )
 from src.task.WWOneTimeTask import WWOneTimeTask
 from src.task.task_icons import task_icon
@@ -114,14 +114,31 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 self.wait_in_team_and_world(time_out=120)
                 try:
                     self.clear_tacet_and_reach_reward()
-                except CharRevivedException:
+                except CharDeadException as death_error:
+                    # 两种死亡都要接住并退本重进, 否则体力刷不完:
+                    # - CharRevivedException: 原地复活成功
+                    # - CharDeadException: 复活失败(传送回血超时等), 曾直接冒泡
+                    #   到 RoutineTask 中断整步, 导致体力没用完。
                     recovery_retries += 1
                     if recovery_retries >= max_recovery_retries:
                         self.log_info(self.tr('farm_tacet: exceeded recovery retries ({max_recovery_retries}), stop farming').format(max_recovery_retries=max_recovery_retries),
                                       notify=True)
+                        try:
+                            self.ensure_main(time_out=120)
+                        except Exception:
+                            pass  # 清理失败不应掩盖已到上限的退出
                         return None
-                    self.log_info(self.tr('farm_tacet: death recovered, re-enter from F2 book'))
-                    self.realm_entry_at_heal_point = True  # 恢复后站在信标上, 从 F2 直接进本
+                    revived = isinstance(death_error, CharRevivedException)
+                    self.log_info(self.tr('farm_tacet: {kind}, re-enter from F2 book').format(
+                        kind='death recovered' if revived else 'revive failed'))
+                    # 复活成功站在信标上可直接 F2 进本；复活失败状态未知，
+                    # 先 ensure_main 退本回大世界, 再完整走传送流程重进。
+                    if not revived:
+                        try:
+                            self.ensure_main(time_out=120)
+                        except Exception as cleanup_error:
+                            self.log_warning(self.tr('Failed to leave realm after revive failure: {error}').format(error=cleanup_error))
+                    self.realm_entry_at_heal_point = revived
                     break
                 except ClaimRewardException as claim_error:
                     # 领奖识别失败：计入重试上限，退本回主页后从 F2 重新进本，
@@ -187,21 +204,21 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         续战一次后仍识别不到领奖点时抛 ClaimRewardException，交由 farm_tacet
         的恢复循环退本重进（不再把普通识别失败冒泡到框架停任务）。
         """
-        self.combat_once(target=True)
         try:
+            self.combat_once(target=True)
             self.walk_to_treasure()
+        except CharDeadException:
+            raise  # 死亡/复活失败原样上抛, 交 farm_tacet 退本重进
         except Exception as first_error:
-            if isinstance(first_error, CharRevivedException):
-                raise
             if not self.in_realm() or not self.wait_combat(target=True, time_out=5, raise_if_not_found=False):
                 raise ClaimRewardException(str(first_error)) from first_error
             logger.info('Tacet reward is unavailable and combat is still active. Resuming in the same arena.')
             self.combat_once(target=True, wait_combat_time=5)
             try:
                 self.walk_to_treasure()
+            except CharDeadException:
+                raise
             except Exception as second_error:
-                if isinstance(second_error, CharRevivedException):
-                    raise
                 raise ClaimRewardException(str(second_error)) from second_error
 
     def find_rechallenge_button(self):

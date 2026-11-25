@@ -245,11 +245,30 @@ class BaseCombatTask(CombatCheck):
         self.sleep(1)
         return False
 
+    def exit_realm_on_death_enabled(self):
+        """是否开启「阵亡退出副本、大世界锚点复活」开关（Basic Options）。"""
+        try:
+            basic = self.get_global_config('Basic Options') or {}
+            return bool(basic.get('Exit Realm on Death'))
+        except Exception:
+            return False
+
     def revive_action(self):
-        """角色死亡恢复：关闭弹窗 → 传最近传送点回血。"""
+        """角色死亡恢复：关闭弹窗 → 传最近传送点回血。
+
+        开启「Exit Realm on Death」后，即便在信标附近阵亡也先退出副本，
+        统一到大世界找锚点复活；默认关闭时沿用原地/信标复活逻辑。
+        """
         try:
             self.close_revive_popup()  # ① 关闭复活弹窗 (点按钮优先, esc 兜底)
-            if self.realm_entry_at_heal_point and self.in_realm():
+            in_realm = self.in_realm()
+            if self.exit_realm_on_death_enabled() and in_realm:
+                # 开关开启：先退出副本回大世界，再走锚点复活流程。
+                self.ensure_main(time_out=120)
+                logger.info('revive_action: exit realm on death (option enabled)')
+                self.revive_at_tower_and_heal()
+                return True
+            if self.realm_entry_at_heal_point and in_realm:
                 self.ensure_main(time_out=120)  # 退本回到信标, 游戏自动回血
                 logger.info('revive_action: left realm at heal point, skip teleport')
                 return True
@@ -334,7 +353,9 @@ class BaseCombatTask(CombatCheck):
         if not travel:
             raise RuntimeError(self.tr('Can not find the travel button'))
         self.click_box(travel, relative_x=1.5)
-        self.wait_in_team_and_world(time_out=20)
+        # 传送加载偶发超过 20s（尤其副本退出后重进/网络慢），过短会导致
+        # 复活被误判失败、整段副本任务中断、体力刷不完。放宽到 60s。
+        self.wait_in_team_and_world(time_out=60)
         self.sleep(2)
 
     def raise_not_in_combat(self, message):

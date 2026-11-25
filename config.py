@@ -263,6 +263,18 @@ _basic_desc.update({
     'Click Jitter Radius (px)': '抖动半径（像素），默认 2，最大 8；中心仍是原坐标，不会系统性偏移',
 })
 
+# 死亡处理策略：开启后副本内阵亡一律先退出副本，再去大世界找锚点复活。
+# 默认关闭以保持原有行为（优先原地/信标复活），避免改变存量打法。
+_DEATH_OPTION_KEYS = {
+    'Exit Realm on Death': False,
+}
+basic_config_option.default_config.update(_DEATH_OPTION_KEYS)
+for _k in _DEATH_OPTION_KEYS:
+    _basic_type[_k] = {'group': 'Tasks'}
+_basic_desc.update({
+    'Exit Realm on Death': '开启后：刷副本/日常时角色阵亡，若身处副本则先退出副本，再到大世界找传送锚点复活；关闭则沿用原地/信标复活',
+})
+
 # 客户端服选择与路径：放在 Game 分组，紧邻「Auto Start Game When App Starts」。
 # 留空则沿用原有的「最近运行 → 注册表」自动探测，老用户无需改动即可保持原行为。
 _SERVER_OPTION_KEYS = (SERVER_KEY, *SERVER_PATH_KEYS.values())
