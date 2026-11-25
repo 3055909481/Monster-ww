@@ -101,5 +101,27 @@ class NightmareNestStepTest(unittest.TestCase):
             nightmare_nest_runtime_config({'刷取目标': []})
 
 
+class TestPlanOptionsForFolder(unittest.TestCase):
+
+    def test_reads_plans_from_given_config_folder(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from src.task.RoutineTask import plan_options_for
+
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, 'RoutinePlans.json').write_text(
+                json.dumps({'默认': [], '国际默认': []}, ensure_ascii=False), encoding='utf-8')
+            options = plan_options_for(folder)
+        self.assertEqual(['默认', '国际默认'], options)
+
+    def test_source_uses_config_folder_not_hardcoded(self):
+        # 防止回退到硬编码 'configs'：源码里必须引用 Config.config_folder。
+        from pathlib import Path
+        source = Path('src/task/RoutineTask.py').read_text(encoding='utf-8')
+        self.assertIn('plan_options_for(_Config.config_folder)', source)
+        self.assertNotIn("RoutinePlanStore('configs').load()", source)
+
+
 if __name__ == '__main__':
     unittest.main()

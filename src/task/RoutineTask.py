@@ -49,6 +49,11 @@ WAIT_STAMINA_KEY = '等待体力恢复'
 STAMINA_GAP_KEY = '体力等待缺口上限'
 
 
+def plan_options_for(folder):
+    """返回计划下拉的可选项，按给定配置目录读取（便携版用 %APPDATA% 目录）。"""
+    return list(RoutinePlanStore(folder).load())
+
+
 class RoutineTask(WWOneTimeTask, BaseCombatTask):
     """Run a user-defined sequence of daily/stamina tasks."""
 
@@ -62,9 +67,13 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         self.support_schedule_task = True
         self.default_config[PLAN_SELECTOR] = DEFAULT_PLAN_NAME
         self.config_description[PLAN_SELECTOR] = '计划名称，保存在 configs/RoutinePlans.json。'
+        # 用框架解析后的 config_folder（便携版是 %APPDATA%/Monster-ww/configs），
+        # 不能用相对 'configs'：那样会读到程序目录下的空/旧配置，导致计划
+        # 下拉只显示「默认」，看不到用户实际添加的计划（如「国际默认」）。
+        from Mon import Config as _Config
         self.config_type[PLAN_SELECTOR] = {
             'type': 'drop_down',
-            'options': list(RoutinePlanStore('configs').load()),
+            'options': plan_options_for(_Config.config_folder),
         }
         self.default_config[EDIT_PLANS] = False
         self.config_type[EDIT_PLANS] = {
