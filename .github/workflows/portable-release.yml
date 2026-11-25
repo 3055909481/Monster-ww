@@ -373,16 +373,32 @@ jobs:
           print(f'copied {len(manifest["files"])} build files to {dest}')
           PY
           cp out/update-manifest.json "$dir/manifests/$TAG.json"
-          # releases.json: append/replace our tag, keep other versions.
+          # Backfill manifests for older releases already on GitHub (best effort).
           gh api "repos/$REPO/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
           python tools/release_index.py manifests "$RUNNER_TEMP/releases.json" "$dir" --repo "$REPO" || true
+
+          # Commit the build products FIRST, then use that commit as the
+          # manifest_ref: raw/jsDelivr serve builds/<version>/ from this exact
+          # commit. Using the pre-commit HEAD would point clients at an old
+          # tree (or the literal "HEAD" on a fresh, empty branch).
+          git -C "$dir" add -A
+          if git -C "$dir" diff --cached --quiet; then
+            echo 'build products unchanged'
+          else
+            git -C "$dir" commit -m "build products for $TAG"
+          fi
           ref=$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo "")
+          if ! printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "unexpected manifest_ref: $ref" >&2
+            exit 1
+          fi
           python tools/release_index.py index "$RUNNER_TEMP/releases.json" "$dir" \
             --repo "$REPO" --manifest-ref "$ref"
+          # The index itself changed after the products commit; commit and push.
           git -C "$dir" add -A
           if git -C "$dir" diff --cached --quiet; then
             echo 'update-index unchanged'
           else
             git -C "$dir" commit -m "update index for $TAG"
-            git -C "$dir" push origin HEAD:update-index
           fi
+          git -C "$dir" push origin HEAD:update-index
