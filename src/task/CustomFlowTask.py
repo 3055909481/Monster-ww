@@ -33,6 +33,14 @@ from src.task.task_icons import task_icon
 
 logger = Logger.get_logger(__name__)
 
+WAIT_STAMINA_KEY = '等待体力恢复'
+STAMINA_GAP_KEY = '体力等待缺口上限'
+
+# 副本类任务：这些任务的 farm 循环会在体力不足时消费 _routine_wait_stamina
+# 等属性（DomainTask / TacetTask 内实现）。其余步骤（领奖、梦魇、游园等）
+# 不消耗体力或没有等待循环，注入属性也无效，不必套用。
+STAMINA_TASK_CLASSES = frozenset({'SimulationTask', 'ForgeryTask', 'TacetTask'})
+
 
 def flow_options_for(folder):
     """Flow names available in the selector, read from a given config folder."""
@@ -80,6 +88,14 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
             'text': '配置任务流',
             'callback': self.configure_flows,
         }
+        # 与日常一条龙同款的任务级开关：流内所有副本步骤统一生效，
+        # 与具体选哪个任务流无关。领奖/梦魇/游园等非体力任务自动忽略。
+        self.default_config[WAIT_STAMINA_KEY] = False
+        self.config_description[WAIT_STAMINA_KEY] = (
+            '体力只差一点就等自然恢复，尽量耗尽当天体力；次数为 0 的副本等恢复后补刷一轮即结束。')
+        self.default_config[STAMINA_GAP_KEY] = 10
+        self.config_description[STAMINA_GAP_KEY] = (
+            '仅当体力差额不超过此值时才等待；差得太多则跳过，避免长时间挂机。')
         self.add_exit_after_config()
         self.flow_name = DEFAULT_FLOW_NAME
         self.results = []
@@ -382,5 +398,20 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
                     plan = DEFAULT_PLAN_NAME
                 task.run_selected_plan(plan)
             else:
+                if class_name in STAMINA_TASK_CLASSES:
+                    self._configure_stamina_wait(task)
                 self.run_task_by_class(task_class)
         self.ensure_main(time_out=180)
+
+    def _configure_stamina_wait(self, task):
+        """Apply the flow-level stamina-wait switch to a domain task instance.
+
+        Mirrors RoutineTask._configure_stamina_wait; Always assign every
+        attribute so a previous step's setting cannot leak when the switch is
+        turned off. Flow steps carry no per-step count, so the single-run mode
+        is not used here (a step always runs its own configured amount).
+        """
+        enabled = bool(self.config.get(WAIT_STAMINA_KEY, False))
+        task._routine_wait_stamina = enabled
+        task._routine_stamina_gap = int(self.config.get(STAMINA_GAP_KEY, 10) or 0)
+        task._routine_stamina_single_run = False

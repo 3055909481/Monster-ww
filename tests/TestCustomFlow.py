@@ -247,5 +247,44 @@ class TestSourceGuards(unittest.TestCase):
         self.assertIn('Global Client Path', source)
 
 
+class TestFlowStaminaWait(unittest.TestCase):
+    """流级体力等待开关：与日常一条龙同款，任务级、对全部任务流生效。
+
+    CustomFlowTask 依赖 Mon，本机无法 import，因此用源码静态检查锁定关键
+    约定；CI 环境有 Mon 时可补充运行期验证。
+    """
+
+    def setUp(self):
+        self.source = Path('src/task/CustomFlowTask.py').read_text(encoding='utf-8')
+
+    def test_task_level_config_keys(self):
+        self.assertIn("WAIT_STAMINA_KEY = '等待体力恢复'", self.source)
+        self.assertIn("STAMINA_GAP_KEY = '体力等待缺口上限'", self.source)
+        self.assertIn('self.default_config[WAIT_STAMINA_KEY] = False', self.source)
+        self.assertIn('self.default_config[STAMINA_GAP_KEY] = 10', self.source)
+
+    def test_only_stamina_consuming_tasks_are_covered(self):
+        self.assertIn("STAMINA_TASK_CLASSES = frozenset({'SimulationTask', 'ForgeryTask', 'TacetTask'})",
+                      self.source)
+        # Non-stamina tasks must not be in the set (领奖/梦魇/游园/讨伐).
+        self.assertNotIn('NightmareNestTask', self.source.split('STAMINA_TASK_CLASSES')[1].split('\n')[0])
+        self.assertNotIn('GardenTask', self.source.split('STAMINA_TASK_CLASSES')[1].split('\n')[0])
+
+    def test_injection_reuses_routine_attributes_and_always_assigns(self):
+        self.assertIn('def _configure_stamina_wait(self, task):', self.source)
+        self.assertIn('task._routine_wait_stamina = enabled', self.source)
+        self.assertIn('task._routine_stamina_gap = int(self.config.get(STAMINA_GAP_KEY, 10) or 0)',
+                      self.source)
+        self.assertIn('task._routine_stamina_single_run = False', self.source)
+        # Injection must happen in the non-routine (direct task) branch.
+        self.assertIn('if class_name in STAMINA_TASK_CLASSES:', self.source)
+        self.assertIn('self._configure_stamina_wait(task)', self.source)
+
+    def test_routine_task_step_inherits_its_own_config(self):
+        # 选「日常一条龙」的路径本就走 run_selected_plan，自动用 RoutineTask
+        # 自己的体力开关；确认没有绕过它。
+        self.assertIn('task.run_selected_plan(plan)', self.source)
+
+
 if __name__ == '__main__':
     unittest.main()
