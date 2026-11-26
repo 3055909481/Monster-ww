@@ -95,7 +95,7 @@ ENTRIES = [
          '手动账号': {'type': 'line_edit'},
          '服务器': {'type': 'drop_down', 'options': list(SERVER_OPTIONS)}},
         description='在游戏登录页选中账号并登录，进入大世界。',
-        icon='login',
+        icon='link',
     ),
     FlowEntry(
         'switch_account', '切换账号',

@@ -39,6 +39,30 @@ class TestFlowCatalog(unittest.TestCase):
                 self.assertEqual(set(entry.config_description), set(entry.default_config))
                 self.assertEqual(set(entry.config_type), set(entry.default_config))
 
+    def test_step_icons_are_valid_kit_icons(self):
+        """The editor paints entry.icon via kit_icon(); an unknown name crashes startup.
+
+        Read the real white-list from the framework's icons module so any future
+        invalid icon is caught in CI instead of in the packaged smoke test.
+        """
+        import re
+        candidates = []
+        try:
+            from Mon.ui.qt.kit import icons as kit_icons
+            candidates.append(Path(kit_icons.__file__))
+        except ImportError:
+            pass
+        vendored = Path('.mon-tmp/Mon/ui/qt/kit/icons.py')
+        if vendored.is_file():
+            candidates.append(vendored)
+        self.assertTrue(candidates, 'Cannot locate Mon kit icons module')
+        source = candidates[0].read_text(encoding='utf-8')
+        whitelist = set(re.findall(r'"([a-z0-9-]+)"\s*:', source))
+        self.assertTrue(whitelist, 'Could not parse kit icon whitelist')
+        for entry in ENTRIES:
+            with self.subTest(entry=entry.task_id):
+                self.assertIn(entry.icon, whitelist)
+
     def test_new_item_and_normalize_keep_duplicates(self):
         first = new_item('login')
         second = new_item('login')
