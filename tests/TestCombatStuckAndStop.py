@@ -72,6 +72,28 @@ class TaskMonitorTest(unittest.TestCase):
         self.assertIn('task.disable()', source)
         self.assertIn('self.executor.stop_current_task()', source)
 
+    def test_monitor_translates_task_names(self):
+        source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
+        self.assertIn('from Mon import og, TriggerTask', source)
+        self.assertIn('app.tr(name)', source)  # Chinese display name via i18n
+        self.assertIn('def _display_name(task):', source)
+
+    def test_monitor_has_per_task_stop_button(self):
+        source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
+        self.assertIn('def _stop_one(self, task):', source)
+        self.assertIn("button.clicked.connect(lambda _checked=False, t=task: self._stop_one(t))", source)
+        self.assertIn('table.setCellWidget(row, 4, button)', source)  # stop column
+
+    def test_monitor_separates_trigger_and_manual(self):
+        source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
+        self.assertIn('def _is_trigger(task):', source)
+        self.assertIn('isinstance(task, TriggerTask)', source)
+        self.assertIn('self.trigger_table', source)
+        self.assertIn('self.manual_table', source)
+        self.assertIn("def _stop_group(self, kind):", source)
+        self.assertIn("self.trigger_stop_all", source)
+        self.assertIn("self.manual_stop_all", source)
+
     def test_exit_cleanup_installed(self):
         main = Path('main.py').read_text(encoding='utf-8')
         self.assertIn('from src.exit_cleanup import install as install_exit_cleanup', main)
