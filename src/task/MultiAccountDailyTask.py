@@ -120,6 +120,26 @@ class MultiAccountDailyTask(WWOneTimeTask, BaseCombatTask):
                       if normalize_account_name(name) == normalized}
         return normalize_account_name(right) == normalized and len(candidates) == 1
 
+    def run_task_by_class(self, cls):
+        """子任务被用户停止时不要记成 ERROR / 弹"运行出错"截图。
+
+        框架 run_task_by_class 用 except Exception 一律 log_error + 截图,
+        而用户主动停止会抛 TaskDisabledException(框架随后按正常停止处理)。
+        多账号切号时这条路径经常触发, 造成误报。这里只把该异常静默透传。
+        """
+        task = self.get_task_by_class(cls)
+        old_info = task.info
+        task.info = self.info
+        try:
+            task.run()
+        except TaskDisabledException:
+            raise  # 正常停止, 不记错误、不截图
+        except Exception as error:
+            self.log_error(f'run_task_by_class {cls}', error)
+            raise
+        finally:
+            task.info = old_info
+
     def run(self):
         if self.config.get(PER_ACCOUNT_CONFIGURATION, False):
             # Import lazily: the configured runner inherits the shared login helpers.

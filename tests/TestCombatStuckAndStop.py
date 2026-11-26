@@ -184,3 +184,25 @@ class CombatTimeoutTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiAccountStopLogTest(unittest.TestCase):
+    """用户主动停止多账号时不应记成 ERROR / 弹运行出错截图。"""
+
+    def test_run_task_by_class_swallows_stop_error_log(self):
+        source = Path('src/task/MultiAccountDailyTask.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        method = next(n for n in ast.walk(tree)
+                      if isinstance(n, ast.FunctionDef) and n.name == 'run_task_by_class')
+        body = ast.unparse(method)
+        self.assertIn('except TaskDisabledException:', body)
+        self.assertIn('raise', body)
+        # The stop branch must not call log_error (which triggers the screenshot).
+        try_node = next(n for n in ast.walk(method) if isinstance(n, ast.Try))
+        stop_handler = next(n for n in try_node.handlers
+                            if isinstance(n.type, ast.Name) and n.type.id == 'TaskDisabledException')
+        self.assertNotIn('log_error', ast.unparse(stop_handler))
+
+
+if __name__ == '__main__':
+    unittest.main()
