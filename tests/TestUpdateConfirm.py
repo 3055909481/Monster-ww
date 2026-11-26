@@ -1,6 +1,7 @@
 """在线更新确认框补丁：验证用户取消时不更新、确认后才更新。"""
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -100,6 +101,18 @@ class TestUpdateConfirm(unittest.TestCase):
             current = fake_card_class.update_to_selected_version
             update_confirm.install()
             self.assertIs(current, fake_card_class.update_to_selected_version)
+
+
+class LauncherUpdateSwitchTest(unittest.TestCase):
+    """Online update must stay on the original standalone-launcher updater."""
+
+    def test_config_installs_github_release_updater(self):
+        source = Path('config.py').read_text(encoding='utf-8')
+        self.assertIn('from src import updater as _updater', source)
+        self.assertIn('_updater.install()', source)
+        # The coco-style file-level incremental updater was reverted; guard
+        # against it silently coming back via the old API check.
+        self.assertNotIn('incremental updater API unavailable', source)
 
 
 if __name__ == '__main__':

@@ -12,16 +12,17 @@ from src.task.process_feature import process_feature
 from src.task.task_icons import task_icon
 
 # The framework enables its update card when this launcher API is callable.
-# Incremental online update (coco-ww style): pyappify itself exposes
-# get_version_list / update_to_version / calculate_update_notes. It compares
-# the compiled build tree against a per-file SHA256 manifest published on the
-# update-index branch and downloads only changed files via raw/jsDelivr.
-# The standalone MonsterUpdate.exe remains the manual full-package path.
+# Install our GitHub-release-backed updater so the existing update UI works:
+# check button, version picker, automatic startup check and update-then-restart.
+# The standalone MonsterUpdate.exe performs download/verify/extract/install in
+# its own window with visible progress; the app stays alive until files need
+# replacing. The coco-style file-level incremental updater was tried and kept
+# breaking updates, so the original launcher updater is restored.
 # Pure runtime use (workshop, tasks) stays offline; only an explicit update
 # check or the framework's startup check touches the network.
 try:
-    if not callable(getattr(pyappify, "get_version_list", None)):
-        raise RuntimeError("incremental updater API unavailable")
+    from src import updater as _updater
+    _updater.install()
 except Exception:
     # Never let an updater problem prevent the application from starting.
     pyappify.get_version_list = None
