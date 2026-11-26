@@ -33,14 +33,6 @@ from src.task.task_icons import task_icon
 
 logger = Logger.get_logger(__name__)
 
-WAIT_STAMINA_KEY = '等待体力恢复'
-STAMINA_GAP_KEY = '体力等待缺口上限'
-
-# 副本类任务：这些任务的 farm 循环会在体力不足时消费 _routine_wait_stamina
-# 等属性（DomainTask / TacetTask 内实现）。其余步骤（领奖、梦魇、游园等）
-# 不消耗体力或没有等待循环，注入属性也无效，不必套用。
-STAMINA_TASK_CLASSES = frozenset({'SimulationTask', 'ForgeryTask', 'TacetTask'})
-
 
 def flow_options_for(folder):
     """Flow names available in the selector, read from a given config folder."""
@@ -88,14 +80,6 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
             'text': '配置任务流',
             'callback': self.configure_flows,
         }
-        # 与日常一条龙同款的任务级开关：流内所有副本步骤统一生效，
-        # 与具体选哪个任务流无关。领奖/梦魇/游园等非体力任务自动忽略。
-        self.default_config[WAIT_STAMINA_KEY] = False
-        self.config_description[WAIT_STAMINA_KEY] = (
-            '体力只差一点就等自然恢复，尽量耗尽当天体力；次数为 0 的副本等恢复后补刷一轮即结束。')
-        self.default_config[STAMINA_GAP_KEY] = 10
-        self.config_description[STAMINA_GAP_KEY] = (
-            '仅当体力差额不超过此值时才等待；差得太多则跳过，避免长时间挂机。')
         self.add_exit_after_config()
         self.flow_name = DEFAULT_FLOW_NAME
         self.results = []
@@ -231,6 +215,7 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
         # requested server and replace it if not. Without one, the framework
         # falls back to auto-detection (single-client setups); just ensure a
         # client is running and let it resolve the exe itself.
+        same_client = False
         if target_path:
             same_client = bool(
                 running_path
@@ -243,6 +228,12 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
                 device_manager.stop_hwnd()
                 self.sleep(3)
                 device_manager.do_refresh(True)
+            else:
+                # The requested client is already running. Reusing it avoids
+                # a needless restart; the following login step detects whether
+                # it is on the login screen or inside the game world.
+                self.log_info(self.tr('{server} client is already running; reusing it.').format(
+                    server=server))
         elif running_path:
             self.log_warning(self.tr(
                 'No client path configured for {server}; the already-running client may be a different server. '
@@ -253,11 +244,12 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
             self.log_info(self.tr('No client path configured for {server}; using auto-detection.').format(
                 server=server))
 
-        try:
-            self.start_device()
-        except Exception as error:
-            raise RuntimeError(self.tr('Failed to start the {server} client: {error}').format(
-                server=server, error=error)) from error
+        if not same_client:
+            try:
+                self.start_device()
+            except Exception as error:
+                raise RuntimeError(self.tr('Failed to start the {server} client: {error}').format(
+                    server=server, error=error)) from error
         self._wait_for_login_or_main()
 
     def _wait_for_login_or_main(self, time_out=180):
@@ -350,10 +342,108 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
             self._login_step(params, from_game=step_id == 'switch_account')
         elif step_id == 'run_task':
             self._run_task_step(params)
+        elif step_id == 'wait_stamina':
+            self._wait_stamina_step(params)
         elif step_id == 'exit_game':
             self._stop_client()
+        elif step_id == 'exit_app':
+            self._exit_app_step()
         else:
             raise ValueError(self.tr('未知任务流步骤：{step}').format(step=step_id))
+
+    def _wait_stamina_step(self, params):
+        """Wait for natural stamina recovery, capped by today's 240 allowance.
+
+        The ledger is keyed by account so multi-account flows do not share a
+        budget. A step never waits past 04:00 reset because the ledger rolls
+        over by game-day, and never waits more than 240 natural stamina in a
+        single game-day.
+        """
+        from src.task.routine.StaminaBudget import (
+            DAILY_STAMINA_CAP, StaminaWaitLedger, plan_stamina_wait,
+        )
+
+        account = self._current_account_key()
+        target = max(0, int(params.get('目标体力', 160) or 0))
+        need = max(0, int(params.get('单次消耗', 60) or 0))
+        ledger = StaminaWaitLedger(self.executor.config_folder)
+
+        current, _, _ = self._read_stamina_reliable()
+        if current < 0:
+            self.log_warning(self.tr('Cannot read stamina; skip the wait step.'))
+            return
+        remaining = ledger.remaining(account=account)
+        should_wait, effective_target = plan_stamina_wait(
+            current, min(target, DAILY_STAMINA_CAP), remaining, need=need)
+        if not should_wait:
+            self.log_info(self.tr(
+                'Stamina wait skipped: current {current}, target {target}, today left {left}.'
+            ).format(current=current, target=target, left=remaining))
+            return
+
+        gained = max(0, int(effective_target - current))
+        self.log_info(self.tr(
+            'Waiting for stamina {current} -> {target} (today budget left {left}).'
+        ).format(current=current, target=effective_target, left=remaining))
+
+        # Natural recovery is ~1 per 4 min; cap the wall-clock wait to avoid
+        # an all-night stall if the OCR or the game misbehaves.
+        time_out = min(max(gained * self.STAMINA_RECOVER_SECONDS, 60), self.STAMINA_WAIT_HARD_CAP)
+
+        def reached():
+            value, _, _ = self._read_stamina_reliable()
+            return value >= effective_target
+
+        recovered = self.wait_until(reached, time_out=time_out, settle_time=0,
+                                    raise_if_not_found=False)
+        if recovered:
+            ledger.add(gained, account=account)
+            self.log_info(self.tr('Stamina wait finished at {target}.').format(
+                target=effective_target))
+        else:
+            # Only credit what actually recovered, so a timeout cannot burn
+            # the whole daily allowance.
+            after, _, _ = self._read_stamina_reliable()
+            actual = max(0, int(after - current)) if after > 0 else 0
+            if actual:
+                ledger.add(actual, account=account)
+            self.log_warning(self.tr('Stamina wait timed out; continue with remaining steps.'))
+
+    def _current_account_key(self):
+        """Best-effort account key for per-account stamina budgeting."""
+        try:
+            return str(self.config.get('Account') or self.info.get('account') or '').strip()
+        except Exception:
+            return ''
+
+    def _exit_app_step(self):
+        """Close the game and quit the app without waiting for flow completion.
+
+        This is an explicit step, so the user can place it exactly where the
+        flow should end instead of relying on the global Exit After Task flag.
+        """
+        from Mon.core.events import communicate
+
+        self._stop_client()
+        self.log_info(self.tr('Exiting Monster-ww'))
+        communicate.quit.emit()
+
+    def _game_state(self):
+        """Detect whether the client sits on the login screen or in the world.
+
+        A flow may start on an already-running client that auto-logged into the
+        previous account. Both login and switch-account steps must cope with
+        that state instead of assuming a freshly launched client shows login.
+        """
+        try:
+            texts = self.ocr()
+            if self._login_combo() or self.find_boxes(texts, LOGIN_TEXTS):
+                return 'login'
+            if self.in_team_and_world():
+                return 'world'
+        except Exception as error:
+            logger.warning('game state detection failed: %s', error)
+        return 'unknown'
 
     def _login_step(self, params, from_game=False):
         server = params.get('服务器', SERVER_FOLLOW)
@@ -364,15 +454,22 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
         if not account_key:
             raise ValueError(self.tr('登录步骤未指定账号；请选择已有账号或手动填写账号 key。'))
 
-        if from_game:
+        state = self._game_state()
+        self.log_info(self.tr('Login step detected game state: {state}').format(state=state))
+        if state == 'world':
+            # Already inside the game with the previous account: go back to the
+            # login screen, then pick the requested account explicitly.
             self.logged_in = False
             self.ensure_main(time_out=180)
             self._switch_to_login()
-        else:
-            # A freshly started client is already on the login screen. Only
-            # return to it when the game world happens to be up (auto-login).
-            if self.in_team_and_world():
+        elif state == 'unknown':
+            # Not sure which screen we are on. Rely on the shared helper to
+            # bring us to a known state (it tolerates already being at login).
+            if from_game:
+                self.logged_in = False
+                self.ensure_main(time_out=180)
                 self._switch_to_login()
+        # state == 'login': select the account directly.
         self._login_target_account(account_key)
 
     def _run_task_step(self, params):
@@ -398,20 +495,5 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
                     plan = DEFAULT_PLAN_NAME
                 task.run_selected_plan(plan)
             else:
-                if class_name in STAMINA_TASK_CLASSES:
-                    self._configure_stamina_wait(task)
                 self.run_task_by_class(task_class)
         self.ensure_main(time_out=180)
-
-    def _configure_stamina_wait(self, task):
-        """Apply the flow-level stamina-wait switch to a domain task instance.
-
-        Mirrors RoutineTask._configure_stamina_wait; Always assign every
-        attribute so a previous step's setting cannot leak when the switch is
-        turned off. Flow steps carry no per-step count, so the single-run mode
-        is not used here (a step always runs its own configured amount).
-        """
-        enabled = bool(self.config.get(WAIT_STAMINA_KEY, False))
-        task._routine_wait_stamina = enabled
-        task._routine_stamina_gap = int(self.config.get(STAMINA_GAP_KEY, 10) or 0)
-        task._routine_stamina_single_run = False

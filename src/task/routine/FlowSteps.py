@@ -123,10 +123,26 @@ ENTRIES = [
         icon='tasks',
     ),
     FlowEntry(
+        'wait_stamina', '等待体力恢复',
+        {'目标体力': 160, '单次消耗': 60},
+        {'目标体力': '等到当前自然体力达到该值再继续；每天最多等 240 点，超过当天额度会自动跳过。',
+         '单次消耗': '一次副本消耗的体力；剩余不足一次消耗时不等待。'},
+        {'目标体力': {'min': 0, 'max': 240},
+         '单次消耗': {'min': 0, 'max': 240}},
+        description='等到体力恢复到目标值再继续；按凌晨 4 点结算，每天最多等待 240 点自然恢复。',
+        icon='timer',
+    ),
+    FlowEntry(
         'exit_game', '退出游戏',
         {}, {}, {},
         description='关闭当前鸣潮客户端，为启动另一个服务器做准备。',
         icon='power',
+    ),
+    FlowEntry(
+        'exit_app', '退出程序',
+        {}, {}, {},
+        description='任务流结束后关闭鸣潮客户端并退出 Monster-ww（无需再配置 Exit After Task）。',
+        icon='stop',
     ),
 ]
 

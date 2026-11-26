@@ -23,7 +23,8 @@ class TestFlowCatalog(unittest.TestCase):
     def test_expected_steps_exist(self):
         self.assertEqual(
             [entry.task_id for entry in ENTRIES],
-            ['start_game', 'login', 'switch_account', 'run_task', 'exit_game'],
+            ['start_game', 'login', 'switch_account', 'run_task',
+             'wait_stamina', 'exit_game', 'exit_app'],
         )
         self.assertEqual(set(ENTRIES_BY_ID), {entry.task_id for entry in ENTRIES})
 
@@ -247,43 +248,45 @@ class TestSourceGuards(unittest.TestCase):
         self.assertIn('Global Client Path', source)
 
 
-class TestFlowStaminaWait(unittest.TestCase):
-    """流级体力等待开关：与日常一条龙同款，任务级、对全部任务流生效。
-
-    CustomFlowTask 依赖 Mon，本机无法 import，因此用源码静态检查锁定关键
-    约定；CI 环境有 Mon 时可补充运行期验证。
-    """
+class TestFlowSteps(unittest.TestCase):
+    """新步骤与状态判断的源码守卫。CustomFlowTask 依赖 Mon 无法本地 import。"""
 
     def setUp(self):
         self.source = Path('src/task/CustomFlowTask.py').read_text(encoding='utf-8')
 
-    def test_task_level_config_keys(self):
-        self.assertIn("WAIT_STAMINA_KEY = '等待体力恢复'", self.source)
-        self.assertIn("STAMINA_GAP_KEY = '体力等待缺口上限'", self.source)
-        self.assertIn('self.default_config[WAIT_STAMINA_KEY] = False', self.source)
-        self.assertIn('self.default_config[STAMINA_GAP_KEY] = 10', self.source)
+    def test_wait_stamina_and_exit_app_steps_registered(self):
+        steps = Path('src/task/routine/FlowSteps.py').read_text(encoding='utf-8')
+        self.assertIn("'wait_stamina', '等待体力恢复'", steps)
+        self.assertIn("'exit_app', '退出程序'", steps)
 
-    def test_only_stamina_consuming_tasks_are_covered(self):
-        self.assertIn("STAMINA_TASK_CLASSES = frozenset({'SimulationTask', 'ForgeryTask', 'TacetTask'})",
-                      self.source)
-        # Non-stamina tasks must not be in the set (领奖/梦魇/游园/讨伐).
-        self.assertNotIn('NightmareNestTask', self.source.split('STAMINA_TASK_CLASSES')[1].split('\n')[0])
-        self.assertNotIn('GardenTask', self.source.split('STAMINA_TASK_CLASSES')[1].split('\n')[0])
+    def test_no_task_level_stamina_switch(self):
+        # 用户要求：开关不动（日常一条龙那份），体力等待改为流程步骤。
+        self.assertNotIn('WAIT_STAMINA_KEY', self.source)
+        self.assertNotIn('STAMINA_GAP_KEY', self.source)
 
-    def test_injection_reuses_routine_attributes_and_always_assigns(self):
-        self.assertIn('def _configure_stamina_wait(self, task):', self.source)
-        self.assertIn('task._routine_wait_stamina = enabled', self.source)
-        self.assertIn('task._routine_stamina_gap = int(self.config.get(STAMINA_GAP_KEY, 10) or 0)',
-                      self.source)
-        self.assertIn('task._routine_stamina_single_run = False', self.source)
-        # Injection must happen in the non-routine (direct task) branch.
-        self.assertIn('if class_name in STAMINA_TASK_CLASSES:', self.source)
-        self.assertIn('self._configure_stamina_wait(task)', self.source)
+    def test_wait_step_honours_daily_budget(self):
+        self.assertIn('def _wait_stamina_step(self, params):', self.source)
+        self.assertIn('StaminaWaitLedger(self.executor.config_folder)', self.source)
+        self.assertIn('plan_stamina_wait(', self.source)
+        self.assertIn('ledger.add(', self.source)
+        self.assertIn('self._current_account_key()', self.source)
 
-    def test_routine_task_step_inherits_its_own_config(self):
-        # 选「日常一条龙」的路径本就走 run_selected_plan，自动用 RoutineTask
-        # 自己的体力开关；确认没有绕过它。
-        self.assertIn('task.run_selected_plan(plan)', self.source)
+    def test_exit_app_step_quits_framework(self):
+        self.assertIn('def _exit_app_step(self):', self.source)
+        self.assertIn('from Mon.core.events import communicate', self.source)
+        self.assertIn('communicate.quit.emit()', self.source)
+
+    def test_game_state_detection_for_login(self):
+        self.assertIn('def _game_state(self):', self.source)
+        self.assertIn("state = self._game_state()", self.source)
+        self.assertIn("if state == 'world':", self.source)
+        self.assertIn('self._switch_to_login()', self.source)
+        self.assertIn('self._login_target_account(account_key)', self.source)
+
+    def test_start_client_reuses_running_client(self):
+        self.assertIn('client is already running; reusing it', self.source)
+        self.assertIn('if not same_client:', self.source)
+        self.assertIn('self.start_device()', self.source)
 
 
 if __name__ == '__main__':
