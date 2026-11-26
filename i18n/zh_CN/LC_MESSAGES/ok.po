@@ -2522,3 +2522,103 @@ msgstr "结晶波片已用于声骸套装无音区"
 #: src/task/CultivationTask.py
 msgid "{name} already cleared ({defeated}/{total})"
 msgstr "{name} 已清理（{defeated}/{total}）"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "🔀 自定义任务流"
+msgstr "🔀 自定义任务流"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "自定义任务流"
+msgstr "自定义任务流"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "配置任务流"
+msgstr "配置任务流"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "编辑任务流"
+msgstr "编辑任务流"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "运行任务"
+msgstr "运行任务"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "启动游戏"
+msgstr "启动游戏"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "登录账号"
+msgstr "登录账号"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "切换账号"
+msgstr "切换账号"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "执行任务"
+msgstr "执行任务"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "退出游戏"
+msgstr "退出游戏"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "任务流"
+msgstr "任务流"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "当前任务流"
+msgstr "当前任务流"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "任务流已保存："
+msgstr "任务流已保存："
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "已新建任务流："
+msgstr "已新建任务流："
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "已删除任务流："
+msgstr "已删除任务流："
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "至少保留一个任务流"
+msgstr "至少保留一个任务流"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "任务流已存在"
+msgstr "任务流已存在"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "任务流没有启用的步骤，无需执行。"
+msgstr "任务流没有启用的步骤，无需执行。"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "任务流完成：{success}/{total}"
+msgstr "任务流完成：{success}/{total}"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "任务流步骤失败：{step}"
+msgstr "任务流步骤失败：{step}"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "登录步骤未指定账号；请选择已有账号或手动填写账号 key。"
+msgstr "登录步骤未指定账号；请选择已有账号或手动填写账号 key。"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "客户端服务器"
+msgstr "客户端服务器"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "跟随全局"
+msgstr "跟随全局"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "不限制（沿用计划默认）"
+msgstr "不限制（沿用计划默认）"
+
+#: src/task/CustomFlowTask.py src/gui/CustomFlowDialog.py src/gui/CustomFlowTab.py
+msgid "按自定义顺序执行：启动国服/国际服、登录账号、执行任务、切换账号、退出客户端。"
+msgstr "按自定义顺序执行：启动国服/国际服、登录账号、执行任务、切换账号、退出客户端。"

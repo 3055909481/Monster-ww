@@ -350,6 +350,7 @@ config = {
     'custom_tabs': [
         ["src.gui.CharacterCodeTab", "CharacterCodeTab"],
         ["src.gui.RoutineTab", "RoutineTab"],
+        ["src.gui.CustomFlowTab", "CustomFlowTab"],
         ["src.recorder.RecorderTab", "AxisRecorderTab"],
     ],
     'ocr': {
@@ -474,6 +475,7 @@ config = {
         ["src.task.GardenTask", "GardenTask"],
         ["src.task.TacetEliminationTask", "TacetEliminationTask"],
         ["src.task.RoutineTask", "RoutineTask"],
+        ["src.task.CustomFlowTask", "CustomFlowTask"],
         ["src.task.TrainingGuideTask", "TrainingGuideTask"],
         # 版本活动（3.8）：单列分组，不并入日常活动
         ["src.task.GalGameTask", "GalGameTask"],

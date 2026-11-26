@@ -43,8 +43,18 @@ def _plans():
         return []
 
 
+def _flows():
+    try:
+        from src.task.routine.FlowSteps import FlowStepStore
+        from Mon import og
+        folder = og.config.get('config_folder', 'configs') if og.config else 'configs'
+        return list(FlowStepStore(folder).load())
+    except Exception:
+        return []
+
+
 def _is_routine_task(task):
-    return type(task).__name__ == 'RoutineTask'
+    return type(task).__name__ in ('RoutineTask', 'CustomFlowTask')
 
 
 def _tr(text):
@@ -106,12 +116,29 @@ def _patch_create_dialog():
             self.form._row = row
 
             def _sync_extras_visibility(index=None):
-                is_routine = 0 <= index < len(self.tasks) and _is_routine_task(self.tasks[index])
-                # 计划配置仅一条龙可见；账号、服务器对所有任务都可见。
+                selected = self.tasks[index] if (index is not None
+                                                 and 0 <= index < len(self.tasks)) else None
+                kind = type(selected).__name__ if selected is not None else ''
+                is_routine = kind in ('RoutineTask', 'CustomFlowTask')
+                # 计划/流程配置仅一条龙与自定义任务流可见；账号、服务器对所有任务可见。
                 for widget in (self.schedule_plan_label, self.schedule_plan_combo):
                     widget.setVisible(is_routine)
-                if not is_routine:
-                    # 切走时清空计划配置，防止残留值被写进定时任务参数
+                if is_routine:
+                    # 一条龙显示「计划配置」，任务流显示「任务流」；复用同一
+                    # --routine-plan 参数通道，运行时各自按名字读取。
+                    options = _flows() if kind == 'CustomFlowTask' else _plans()
+                    label = _tr('任务流') if kind == 'CustomFlowTask' else _tr('计划配置')
+                    current = self.schedule_plan_combo.currentText()
+                    self.schedule_plan_label.setText(label)
+                    self.schedule_plan_combo.blockSignals(True)
+                    self.schedule_plan_combo.clear()
+                    self.schedule_plan_combo.addItems(
+                        [_tr('不限制（沿用计划默认）')] + options)
+                    if current in options:
+                        self.schedule_plan_combo.setCurrentText(current)
+                    self.schedule_plan_combo.blockSignals(False)
+                else:
+                    # 切走时清空配置，防止残留值被写进定时任务参数
                     self.schedule_plan_combo.setCurrentIndex(0)
                 try:
                     # 与框架 _on_trigger_type_changed 保持一致：只在窗口可见时

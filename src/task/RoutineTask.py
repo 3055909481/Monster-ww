@@ -276,6 +276,21 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             self._switch_to_login()
             self._login_target_account(account_key)
 
+        self.run_selected_plan(self.plan_name)
+
+    def run_selected_plan(self, plan_name):
+        """Run one plan on the currently logged-in account, without any account switch.
+
+        Custom task flows log in themselves, then call this entry so the routine
+        never re-logs-in or rebinds the plan's account. Keeping the loop here
+        also lets the flow reuse the exact same battle/navigation logic.
+        """
+        plans = RoutinePlanStore(self.executor.config_folder).load()
+        items = normalize_items(plans.get(plan_name, plans[DEFAULT_PLAN_NAME]))
+        selected = [item for item in items if item['enabled']]
+        if not selected:
+            self.log_info(self.tr('流水线没有启用的步骤，无需执行。'), notify=True)
+            return
         self.ensure_main(time_out=180)
         today = date.today()
         for item in selected:
