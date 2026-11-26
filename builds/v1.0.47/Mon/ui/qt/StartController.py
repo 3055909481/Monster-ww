@@ -1,7 +1,0 @@
-"""Module alias for the UI-independent start controller."""
-
-import sys
-
-from Mon.core import start_controller as _core
-
-sys.modules[__name__] = _core
