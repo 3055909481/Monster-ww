@@ -204,5 +204,29 @@ class MultiAccountStopLogTest(unittest.TestCase):
         self.assertNotIn('log_error', ast.unparse(stop_handler))
 
 
+class PyAppifyLauncherTest(unittest.TestCase):
+    """在线更新必须交给 PyAppify 启动器（上游 ok-ww 方案）。"""
+
+    def test_config_disables_in_app_update_card(self):
+        source = Path('config.py').read_text(encoding='utf-8')
+        self.assertIn('pyappify.get_version_list = None', source)
+        self.assertNotIn('_updater.install()', source)
+        self.assertNotIn('incremental updater API unavailable', source)
+
+    def test_no_incremental_backend(self):
+        # coco 增量后端不应再随包发布, 否则会覆盖启动器内置模块。
+        root = Path('.')
+        self.assertFalse((root / 'pyappify' / '__init__.py').exists())
+        self.assertFalse((root / 'src' / 'net_ssl.py').exists())
+        self.assertFalse((root / 'src' / 'update_confirm.py').exists())
+
+    def test_workflow_uses_pyappify_launcher(self):
+        workflow = Path('.github/workflows/portable-release.yml').read_text(encoding='utf-8')
+        self.assertIn('pyappify', workflow)
+        self.assertIn('launcher', workflow)
+        self.assertNotIn('PyInstaller', workflow)
+        self.assertNotIn('Monster-ww.spec', workflow)
+
+
 if __name__ == '__main__':
     unittest.main()
