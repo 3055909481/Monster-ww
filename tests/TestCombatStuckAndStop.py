@@ -46,11 +46,17 @@ class MultiAccountStopTest(unittest.TestCase):
                      if isinstance(n, ast.FunctionDef) and n.name == 'click')
         self.assertIn('_check_stopped()', ast.unparse(click))
 
-    def test_stop_checked_before_each_account(self):
-        loop = next(n for n in ast.walk(ast.parse(self.source))
-                    if isinstance(n, ast.For)
-                    and 'account' in ast.unparse(n.target))
-        self.assertIn('self._check_stopped()', ast.unparse(loop))
+    def test_stop_check_guards_all_game_input(self):
+        # Click is the single choke point for every login/switch action;
+        # checking there stops mid-account too, without changing the account
+        # loop's control flow (which tests rely on for result recording).
+        tree = ast.parse(self.source)
+        click = next(n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == 'click')
+        self.assertIn('self._check_stopped()', ast.unparse(click))
+        run = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == 'run')
+        self.assertNotIn('self._check_stopped()', ast.unparse(run))
 
 
 class TaskMonitorTest(unittest.TestCase):

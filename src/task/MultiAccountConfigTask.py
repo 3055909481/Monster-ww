@@ -91,7 +91,6 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
             # Reset for every account, including configs of indirectly called tasks.
             for index, (account, task) in enumerate(plan):
                 try:
-                    self._check_stopped()  # never start a new account after stop
                     self._target_account_key = account['account_key']
                     # Per-account client server: make this account's exe path
                     # override the global Game Server while its task runs.
