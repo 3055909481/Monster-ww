@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 _INSTALLED = False
 
-# on_create -> on_task_created 之间传递本次选择（框架 signal 不带这两个值）
-_LAST_EXTRAS = {'plan': '', 'account': ''}
+# on_create -> on_task_created 之间传递本次选择（框架 signal 不带这些值）
+_LAST_EXTRAS = {'plan': '', 'account': '', 'server': ''}
 
 
 def _accounts():
@@ -43,8 +43,18 @@ def _plans():
         return []
 
 
+def _flows():
+    try:
+        from src.task.routine.FlowSteps import FlowStepStore
+        from Mon import og
+        folder = og.config.get('config_folder', 'configs') if og.config else 'configs'
+        return list(FlowStepStore(folder).load())
+    except Exception:
+        return []
+
+
 def _is_routine_task(task):
-    return type(task).__name__ == 'RoutineTask'
+    return type(task).__name__ in ('RoutineTask', 'CustomFlowTask')
 
 
 def _tr(text):
@@ -81,8 +91,8 @@ def _patch_create_dialog():
         grid = self.form.grid
         row = getattr(self.form, '_row', 0)
         try:
-            # 计划配置 / 执行账号目前只对「日常一条龙」生效。整行做成动态
-            # 显示：选一条龙时出现，选其他任务时隐藏，避免误以为设置会生效。
+            # 计划配置只对「日常一条龙」生效；执行账号与客户端服务器对所有
+            # 任务生效（任何任务都可在启动时登录指定账号、选择国服/国际服）。
             self.schedule_plan_label = QLabel(_tr('计划配置'), self.panel)
             self.schedule_plan_combo = ComboBox(parent=self.panel)
             self.schedule_plan_combo.addItems([_tr('不限制（沿用计划默认）')] + _plans())
@@ -96,17 +106,42 @@ def _patch_create_dialog():
             grid.addWidget(self.schedule_account_label, row, 0)
             grid.addWidget(self.schedule_account_combo, row, 1)
             row += 1
+
+            self.schedule_server_label = QLabel(_tr('客户端服务器'), self.panel)
+            self.schedule_server_combo = ComboBox(parent=self.panel)
+            self.schedule_server_combo.addItems([_tr('跟随全局'), '国服', '国际服'])
+            grid.addWidget(self.schedule_server_label, row, 0)
+            grid.addWidget(self.schedule_server_combo, row, 1)
+            row += 1
             self.form._row = row
 
             def _sync_extras_visibility(index=None):
-                is_routine = 0 <= index < len(self.tasks) and _is_routine_task(self.tasks[index])
-                for widget in (self.schedule_plan_label, self.schedule_plan_combo,
-                               self.schedule_account_label, self.schedule_account_combo):
+                selected = self.tasks[index] if (index is not None
+                                                 and 0 <= index < len(self.tasks)) else None
+                # Keep using the helper as the single source of truth: tests and
+                # callers patch _is_routine_task to recognise stub task objects.
+                is_routine = _is_routine_task(selected) if selected is not None else False
+                kind = type(selected).__name__ if selected is not None else ''
+                # 计划/流程配置仅一条龙与自定义任务流可见；账号、服务器对所有任务可见。
+                for widget in (self.schedule_plan_label, self.schedule_plan_combo):
                     widget.setVisible(is_routine)
-                if not is_routine:
-                    # 切走时清空，防止残留值被写进定时任务参数
+                if is_routine:
+                    # 一条龙显示「计划配置」，任务流显示「任务流」；复用同一
+                    # --routine-plan 参数通道，运行时各自按名字读取。
+                    options = _flows() if kind == 'CustomFlowTask' else _plans()
+                    label = _tr('任务流') if kind == 'CustomFlowTask' else _tr('计划配置')
+                    current = self.schedule_plan_combo.currentText()
+                    self.schedule_plan_label.setText(label)
+                    self.schedule_plan_combo.blockSignals(True)
+                    self.schedule_plan_combo.clear()
+                    self.schedule_plan_combo.addItems(
+                        [_tr('不限制（沿用计划默认）')] + options)
+                    if current in options:
+                        self.schedule_plan_combo.setCurrentText(current)
+                    self.schedule_plan_combo.blockSignals(False)
+                else:
+                    # 切走时清空配置，防止残留值被写进定时任务参数
                     self.schedule_plan_combo.setCurrentIndex(0)
-                    self.schedule_account_combo.setCurrentIndex(0)
                 try:
                     # 与框架 _on_trigger_type_changed 保持一致：只在窗口可见时
                     # 用 _fit() 重新居中面板。dialog 本身铺满父窗口且没有 layout，
@@ -134,15 +169,17 @@ def _patch_create_dialog():
         try:
             index = self.task_combo.currentIndex()
             is_routine = 0 <= index < len(self.tasks) and _is_routine_task(self.tasks[index])
-            if is_routine and hasattr(self, 'schedule_plan_combo'):
-                _LAST_EXTRAS['plan'] = self.schedule_plan_combo.currentText()
-                _LAST_EXTRAS['account'] = self.schedule_account_combo.currentText()
-            else:
-                _LAST_EXTRAS['plan'] = ''
-                _LAST_EXTRAS['account'] = ''
+            # 计划配置仅一条龙；账号/服务器对所有任务都读取。
+            _LAST_EXTRAS['plan'] = (self.schedule_plan_combo.currentText()
+                                    if is_routine and hasattr(self, 'schedule_plan_combo') else '')
+            _LAST_EXTRAS['account'] = (self.schedule_account_combo.currentText()
+                                       if hasattr(self, 'schedule_account_combo') else '')
+            _LAST_EXTRAS['server'] = (self.schedule_server_combo.currentText()
+                                      if hasattr(self, 'schedule_server_combo') else '')
         except Exception:
             _LAST_EXTRAS['plan'] = ''
             _LAST_EXTRAS['account'] = ''
+            _LAST_EXTRAS['server'] = ''
         return original_create(self)
 
     mod.CreateScheduleTaskDialog.on_create = patched_on_create
@@ -158,16 +195,19 @@ def _patch_task_created():
         # on_create 已把本次选择写入模块变量（signal 不带这两个值）
         plan = _LAST_EXTRAS.get('plan', '')
         account = _LAST_EXTRAS.get('account', '')
+        server = _LAST_EXTRAS.get('server', '')
         manager = getattr(self, 'schedule_manager', None)
         if manager is not None:
             manager._next_plan = plan
             manager._next_account = account
+            manager._next_server = server
         try:
             return original(self, name, task_index, trigger_type, timeout_hours, start_hour,
                             start_minute, auto_exit, interval_days, interval_hours)
         finally:
             _LAST_EXTRAS['plan'] = ''
             _LAST_EXTRAS['account'] = ''
+            _LAST_EXTRAS['server'] = ''
 
     mod.ScheduleTaskTab.on_task_created = patched
 
@@ -183,9 +223,11 @@ def _patch_create_task():
         xml = original_generate(self, *args, **kwargs)
         plan = getattr(self, '_next_plan', '') or ''
         account = getattr(self, '_next_account', '') or ''
+        server = getattr(self, '_next_server', '') or ''
         extra = build_task_args(
             None if plan.startswith(('不限制', '当前账号')) or not plan else plan,
             None if account.startswith(('不限制', '当前账号')) or not account else account,
+            None if server.startswith(('跟随全局', '不限制')) or server not in ('国服', '国际服') else server,
         )
         if not extra:
             return xml

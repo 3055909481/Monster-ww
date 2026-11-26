@@ -32,7 +32,7 @@ CLAUDE.md
 # C extensions
 ok
 ok/
-pyappify
+# Cython build artifacts (source obfuscation, produced in CI).
 *.cpp
 *.pyx
 *.so
