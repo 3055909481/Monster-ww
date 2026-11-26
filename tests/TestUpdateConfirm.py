@@ -103,16 +103,16 @@ class TestUpdateConfirm(unittest.TestCase):
             self.assertIs(current, fake_card_class.update_to_selected_version)
 
 
-class LauncherUpdateSwitchTest(unittest.TestCase):
-    """Online update must stay on the original standalone-launcher updater."""
+class IncrementalUpdateSwitchTest(unittest.TestCase):
+    """Online update must stay on pyappify's incremental launcher updater."""
 
-    def test_config_installs_github_release_updater(self):
+    def test_config_keeps_incremental_updater(self):
         source = Path('config.py').read_text(encoding='utf-8')
-        self.assertIn('from src import updater as _updater', source)
-        self.assertIn('_updater.install()', source)
-        # The coco-style file-level incremental updater was reverted; guard
-        # against it silently coming back via the old API check.
-        self.assertNotIn('incremental updater API unavailable', source)
+        self.assertIn('incremental updater API unavailable', source)
+        self.assertIn('getattr(pyappify, "get_version_list", None)', source)
+        # The GitHub-release full-package updater is only a manual fallback,
+        # never installed by default (that broke incremental updates).
+        self.assertNotIn('_updater.install()', source)
 
 
 if __name__ == '__main__':
