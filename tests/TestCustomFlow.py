@@ -4,6 +4,7 @@ These tests import only the dependency-free FlowSteps module so they run
 without Mon, PySide6 or any compiled native extension.
 """
 
+import ast
 import json
 import tempfile
 import unittest
@@ -287,6 +288,27 @@ class TestFlowSteps(unittest.TestCase):
         self.assertIn('client is already running; reusing it', self.source)
         self.assertIn('if not same_client:', self.source)
         self.assertIn('self.start_device()', self.source)
+
+    def test_only_pc_client_windows_are_matched(self):
+        """Cloud-game browser windows must never be auto-selected as the game."""
+        src = Path('config.py').read_text(encoding='utf-8')
+        tree = ast.parse(src)
+        config = next(n.value for n in tree.body if isinstance(n, ast.Assign)
+                      and any(getattr(t, 'id', None) == 'config' for t in n.targets))
+        top_classes = []
+        for node in ast.walk(config):
+            if isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values):
+                    if (isinstance(key, ast.Constant) and key.value == 'top_hwnd_class'
+                            and isinstance(value, ast.List)):
+                        top_classes.extend(ast.unparse(e) for e in value.elts)
+        self.assertTrue(top_classes)
+        self.assertFalse([v for v in top_classes if 'Cef' in v or 'Chrome' in v])
+
+        browser_keys = [key.value for node in ast.walk(config) if isinstance(node, ast.Dict)
+                        for key in node.keys if isinstance(key, ast.Constant)
+                        and isinstance(key.value, str) and key.value == 'browser']
+        self.assertFalse(browser_keys, 'browser device must be opt-in, not auto-registered')
 
 
 if __name__ == '__main__':

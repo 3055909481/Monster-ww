@@ -383,8 +383,12 @@ config = {
                              'a_garden_restart', 'suisui_forte2', 'e_forte', 'f_break_full']
     },
     'windows': {  # required  when supporting windows game
+        # Keep these to PC client dialogs only. Browser-window class names
+        # (CefBrowserWindow / Chrome_RenderWidgetHostHWND) used to be listed
+        # here, which made find_hwnd() treat the cloud-game browser window as
+        # the game and randomly jump to the cloud login screen.
         'top_hwnd_class': [re.compile('CAgreementDlg'), re.compile('CLoginDlg_P_'),
-                           'CefBrowserWindow', 'Chrome_RenderWidgetHostHWND', '#32770',
+                           '#32770',
                            re.compile('CNativeLoginDlg'), 'Static', 'ComboBox', 'ComboLBox', 'Button'
                            ],
         'calculate_pc_exe_path': calculate_pc_exe_path,
@@ -410,14 +414,17 @@ config = {
     # MuMu12 users can switch to the small-case "ipc" value in the device
     # connection dialog for a much faster capture path.
     'adb': adb_config(),
-    # 云游戏（需要 Win11 并安装 Chrome 或 Edge）。框架的 browser 设备据此启用。
-    'browser': {
-        'url': 'https://mc.kurogames.com/cloud/#/',
-        'resolution': (1920, 1080),
-        'channels': ['msedge', 'chrome', 'chromium'],
-        'args': ['--webrtc-ip-handling-policy=default', '--force-color-profile=srgb'],
-        'nick': '云游戏(需要Win11并安装Chrome或Edge)',
-    },
+    # 云游戏（需要 Win11 并安装 Chrome 或 Edge）。
+    # 默认不注册 browser 设备：框架只要看到这个键就会把云游戏加入设备列表，
+    # 首次启动/设备重刷时可能自动选中它，表现为"突然跳到云鸣潮登录"。
+    # 只有明确要用云游戏时才手动取消下面的注释；PC 鸣潮无需任何改动。
+    # 'browser': {
+    #     'url': 'https://mc.kurogames.com/cloud/#/',
+    #     'resolution': (1920, 1080),
+    #     'channels': ['msedge', 'chrome', 'chromium'],
+    #     'args': ['--webrtc-ip-handling-policy=default', '--force-color-profile=srgb'],
+    #     'nick': '云游戏(需要Win11并安装Chrome或Edge)',
+    # },
     'window_size': {
         'width': 1200,
         'height': 800,
