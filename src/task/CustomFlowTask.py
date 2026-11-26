@@ -412,6 +412,13 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
     def _current_account_key(self):
         """Best-effort account key for per-account stamina budgeting."""
         try:
+            from src import schedule_runtime
+            account = schedule_runtime.scheduled_account()
+            if account:
+                return str(account).strip()
+        except Exception:
+            pass
+        try:
             return str(self.config.get('Account') or self.info.get('account') or '').strip()
         except Exception:
             return ''
