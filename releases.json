@@ -4,7 +4,7 @@
   {
    "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
    "manifest": "manifests/v1.0.57.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
+   "manifest_ref": "625ee4e7721b51f27e3fe6f7da391caf52670c71",
    "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.57/update-manifest.json",
    "prerelease": false,
    "published_at": "2026-11-26T13:25:52Z",
@@ -13,7 +13,7 @@
   {
    "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
    "manifest": "manifests/v1.0.56.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
+   "manifest_ref": "625ee4e7721b51f27e3fe6f7da391caf52670c71",
    "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.56/update-manifest.json",
    "prerelease": false,
    "published_at": "2026-11-26T12:33:50Z",
@@ -22,7 +22,7 @@
   {
    "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
    "manifest": "manifests/v1.0.55.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
+   "manifest_ref": "625ee4e7721b51f27e3fe6f7da391caf52670c71",
    "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.55/update-manifest.json",
    "prerelease": false,
    "published_at": "2026-11-26T12:16:38Z",
@@ -31,7 +31,7 @@
   {
    "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
    "manifest": "manifests/v1.0.54.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
+   "manifest_ref": "625ee4e7721b51f27e3fe6f7da391caf52670c71",
    "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.54/update-manifest.json",
    "prerelease": false,
    "published_at": "2026-11-26T11:27:32Z",
@@ -40,38 +40,11 @@
   {
    "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
    "manifest": "manifests/v1.0.53.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
+   "manifest_ref": "625ee4e7721b51f27e3fe6f7da391caf52670c71",
    "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.53/update-manifest.json",
    "prerelease": false,
    "published_at": "2026-11-26T10:54:49Z",
    "version": "v1.0.53"
-  },
-  {
-   "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
-   "manifest": "manifests/v1.0.52.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
-   "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.52/update-manifest.json",
-   "prerelease": false,
-   "published_at": "2026-11-26T05:53:53Z",
-   "version": "v1.0.52"
-  },
-  {
-   "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
-   "manifest": "manifests/v1.0.51.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
-   "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.51/update-manifest.json",
-   "prerelease": false,
-   "published_at": "2026-11-26T05:07:05Z",
-   "version": "v1.0.51"
-  },
-  {
-   "body": "### Monster-ww 便携版（PyInstaller 全量包）\n\n解压后双击 `Monster-ww/Monster-ww.exe` 启动。\n\n- **任务栏分组显示为 Monster-ww**：GUI 窗口由带版本资源的独立 exe 承载，不再归到 Python 分组\n- **必须以管理员权限运行**：exe 内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权。鸣潮客户端是管理员权限，脚本若普通权限启动，`PostMessage` 会被 UIPI 拦截，表现为点击按键无反应\n- **配置保留**：账号、计划和运行历史保存在 `%APPDATA%/Monster-ww/configs`，升级时全量替换程序目录也不会丢失；旧版 `configs/` 会在首次启动时自动迁移过去\n- **应用内自动更新**：「关于」页可检测更新、选择版本升级，更新后自动重启；启动时也会检测一次。也可手动下载 7z 解压覆盖程序目录，配置不受影响\n- **队伍创意工坊完全离线**：`workshop_bundle/` 内置全部队伍配置，浏览导入不访问外部 CDN\n- **ADB 模拟器技术验证**：设备列表新增安卓模拟器/ADB 入口，可用「ADB 模拟器技术验证」任务检查截图帧率、OCR 和单点点击；MuMu12 可在连接弹窗切换到 ipc 截图\n- **源码保护**：业务模块编译为 `.pyd`，仅保留必要的运行时补丁源码\n- Python 环境与依赖已随包提供，首次运行无需联网下载\n- 7z 请用 7-Zip 或 Windows 11 23H2+ 解压\n- 由手动触发的 `Monster-ww Portable Release` 工作流构建\n",
-   "manifest": "manifests/v1.0.50.json",
-   "manifest_ref": "f6f34c5f8ff84507a5e17ea2e89c3c2c78315bc8",
-   "manifest_url": "https://github.com/3055909481/Monster-ww/releases/download/v1.0.50/update-manifest.json",
-   "prerelease": false,
-   "published_at": "2026-11-25T16:44:11Z",
-   "version": "v1.0.50"
   }
  ],
  "repo": "3055909481/Monster-ww"
