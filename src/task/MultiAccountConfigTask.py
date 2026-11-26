@@ -34,7 +34,20 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
         self.config_type = {}
         self.visible = False
 
+    def _check_stopped(self):
+        """Abort immediately once the user disables this task.
+
+        Child tasks started via run_task_by_class() have their own enabled
+        flag, so stopping the multi-account task does not stop them. Checking
+        here (every click goes through it) prevents further account switches
+        even while a nested task is still unwinding.
+        """
+        if not self.enabled:
+            raise TaskDisabledException('multi-account task stopped')
+
     def click(self, x=-1, y=-1, *args, **kwargs):
+        # Stop before issuing any game input: account switching is all clicks.
+        self._check_stopped()
         # Box and relative clicks are resolved by the framework and re-enter
         # this method with capture-pixel coordinates. Keep both coordinates
         # identical so the native login dialog receives a real hover before
@@ -76,6 +89,7 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
             # Reset for every account, including configs of indirectly called tasks.
             for index, (account, task) in enumerate(plan):
                 try:
+                    self._check_stopped()  # never start a new account after stop
                     self._target_account_key = account['account_key']
                     # Per-account client server: make this account's exe path
                     # override the global Game Server while its task runs.
