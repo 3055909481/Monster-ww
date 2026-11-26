@@ -118,8 +118,10 @@ def _patch_create_dialog():
             def _sync_extras_visibility(index=None):
                 selected = self.tasks[index] if (index is not None
                                                  and 0 <= index < len(self.tasks)) else None
+                # Keep using the helper as the single source of truth: tests and
+                # callers patch _is_routine_task to recognise stub task objects.
+                is_routine = _is_routine_task(selected) if selected is not None else False
                 kind = type(selected).__name__ if selected is not None else ''
-                is_routine = kind in ('RoutineTask', 'CustomFlowTask')
                 # 计划/流程配置仅一条龙与自定义任务流可见；账号、服务器对所有任务可见。
                 for widget in (self.schedule_plan_label, self.schedule_plan_combo):
                     widget.setVisible(is_routine)
