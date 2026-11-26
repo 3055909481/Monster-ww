@@ -82,6 +82,8 @@ class TestUpdateConfirm(unittest.TestCase):
         self.assertIn('"update_confirm.py"', setup_source)
         spec_source = Path('Monster-ww.spec').read_text(encoding='utf-8')
         self.assertIn("'update_confirm.py'", spec_source)
+        workflow = Path('.github/workflows/portable-release.yml').read_text(encoding='utf-8')
+        self.assertIn("'update_confirm.py'", workflow)
 
     def test_install_patches_update_card_once(self):
         fake_card_class = type('FakeUpdateCard', (), {'update_to_selected_version': lambda self: None})

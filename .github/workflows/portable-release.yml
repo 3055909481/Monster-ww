@@ -149,7 +149,7 @@ jobs:
         run: |
           $stripped = 0
           Get-ChildItem -Recurse -Filter '*.py' src | Where-Object {
-            $_.Name -notin @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py', 'recorder.py') -and
+            $_.Name -notin @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py', 'update_confirm.py', 'recorder.py') -and
             (Test-Path ($_.FullName -replace '\.py$', '.cp312-win_amd64.pyd'))
           } | ForEach-Object { Remove-Item $_.FullName; $stripped++ }
           if (Test-Path config.py) { Remove-Item config.py; $stripped++ }
@@ -182,7 +182,7 @@ jobs:
       - name: Verify packaged tree has no readable business source
         run: |
           $leaks = Get-ChildItem -Recurse -Filter '*.py' dist/Monster-ww/src | Where-Object {
-            $_.Name -notin @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py', 'recorder.py')
+            $_.Name -notin @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py', 'team_overlay.py', 'click_jitter.py', 'update_confirm.py', 'recorder.py')
           }
           if ($leaks) { $leaks | ForEach-Object { Write-Host "LEAK: $($_.FullName)" }; throw 'Readable business source leaked into package.' }
           # The package root must stay clean too: update_core.py used to be
