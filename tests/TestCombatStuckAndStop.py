@@ -83,7 +83,7 @@ class TaskMonitorTest(unittest.TestCase):
         self.assertIn('def _stop_one(self, task):', source)
         self.assertIn('def _on_row_stop(self):', source)
         self.assertIn('button.clicked.connect(self._on_row_stop)', source)
-        self.assertIn("button.setProperty('task', task)", source)
+        self.assertIn('self._button_tasks[id(button)] = task', source)
         self.assertIn('table.setCellWidget(row, 4, button)', source)  # stop column
         # Reuse rows instead of rebuilding each second (avoids lost clicks).
         self.assertNotIn('table.setRowCount(0)', source)
@@ -112,12 +112,39 @@ class CombatTimeoutTest(unittest.TestCase):
 
     def test_combat_hard_timeout(self):
         source = Path('src/task/BaseCombatTask.py').read_text(encoding='utf-8')
-        self.assertIn('class CombatTimeoutException(NotInCombatException):', source)
+        check_src = Path('src/combat/CombatCheck.py').read_text(encoding='utf-8')
+        # 独立异常(非 NotInCombatException 子类), 否则副本循环当普通脱战重试。
+        self.assertIn('class CombatTimeoutException(Exception):', check_src)
+        self.assertIn('from src.combat.CombatCheck import CombatCheck, CombatTimeoutException', source)
         self.assertIn('COMBAT_HARD_TIMEOUT = 900', source)
         sleep_check = next(n for n in ast.walk(ast.parse(source))
                            if isinstance(n, ast.FunctionDef) and n.name == 'sleep_check')
         self.assertIn('CombatTimeoutException', ast.unparse(sleep_check))
         self.assertIn('_global_combat_deadline', ast.unparse(sleep_check))
+        in_combat = next(n for n in ast.walk(ast.parse(check_src))
+                         if isinstance(n, ast.FunctionDef) and n.name == 'in_combat')
+        self.assertIn('CombatTimeoutException', ast.unparse(in_combat))  # must re-raise
+
+    def test_stamina_wait_has_buffer(self):
+        for path in ('src/task/BaseWWTask.py', 'src/task/CustomFlowTask.py'):
+            source = Path(path).read_text(encoding='utf-8')
+            self.assertIn('STAMINA_RECOVER_SECONDS + 300', source)
+
+    def test_account_key_is_process_wide(self):
+        rt = Path('src/task/RoutineTask.py').read_text(encoding='utf-8')
+        self.assertIn('set_current_account(account_key)', rt)
+        sched = Path('src/schedule_runtime.py').read_text(encoding='utf-8')
+        self.assertIn('def set_current_account(account):', sched)
+        self.assertIn('def current_account():', sched)
+        base = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')
+        self.assertIn('schedule_runtime.current_account()', base)
+
+    def test_monitor_icon_and_columns(self):
+        source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
+        self.assertIn("icon = 'monitor'", source)
+        self.assertIn('QHeaderView.ResizeMode.Stretch', source)
+        self.assertIn('_button_tasks', source)
+        self.assertNotIn('setProperty(', source)
 
     def test_liberation_shortcut_bounded(self):
         source = Path('src/combat/CombatCheck.py').read_text(encoding='utf-8')

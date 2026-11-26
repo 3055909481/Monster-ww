@@ -15,6 +15,22 @@ PLAN_ARG = '--routine-plan'
 ACCOUNT_ARG = '--schedule-account'
 SERVER_ARG = '--schedule-server'
 
+# 进程级"当前登录账号"。CLI 的 --schedule-account 只反映启动参数, 多账号
+# 流程里切号后它不会变; 流程内嵌任务还会临时屏蔽它(_no_scheduled_account)。
+# 登录成功后写入这里, 让体力账本等按账号隔离的逻辑拿到真实账号。
+_current_account = None
+
+
+def set_current_account(account):
+    """Record the account that is actually logged in (best effort)."""
+    global _current_account
+    _current_account = str(account or '').strip() or None
+
+
+def current_account():
+    """The account currently logged in, independent of CLI/scheduling args."""
+    return _current_account
+
 
 def _clean(value: Optional[str]) -> Optional[str]:
     """去掉 shell/模拟 split 后可能残留的包裹双引号。"""

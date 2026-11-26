@@ -15,6 +15,16 @@ from src.task.BaseWWTask import BaseWWTask
 
 logger = Logger.get_logger(__name__)
 
+
+class CombatTimeoutException(Exception):
+    """整场战斗超过硬上限。
+
+    刻意不继承 NotInCombatException: 副本恢复循环会把后者当"死亡/脱战"
+    捕获并重进副本重试, 15 分钟一场会无限循环白烧体力。超时是异常状态,
+    应冒泡到任务级停止, 让用户看到明确原因。
+    """
+
+
 # 大招演出期间跳过脱战判定的最长时间。演出结束后若标志残留, 必须自动放行,
 # 否则 do_check_in_combat 永远 return True, 卡在战斗画面不领奖(同 has_intro bug)。
 LIBERATION_CHECK_GRACE = 8.0
@@ -279,7 +289,9 @@ class CombatCheck(BaseWWTask):
         self.in_sleep_check = True
         try:
             return self.do_check_in_combat(target)
-        except TaskDisabledException:
+        except (TaskDisabledException, CombatTimeoutException):
+            # 任务停止 / 整场战斗硬超时必须透传, 不能被下面的"当脱战"吞掉,
+            # 否则上层会误判为正常脱战、静默重进副本反复烧体力。
             raise
         except Exception as e:
             logger.error(f'do_check_in_combat:', e)

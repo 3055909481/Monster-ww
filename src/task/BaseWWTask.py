@@ -499,7 +499,9 @@ class BaseWWTask(BaseTask):
                 ).format(gap=gap, left=remaining))
                 return False
 
-        time_out = min(max(gap * self.STAMINA_RECOVER_SECONDS, 60), self.STAMINA_WAIT_HARD_CAP)
+        # +300s 余量: gap 点恢复恰好需要 gap*360 秒, 不留余量会在差 1 点时
+        # 因 OCR 轮询开销必然超时。
+        time_out = min(max(gap * self.STAMINA_RECOVER_SECONDS + 300, 60), self.STAMINA_WAIT_HARD_CAP)
         self.log_info(self.tr('Stamina short by {gap}; waiting up to {minutes:.0f} min for recovery.').format(
             gap=gap, minutes=time_out / 60))
         result = self.wait_until(
@@ -527,7 +529,11 @@ class BaseWWTask(BaseTask):
             account = ''
             try:
                 from src import schedule_runtime
-                account = str(schedule_runtime.scheduled_account() or '').strip()
+                # 进程级当前账号优先: CLI --schedule-account 在切号后不变,
+                # 流程内嵌任务还会临时屏蔽它, 都会导致退化成空账号共享桶。
+                account = str(schedule_runtime.current_account() or '').strip()
+                if not account:
+                    account = str(schedule_runtime.scheduled_account() or '').strip()
             except Exception:
                 pass
             if not account:

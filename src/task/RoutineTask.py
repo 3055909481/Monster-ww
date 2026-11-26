@@ -240,6 +240,14 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
                 except Exception as first_error:
                     self.log_warning(self.tr('Login did not reach the game world ({error}); retrying once.').format(error=first_error))
                     self.ensure_main(time_out=180)
+                # Record the actually logged-in account for per-account budgets
+                # (stamina ledger). Must survive _no_scheduled_account() which
+                # only hides the CLI arg for nested tasks.
+                try:
+                    from src.schedule_runtime import set_current_account
+                    set_current_account(account_key)
+                except Exception:
+                    pass
                 self.log_info(self.tr('{account} logged in successfully').format(
                     account=display_account(account_key)))
             finally:
@@ -292,7 +300,10 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             self.log_info(self.tr('流水线没有启用的步骤，无需执行。'), notify=True)
             return
         self.ensure_main(time_out=180)
-        today = date.today()
+        # 鸣潮自然日 04:00 重置; 用游戏日而非 date.today(), 否则 0:00-4:00
+        # 跑周常会按新的一天误判。
+        from src.task.routine.StaminaBudget import reset_day
+        today = reset_day()
         for item in selected:
             entry_id = item['id']
             if not is_scheduled_today(item['params'], today):

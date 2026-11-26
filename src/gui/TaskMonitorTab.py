@@ -10,12 +10,11 @@ import time
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from Mon import og, TriggerTask
-from Mon.core.icons import Icon
 from Mon.ui.qt.kit.buttons import Button
 from Mon.ui.qt.widget.CustomTab import CustomTab
 
@@ -43,10 +42,13 @@ def _display_name(task):
 
 
 class TaskMonitorTab(CustomTab):
-    icon = Icon.APPLICATION
+    # Distinct sidebar icon (the default APPLICATION/grid collides with other
+    # pages). 'monitor' is a bundled kit icon registered in nav_icons.
+    icon = 'monitor'
 
     def __init__(self):
         self._executor = None
+        self._button_tasks = {}  # id(button) -> task, avoids Qt QVariant proxy issues
         self.manual_table = None
         self.trigger_table = None
         self.manual_stop_all = None
@@ -79,7 +81,16 @@ class TaskMonitorTab(CustomTab):
         ])
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.verticalHeader().setVisible(False)
-        table.horizontalHeader().setStretchLastSection(True)
+
+        # Explicit, sensible widths. The old setStretchLastSection(True) blew
+        # the last ("操作") column up to hundreds of px and left 详情 mostly
+        # empty while squeezing the task name; pin fixed columns and let only
+        # the details column absorb spare space.
+        header = table.horizontalHeader()
+        for column, width in ((0, 180), (1, 72), (2, 64), (4, 72)):
+            table.setColumnWidth(column, width)
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         return table
 
     def _build(self):
@@ -188,8 +199,9 @@ class TaskMonitorTab(CustomTab):
                 button = QPushButton(self.tr('停止'), table)
                 button.clicked.connect(self._on_row_stop)
                 table.setCellWidget(row, 4, button)
-            # Store the task on the stable button; the slot looks it up on click.
-            button.setProperty('task', task)
+            # Keep the mapping in a plain Python dict (setProperty would store
+            # the task as a QVariant and may hand back a proxy on Cython builds).
+            self._button_tasks[id(button)] = task
 
     def _refresh(self):
         if self.manual_table is None:
@@ -211,7 +223,7 @@ class TaskMonitorTab(CustomTab):
         button = self.sender()
         if button is None:
             return
-        self._stop_one(button.property('task'))
+        self._stop_one(self._button_tasks.get(id(button)))
 
     def _stop_one(self, task):
         """Stop a single task, and always the executor's current task.
@@ -233,7 +245,11 @@ class TaskMonitorTab(CustomTab):
                 task.unpause()
         except Exception:
             pass
-        if self.executor is not None:
+        # 仅当被点任务不是当前任务时才联动: 嵌套任务(run_task_by_class)的
+        # _enabled 无人检查, 必须停当前任务才生效; 点当前任务自己已被 disable,
+        # 点排队任务则不该误停正在跑的任务。
+        current = getattr(self.executor, 'current_task', None) if self.executor else None
+        if self.executor is not None and current is not None and task is not current:
             try:
                 self.executor.stop_current_task()
             except Exception:

@@ -22,20 +22,21 @@ def stop_all_manual_tasks():
         if executor is None:
             return
         for task in list(executor.get_all_tasks()):
-            try:
-                if getattr(task, 'enabled', False) or getattr(task, 'running', False):
-                    task.disable()
-            except Exception as error:
-                logger.warning('failed to disable %s on exit: %s', task, error)
-            # Release keys/buttons the task is still holding (W, left mouse,
-            # charged E, ...). Without this the OS keeps them pressed after the
-            # process is gone and the character keeps moving on its own.
+            # Release held keys/buttons BEFORE disabling: send_key_up on the
+            # task calls executor.reset_scene() -> check_enabled(), which raises
+            # TaskDisabledException once _enabled is False and drops the first
+            # key (set iteration order then randomly leaks one held key, e.g. W).
             try:
                 release = getattr(task, 'release_held_inputs', None)
                 if callable(release):
                     release()
             except Exception as error:
                 logger.warning('failed to release held inputs for %s: %s', task, error)
+            try:
+                if getattr(task, 'enabled', False) or getattr(task, 'running', False):
+                    task.disable()
+            except Exception as error:
+                logger.warning('failed to disable %s on exit: %s', task, error)
         try:
             executor.stop_current_task()
         except Exception:

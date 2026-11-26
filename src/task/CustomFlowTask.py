@@ -388,7 +388,8 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
 
         # Natural recovery is capped at 240/day => 6 min per point; cap the
         # wall-clock wait to avoid an all-night stall if OCR/game misbehaves.
-        time_out = min(max(gained * self.STAMINA_RECOVER_SECONDS, 60), self.STAMINA_WAIT_HARD_CAP)
+        # +300s 余量抵消 OCR 轮询开销, 避免恰好在差 1 点时超时。
+        time_out = min(max(gained * self.STAMINA_RECOVER_SECONDS + 300, 60), self.STAMINA_WAIT_HARD_CAP)
 
         def reached():
             value, _, _ = self._read_stamina_reliable()
@@ -413,7 +414,8 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
         """Best-effort account key for per-account stamina budgeting."""
         try:
             from src import schedule_runtime
-            account = schedule_runtime.scheduled_account()
+            # 进程级当前账号优先于 CLI 参数(切号后会变, 且不被流程内屏蔽)。
+            account = schedule_runtime.current_account() or schedule_runtime.scheduled_account()
             if account:
                 return str(account).strip()
         except Exception:

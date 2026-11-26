@@ -54,7 +54,9 @@ def is_scheduled_today(params, today=None):
     if not days:
         return True
     if today is None:
-        today = date.today()
+        # 鸣潮 04:00 重置; 未显式传日期时按游戏日判定运行日。
+        from src.task.routine.StaminaBudget import reset_day
+        today = reset_day()
     return WEEKDAYS[today.weekday()] in days
 
 

@@ -13,7 +13,7 @@ from src import text_white_color
 from src.char import BaseChar
 from src.char.BaseChar import SwitchPriority, dot_color, CharPerformTimeout  # noqa
 from src.char.CharFactory import apply_team_char_classes, get_char_by_pos
-from src.combat.CombatCheck import CombatCheck
+from src.combat.CombatCheck import CombatCheck, CombatTimeoutException
 from src.task.BaseWWTask import isolate_white_text_to_black, binarize_for_matching
 
 logger = Logger.get_logger(__name__)
@@ -33,10 +33,6 @@ class CharDeadException(NotInCombatException):
 class CharRevivedException(CharDeadException):
     """角色已复活，用于中断当前战斗上下文并让任务重新进入。"""
     pass
-
-
-class CombatTimeoutException(NotInCombatException):
-    """整场战斗超过硬上限, 视为脱战让上层走副本恢复流程。"""
 
 
 class ClaimRewardException(Exception):
@@ -617,8 +613,8 @@ class BaseCombatTask(CombatCheck):
             self.switch_healer()
         self.info['Combat Count'] = self.info.get('Combat Count', 0) + 1
         # 整场战斗硬上限: 任何标志残留导致 in_combat 永真时, sleep_check 会
-        # 抛 CombatTimeoutException(继承 NotInCombatException)退出循环, 走
-        # 下面的 combat_end/副本恢复, 不再无限平 A。
+        # 抛 CombatTimeoutException(独立异常)退出循环。它不被当作普通脱战
+        # 静默重试, 而是冒泡到任务级停止, 避免每轮白烧 15 分钟。
         self._global_combat_deadline = time.monotonic() + self.COMBAT_HARD_TIMEOUT
         try:
             while self.in_combat():
