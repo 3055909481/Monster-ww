@@ -35,6 +35,10 @@ class CharRevivedException(CharDeadException):
     pass
 
 
+class CombatTimeoutException(NotInCombatException):
+    """整场战斗超过硬上限, 视为脱战让上层走副本恢复流程。"""
+
+
 class ClaimRewardException(Exception):
     """领奖识别失败（找不到宝箱/领奖点，或领奖后未确认）。
 
@@ -59,6 +63,9 @@ mismatched_names = {
 class BaseCombatTask(CombatCheck):
     owns_switch_healer_config = False
     """基础战斗任务类，封装了游戏"鸣潮"中角色自动化操作的通用逻辑。"""
+    # 整场战斗硬上限(秒)。任何任务卡在"永久战斗中"(标志残留/未锁目标)时
+    # 由 sleep_check 抛出 CombatTimeoutException, 让上层走副本恢复而非死等。
+    COMBAT_HARD_TIMEOUT = 900
     CD_OCR_REFERENCE_ASPECT_RATIO = 16 / 9
     hot_key_verified = False  # 热键是否已验证
     con_full_size = None  # 不同角色协奏值充满时的大小记录
@@ -81,6 +88,7 @@ class BaseCombatTask(CombatCheck):
             **kwargs: 传递给父类的关键字参数。
         """
         super().__init__(*args, **kwargs)
+        self._global_combat_deadline = 0.0  # 整场战斗硬超时(由 combat_once 设置)
         self.chars = [None, None, None]  # 角色列表
         self.char_texts = ['char_1_text', 'char_2_text', 'char_3_text']  # 角色文本标识符列表
         self.mouse_pos = None  # 当前鼠标位置
@@ -608,6 +616,10 @@ class BaseCombatTask(CombatCheck):
             self.load_chars()
             self.switch_healer()
         self.info['Combat Count'] = self.info.get('Combat Count', 0) + 1
+        # 整场战斗硬上限: 任何标志残留导致 in_combat 永真时, sleep_check 会
+        # 抛 CombatTimeoutException(继承 NotInCombatException)退出循环, 走
+        # 下面的 combat_end/副本恢复, 不再无限平 A。
+        self._global_combat_deadline = time.monotonic() + self.COMBAT_HARD_TIMEOUT
         try:
             while self.in_combat():
                 logger.debug(f'combat_once loop {self.chars}')
@@ -616,6 +628,8 @@ class BaseCombatTask(CombatCheck):
             raise e
         except NotInCombatException as e:
             logger.info(f'combat_once out of combat break {e}')
+        finally:
+            self._global_combat_deadline = 0.0
         self.combat_end()
         if self.switch_healer_enabled():
             self.switch_healer()
@@ -1078,6 +1092,13 @@ class BaseCombatTask(CombatCheck):
             check_combat (bool, optional): 是否在休眠前检查战斗状态。默认为 True。
         """
         self.check_perform_watch()
+        # 整场战斗硬超时兜底: 必须在 skip_combat_check 之前, 否则角色标志
+        # 残留导致 skip 常真时, 连超时都检查不到, 又变成无限平 A。
+        deadline = getattr(self, '_global_combat_deadline', 0.0)
+        if deadline and time.monotonic() >= deadline:
+            self._global_combat_deadline = 0.0
+            self.log_warning(f'combat exceeded {self.COMBAT_HARD_TIMEOUT}s hard timeout, force out')
+            raise CombatTimeoutException('combat hard timeout')
         if self.skip_combat_check:
             return
         # self.log_debug(f'sleep_check {self._in_combat}')

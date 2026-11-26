@@ -447,9 +447,11 @@ class BaseWWTask(BaseTask):
         self.info_set('back_up_stamina', back_up)
         return current, back_up, current + back_up
 
-    # 体力自然恢复约每 4 分钟 1 点（每天 360），等待估算与超时上限都基于它。
-    STAMINA_RECOVER_SECONDS = 240
-    STAMINA_WAIT_HARD_CAP = 3600  # 单缺口最长等 60 分钟，超时就放弃继续后面的步骤
+    # 自然恢复上限 240 点/天 => 1440/240 = 6 分钟/点。等待估算与账本口径一致；
+    # 之前按 4 分钟/点(240s)算会让超时系统性偏短 1/3，攒不够就放弃。
+    STAMINA_RECOVER_SECONDS = 360
+    # 单缺口最多等 90 分钟(15 点 @6min)，超时就放弃继续后面的步骤。
+    STAMINA_WAIT_HARD_CAP = 5400
     STAMINA_READ_RETRIES = 3  # OCR 偶发读不到体力时重试次数
     STAMINA_READ_RETRY_SLEEP = 1.0
 
@@ -484,6 +486,19 @@ class BaseWWTask(BaseTask):
             self.log_info(self.tr('Stamina short by {gap}, above the {limit} limit; skip waiting.').format(
                 gap=gap, limit=gap_limit))
             return False
+
+        # Same daily ledger as the custom-flow wait step: at most 240 natural
+        # stamina per 04:00 game-day, isolated per account. Best-effort so
+        # mocks/tasks without an executor keep the old behaviour.
+        ledger, account = self._stamina_wait_ledger()
+        if ledger is not None:
+            remaining = ledger.remaining(account=account)
+            if remaining < gap:
+                self.log_info(self.tr(
+                    'Stamina wait skipped: needs {gap}, today left {left}.'
+                ).format(gap=gap, left=remaining))
+                return False
+
         time_out = min(max(gap * self.STAMINA_RECOVER_SECONDS, 60), self.STAMINA_WAIT_HARD_CAP)
         self.log_info(self.tr('Stamina short by {gap}; waiting up to {minutes:.0f} min for recovery.').format(
             gap=gap, minutes=time_out / 60))
@@ -491,10 +506,35 @@ class BaseWWTask(BaseTask):
             lambda: self._read_stamina_reliable()[0] >= need,
             time_out=time_out, settle_time=0, raise_if_not_found=False)
         if result:
+            if ledger is not None:
+                ledger.add(gap, account=account)
             self.log_info(self.tr('Stamina recovered; continue.'))
         else:
+            # Credit only what actually recovered so a timeout cannot burn the
+            # whole daily allowance.
+            after, _, _ = self._read_stamina_reliable()
+            actual = max(0, int(after - current)) if after > 0 else 0
+            if ledger is not None and actual:
+                ledger.add(actual, account=account)
             self.log_info(self.tr('Timed out waiting for stamina; continue with remaining steps.'))
         return bool(result)
+
+    def _stamina_wait_ledger(self):
+        """Best-effort (ledger, account key); (None, '') when unavailable."""
+        try:
+            from src.task.routine.StaminaBudget import StaminaWaitLedger
+            config_folder = getattr(getattr(self, 'executor', None), 'config_folder', None) or 'configs'
+            account = ''
+            try:
+                from src import schedule_runtime
+                account = str(schedule_runtime.scheduled_account() or '').strip()
+            except Exception:
+                pass
+            if not account:
+                account = str(self.config.get('Account') or self.info.get('account') or '').strip()
+            return StaminaWaitLedger(config_folder), account
+        except Exception:
+            return None, ''
 
     def use_stamina(self, once=60, must_use=0):
         self.sleep(1)

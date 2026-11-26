@@ -15,6 +15,9 @@ from src.task.BaseWWTask import BaseWWTask
 
 logger = Logger.get_logger(__name__)
 
+# 大招演出期间跳过脱战判定的最长时间。演出结束后若标志残留, 必须自动放行,
+# 否则 do_check_in_combat 永远 return True, 卡在战斗画面不领奖(同 has_intro bug)。
+LIBERATION_CHECK_GRACE = 8.0
 # 收手前需隔一次判定再确认, 避免一帧误报「声骸」就收手导致空站
 END_CONFIRM_SECONDS = 0.3
 # 云游戏血条消失后仍视为战斗中的秒数, 之后才检查结束条件(声骸识别)
@@ -203,7 +206,12 @@ class CombatCheck(BaseWWTask):
         if not getattr(self, '_in_combat', False) and self.should_start_combat_by_key():
             return self.start_combat_by_key()
         if self.in_liberation:
-            return True
+            # 大招演出有上限; 超时后清掉残留标志, 继续走正常脱战判定,
+            # 避免一次演出没复位就永久被当成"战斗中"。
+            started = float(getattr(self, '_last_liberation', 0) or 0)
+            if started > 0 and time.time() - started <= LIBERATION_CHECK_GRACE:
+                return True
+            self.in_liberation = False
         if self._in_combat:
             if self.scene.in_combat() is not None:
                 return self.scene.in_combat()

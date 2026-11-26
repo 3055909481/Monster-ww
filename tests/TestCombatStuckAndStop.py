@@ -81,8 +81,13 @@ class TaskMonitorTest(unittest.TestCase):
     def test_monitor_has_per_task_stop_button(self):
         source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
         self.assertIn('def _stop_one(self, task):', source)
-        self.assertIn("button.clicked.connect(lambda _checked=False, t=task: self._stop_one(t))", source)
+        self.assertIn('def _on_row_stop(self):', source)
+        self.assertIn('button.clicked.connect(self._on_row_stop)', source)
+        self.assertIn("button.setProperty('task', task)", source)
         self.assertIn('table.setCellWidget(row, 4, button)', source)  # stop column
+        # Reuse rows instead of rebuilding each second (avoids lost clicks).
+        self.assertNotIn('table.setRowCount(0)', source)
+        self.assertIn('QTimer.singleShot(0, self._refresh)', source)
 
     def test_monitor_separates_trigger_and_manual(self):
         source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
@@ -93,6 +98,54 @@ class TaskMonitorTest(unittest.TestCase):
         self.assertIn("def _stop_group(self, kind):", source)
         self.assertIn("self.trigger_stop_all", source)
         self.assertIn("self.manual_stop_all", source)
+
+    def test_monitor_filters_hidden_and_stops_current(self):
+        source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
+        self.assertIn("getattr(task, 'visible', True)", source)
+        one = next(n for n in ast.walk(ast.parse(source))
+                   if isinstance(n, ast.FunctionDef) and n.name == '_stop_one')
+        self.assertIn('self.executor.stop_current_task()', ast.unparse(one))
+
+
+class CombatTimeoutTest(unittest.TestCase):
+    """整场战斗硬超时与 in_liberation 短路兜底的源码守卫。"""
+
+    def test_combat_hard_timeout(self):
+        source = Path('src/task/BaseCombatTask.py').read_text(encoding='utf-8')
+        self.assertIn('class CombatTimeoutException(NotInCombatException):', source)
+        self.assertIn('COMBAT_HARD_TIMEOUT = 900', source)
+        sleep_check = next(n for n in ast.walk(ast.parse(source))
+                           if isinstance(n, ast.FunctionDef) and n.name == 'sleep_check')
+        self.assertIn('CombatTimeoutException', ast.unparse(sleep_check))
+        self.assertIn('_global_combat_deadline', ast.unparse(sleep_check))
+
+    def test_liberation_shortcut_bounded(self):
+        source = Path('src/combat/CombatCheck.py').read_text(encoding='utf-8')
+        self.assertIn('LIBERATION_CHECK_GRACE = 8.0', source)
+        check = next(n for n in ast.walk(ast.parse(source))
+                     if isinstance(n, ast.FunctionDef) and n.name == 'do_check_in_combat')
+        body = ast.unparse(check)
+        self.assertIn('_last_liberation', body)
+        self.assertIn('self.in_liberation = False', body)
+
+    def test_exit_releases_held_inputs(self):
+        source = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
+        self.assertIn('release_held_inputs', source)
+
+    def test_fkey_watcher_stoppable(self):
+        source = Path('src/combat/FKeyStart.py').read_text(encoding='utf-8')
+        self.assertIn('self._stop = threading.Event()', source)
+        self.assertIn('while not self._stop.is_set():', source)
+        self.assertIn('def stop(self):', source)
+        self.assertIn('def uninstall_self_f_filter():', source)
+        exit_src = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
+        self.assertIn('f_key_watcher.stop()', exit_src)
+        self.assertIn('uninstall_self_f_filter()', exit_src)
+
+    def test_stamina_recovery_matches_daily_cap(self):
+        source = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')
+        self.assertIn('STAMINA_RECOVER_SECONDS = 360', source)
+        self.assertIn('_stamina_wait_ledger', source)
 
     def test_exit_cleanup_installed(self):
         main = Path('main.py').read_text(encoding='utf-8')

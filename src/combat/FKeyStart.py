@@ -37,6 +37,7 @@ class FKeyWatcher:
         self.is_game_foreground = None
         self._thread = None
         self._lock = threading.Lock()
+        self._stop = threading.Event()
         self._self_held = False
         self._self_until = 0.0
 
@@ -71,8 +72,21 @@ class FKeyWatcher:
             self.is_game_foreground = is_game_foreground
             if self._thread is not None and self._thread.is_alive():
                 return
+            self._stop.clear()
             self._thread = threading.Thread(target=self._watch, name='f_key_start_watch', daemon=True)
             self._thread.start()
+
+    def stop(self):
+        """Signal the watch thread to exit and drop its key state.
+
+        Daemon threads die with the process, but an explicit stop lets the app
+        shut down cleanly without a thread polling GetAsyncKeyState until the
+        very last moment.
+        """
+        self._stop.set()
+        with self._lock:
+            self._self_held = False
+            self._self_until = 0.0
 
     @staticmethod
     def _resolve_key_state():
@@ -96,14 +110,14 @@ class FKeyWatcher:
             logger.error(f'F 开始战斗: 读不了键盘 ({e}), 按 F 开打不可用')
             return
         was_down = False
-        while True:
+        while not self._stop.is_set():
             try:
                 down = bool(get_key_state(F_VK) & 0x8000)
                 was_down = self.on_sample(down, was_down)
             except Exception as e:
                 logger.error(f'F 开始战斗: 读键线程出错, 停止 ({e})')
                 return
-            time.sleep(F_POLL_INTERVAL)
+            self._stop.wait(F_POLL_INTERVAL)  # interruptible sleep for prompt stop
 
     def on_sample(self, down, was_down):
         """只认上升沿; 返回这次的按键状态给下一轮比较。"""
@@ -127,6 +141,7 @@ f_key_watcher = FKeyWatcher()
 # 幂等标记放在模块级, 而不是函数对象上: ctypes.windll.user32.GetAsyncKeyState 是
 # builtin _FuncPtr, 不支持设置自定义属性 (fork 的 ok 环境可以, Mon 环境会 AttributeError)。
 _self_f_filter_installed = False
+_original_get_async_key_state = None  # 供退出时还原全局替换
 
 
 def _filter_self_f(original, watcher):
@@ -149,7 +164,7 @@ def install_self_f_filter():
     它们都是每次调用时从共享的 ctypes.windll.user32 上取这个函数, 所以在这里换掉一次就都管到了, 队伍代码不用改。
     后台 PostMessage 下没人报「自己在按 F」, 这层包装什么都不做。
     """
-    global _self_f_filter_installed
+    global _self_f_filter_installed, _original_get_async_key_state
     if _self_f_filter_installed:
         return True
     try:
@@ -157,12 +172,25 @@ def install_self_f_filter():
         current = user32.GetAsyncKeyState
         current.restype = ctypes.c_short
         current.argtypes = (ctypes.c_int,)
+        _original_get_async_key_state = current
         user32.GetAsyncKeyState = _filter_self_f(current, f_key_watcher)
         _self_f_filter_installed = True
         return True
     except Exception as e:
         logger.warning(f'F 键过滤装不上 ({e}), 前台输入下自己按的 F 可能被当成玩家按的')
         return False
+
+
+def uninstall_self_f_filter():
+    """Restore the original GetAsyncKeyState on app exit (best effort)."""
+    global _self_f_filter_installed
+    if not _self_f_filter_installed or _original_get_async_key_state is None:
+        return
+    try:
+        ctypes.windll.user32.GetAsyncKeyState = _original_get_async_key_state
+        _self_f_filter_installed = False
+    except Exception as e:
+        logger.debug(f'F 键过滤还原失败 ({e})')
 
 
 # import 期副作用必须兜底: 某些环境 (CI / 非 Windows / mock) 下 ctypes 不可写,

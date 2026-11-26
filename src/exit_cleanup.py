@@ -27,10 +27,28 @@ def stop_all_manual_tasks():
                     task.disable()
             except Exception as error:
                 logger.warning('failed to disable %s on exit: %s', task, error)
+            # Release keys/buttons the task is still holding (W, left mouse,
+            # charged E, ...). Without this the OS keeps them pressed after the
+            # process is gone and the character keeps moving on its own.
+            try:
+                release = getattr(task, 'release_held_inputs', None)
+                if callable(release):
+                    release()
+            except Exception as error:
+                logger.warning('failed to release held inputs for %s: %s', task, error)
         try:
             executor.stop_current_task()
         except Exception:
             pass
+        # Stop the always-on F-key watcher thread and restore the global
+        # GetAsyncKeyState hook it installs; otherwise the process exits with a
+        # live polling thread and a patched system function.
+        try:
+            from src.combat.FKeyStart import f_key_watcher, uninstall_self_f_filter
+            f_key_watcher.stop()
+            uninstall_self_f_filter()
+        except Exception as error:
+            logger.warning('F-key watcher cleanup failed: %s', error)
     except Exception as error:
         logger.warning('exit cleanup failed: %s', error)
 

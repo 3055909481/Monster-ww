@@ -142,20 +142,28 @@ class TaskMonitorTab(CustomTab):
         except Exception:
             tasks = list(getattr(self.executor, 'onetime_tasks', []) or []) + \
                     list(getattr(self.executor, 'trigger_tasks', []) or [])
-        # Keep enabled or running tasks; disabled/stopped ones drop off the view
-        # (same behaviour as before this refactor).
+        # Only visible, enabled/running tasks. Hidden shells (FStartCombatTask,
+        # MultiAccountConfigTask) are config proxies: stopping them does nothing
+        # (their `enabled` is a read-only property), so don't show them at all.
         return [task for task in tasks
-                if getattr(task, 'enabled', False) or getattr(task, 'running', False)]
+                if getattr(task, 'visible', True)
+                and (getattr(task, 'enabled', False) or getattr(task, 'running', False))]
 
     @staticmethod
     def _is_trigger(task):
         return isinstance(task, TriggerTask)
 
     def _fill(self, table, tasks, current, now):
-        # Reset to zero first so Qt disposes the previous row cell-widgets
-        # (stop buttons); otherwise widgets pile up on every 1s refresh.
-        table.setRowCount(0)
-        table.setRowCount(len(tasks))
+        # Reuse cells/buttons across refreshes: rebuilding every second destroyed
+        # the button mid-click (press/release split by the 1s timer) and lost the
+        # click. Only add/remove rows when the count actually changes.
+        old_count = table.rowCount()
+        new_count = len(tasks)
+        if old_count > new_count:
+            table.setRowCount(new_count)
+        elif old_count < new_count:
+            table.setRowCount(new_count)
+
         for row, task in enumerate(tasks):
             running = bool(getattr(task, 'running', False)) and task is current
             if running:
@@ -169,11 +177,19 @@ class TaskMonitorTab(CustomTab):
             details = _value_text(getattr(task, 'info', {}) or {})
             values = [_display_name(task), state, elapsed, details]
             for column, value in enumerate(values):
-                table.setItem(row, column, QTableWidgetItem(value))
-            button = QPushButton(self.tr('停止'), table)
-            # Default argument binds the task so the lambda is not late-binding.
-            button.clicked.connect(lambda _checked=False, t=task: self._stop_one(t))
-            table.setCellWidget(row, 4, button)
+                item = table.item(row, column)
+                if item is None:
+                    item = QTableWidgetItem()
+                    table.setItem(row, column, item)
+                if item.text() != value:
+                    item.setText(value)
+            button = table.cellWidget(row, 4)
+            if button is None:
+                button = QPushButton(self.tr('停止'), table)
+                button.clicked.connect(self._on_row_stop)
+                table.setCellWidget(row, 4, button)
+            # Store the task on the stable button; the slot looks it up on click.
+            button.setProperty('task', task)
 
     def _refresh(self):
         if self.manual_table is None:
@@ -190,8 +206,22 @@ class TaskMonitorTab(CustomTab):
         self.trigger_stop_all.setEnabled(bool(trigger))
         self.manual_stop_all.setEnabled(bool(manual))
 
+    def _on_row_stop(self):
+        """Row button slot: read the task bound to the clicked button."""
+        button = self.sender()
+        if button is None:
+            return
+        self._stop_one(button.property('task'))
+
     def _stop_one(self, task):
-        """Stop a single task without touching the others."""
+        """Stop a single task, and always the executor's current task.
+
+        A one-time task can be running *inside* another task (run_task_by_class
+        calls task.run() in place without changing executor.current_task). In
+        that case disabling the child alone is a no-op because framework
+        check_enabled only reads current_task._enabled. Stopping the current
+        task too guarantees the click actually takes effect.
+        """
         if task is None:
             return
         try:
@@ -203,7 +233,14 @@ class TaskMonitorTab(CustomTab):
                 task.unpause()
         except Exception:
             pass
-        self._refresh()
+        if self.executor is not None:
+            try:
+                self.executor.stop_current_task()
+            except Exception:
+                pass
+        # Defer refresh to the event loop: refreshing synchronously here would
+        # destroy the very button whose click handler we are inside of.
+        QTimer.singleShot(0, self._refresh)
 
     def _stop_group(self, kind):
         """Stop one group: 'trigger' or 'manual'."""

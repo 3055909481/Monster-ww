@@ -36,8 +36,8 @@ class TestWaitForStaminaEnough(unittest.TestCase):
         task.wait_until = Mock(side_effect=lambda cond, **kw: cond() or True)
         self.assertTrue(task.wait_for_stamina_enough(60, 10))
         task.wait_until.assert_called_once()
-        # 缺口 5 点 * 240s/点 = 1200s，低于 60 分钟硬上限
-        self.assertEqual(task.wait_until.call_args.kwargs['time_out'], 1200)
+        # 缺口 5 点 * 360s/点 = 1800s（240 点/天 => 6 分钟/点），低于硬上限
+        self.assertEqual(task.wait_until.call_args.kwargs['time_out'], 1800)
 
     def test_gap_above_limit_skips(self):
         task = _stamina_task([30])

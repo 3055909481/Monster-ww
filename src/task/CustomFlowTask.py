@@ -386,8 +386,8 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
             'Waiting for stamina {current} -> {target} (today budget left {left}).'
         ).format(current=current, target=effective_target, left=remaining))
 
-        # Natural recovery is ~1 per 4 min; cap the wall-clock wait to avoid
-        # an all-night stall if the OCR or the game misbehaves.
+        # Natural recovery is capped at 240/day => 6 min per point; cap the
+        # wall-clock wait to avoid an all-night stall if OCR/game misbehaves.
         time_out = min(max(gained * self.STAMINA_RECOVER_SECONDS, 60), self.STAMINA_WAIT_HARD_CAP)
 
         def reached():
