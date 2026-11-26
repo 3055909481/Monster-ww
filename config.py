@@ -351,6 +351,7 @@ config = {
         ["src.gui.CharacterCodeTab", "CharacterCodeTab"],
         ["src.gui.RoutineTab", "RoutineTab"],
         ["src.gui.CustomFlowTab", "CustomFlowTab"],
+        ["src.gui.TaskMonitorTab", "TaskMonitorTab"],
         ["src.recorder.RecorderTab", "AxisRecorderTab"],
     ],
     'ocr': {

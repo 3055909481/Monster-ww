@@ -19,6 +19,7 @@ class StuckCombatTest(unittest.TestCase):
         body = ast.unparse(fn)
         self.assertIn('INTRO_COMBAT_CHECK_GRACE', body)
         self.assertIn('last_switch_in_time', body)
+        self.assertIn('switched_at < 0', body)  # unset timestamp = fresh intro
         self.assertIn('self.has_intro = False', body)  # stale flag must clear
         self.assertIn('return self.flying()', body)
 
@@ -52,5 +53,26 @@ class MultiAccountStopTest(unittest.TestCase):
         self.assertIn('self._check_stopped()', ast.unparse(loop))
 
 
-if __name__ == '__main__':
+class TaskMonitorTest(unittest.TestCase):
+    """全局任务监控页与退出清理的源码守卫。"""
+
+    def test_monitor_tab_registered(self):
+        self.assertIn('["src.gui.TaskMonitorTab", "TaskMonitorTab"]',
+                      Path('config.py').read_text(encoding='utf-8'))
+
+    def test_monitor_has_stop_all(self):
+        source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
+        self.assertIn('def _stop_all(self):', source)
+        self.assertIn('task.disable()', source)
+        self.assertIn('self.executor.stop_current_task()', source)
+
+    def test_exit_cleanup_installed(self):
+        main = Path('main.py').read_text(encoding='utf-8')
+        self.assertIn('from src.exit_cleanup import install as install_exit_cleanup', main)
+        source = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
+        self.assertIn('app.aboutToQuit.connect(stop_all_manual_tasks)', source)
+        self.assertIn('task.disable()', source)
+
+
+if __name__ == "__main__":
     unittest.main()

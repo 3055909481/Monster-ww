@@ -56,6 +56,13 @@ if __name__ == '__main__':
     except Exception:
         pass
 
+    # 退出时停掉所有手动任务，避免脚本残留到程序关闭之后
+    try:
+        from src.exit_cleanup import install as install_exit_cleanup
+        install_exit_cleanup()
+    except Exception:
+        pass
+
     config = config
     ok = OK(config)
     ok.start()

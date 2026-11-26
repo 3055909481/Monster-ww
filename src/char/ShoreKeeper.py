@@ -36,7 +36,12 @@ class ShoreKeeper(BaseChar):
         # to report "in combat" and leaving combat_once() stuck attacking a
         # dead fight. Bound the intro grace period to the actual animation.
         if self.has_intro:
-            elapsed = time.time() - float(getattr(self, 'last_switch_in_time', -1) or 0)
+            switched_at = float(getattr(self, 'last_switch_in_time', -1) or -1)
+            if switched_at < 0:
+                # No switch timestamp (tests / hand-built state): treat the
+                # intro as fresh rather than stale.
+                return True
+            elapsed = time.time() - switched_at
             if 0 <= elapsed <= self.INTRO_COMBAT_CHECK_GRACE:
                 return True
             self.has_intro = False
