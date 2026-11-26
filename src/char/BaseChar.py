@@ -9,6 +9,9 @@ from Mon import Config, Logger  # noqa
 from src import text_white_color  # noqa
 
 SKILL_TIME_OUT = 15
+# 按下 E 后图标仍显示可用超过这么久就停按（技能有层数/后续形态/按键被游戏忽略）。
+# 上游 3.0.15：否则会一直白等到 15 秒技能超时，角色长时间占场。
+RESONANCE_STILL_READY_TIME_OUT = 2
 
 
 class CharPerformTimeout(Exception):
@@ -581,6 +584,13 @@ class BaseChar:
             if not self.resonance_available() and (
                     not has_animation or now - start > animation_min_duration):
                 self.logger.debug(f'click_resonance not available break')
+                break
+            if (time_out == 0 and not has_animation and resonance_click_time != 0
+                    and now - resonance_click_time > RESONANCE_STILL_READY_TIME_OUT):
+                # 按过之后图标仍显示可用：多层技能/后续形态/按键被忽略。
+                # 上游 3.0.15：别白等到 15 秒技能超时把角色长时间留在场上。
+                self.logger.info(f'click_resonance still available '
+                                 f'{now - resonance_click_time:.1f}s after first press, stop')
                 break
             self.logger.debug(f'click_resonance resonance_available click')
 

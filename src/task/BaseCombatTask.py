@@ -1172,6 +1172,10 @@ class BaseCombatTask(CombatCheck):
             self.raise_not_in_combat('combat check not in combat')
 
     def set_key(self, key, box):
+        # 用户显式配置的鼠标侧键不要被 OCR 自动覆盖（上游 3.0.15 修复）。
+        current_key = self.key_config.get(key)
+        if current_key and str(current_key).lower() in ['mouse4', 'mouse5', 'xbutton1', 'xbutton2']:
+            return
         best = self.find_best_match_in_box(box, ['t', 'e', 'r', 'q'], threshold=0.7)
         logger.debug(f'set_key best match {key}: {best}')
         if best and best.name != self.key_config[key]:
@@ -1341,48 +1345,56 @@ class BaseCombatTask(CombatCheck):
     def get_current_con(self):
         """获取当前角色的协奏值百分比。
 
+        协奏环是灰色轨道上的彩色弧，并非单向填充，所以按"元素色覆盖的环周角
+        占比"计算。无需按分辨率标定，也不会因保存的满环面积失效而把 ~85%
+        的环读成满、把短弧读成 0（移植自上游 3.0.15 的识别修复）。
+
         Returns:
-            float: 协奏值百分比 (0.0 到 1.0)。
+            float: 协奏值百分比 (0.0 到 1.0)。只有整圈都被覆盖时才返回 1。
         """
         box = self.get_con_box()
-        box.confidence = 0
-
-        max_area = 0
-        percent = 0
-        max_is_full = False
         target_index = self._ensure_ring_index()
-
-        cropped = box.crop_frame(self.frame)
-        for i in range(len(con_colors)):
-            if target_index != -1 and i != target_index:
-                continue
-            color_range = con_colors[i]
-            area, is_full = self.count_rings(cropped, color_range,
-                                             1500 / 3840 / 2160 * self.screen_width * self.screen_height)
-            if is_full:
-                max_is_full = is_full
-            if area > max_area:
-                max_area = int(area)
-        if max_is_full:
-            percent = 1
-        if max_is_full:
-            self.con_full_size[str(target_index)] = max_area
-
-        if percent != 1 and self.con_full_size[str(target_index)] > 0:
-            percent = max_area / self.con_full_size[str(target_index)]
-        if not max_is_full and percent >= 1:
-            self.logger.warning(
-                f'is_con_full not full but percent greater than 1, set to 0.99, {percent} {max_is_full}')
-            percent = 0.99
-        if percent > 1:
-            self.logger.error(f'is_con_full percent greater than 1, set to 1, {percent} {max_is_full}')
-            percent = 1
-
+        percent = self.measure_con_arc(box.crop_frame(self.frame), target_index)
         box.confidence = percent
         self.draw_boxes(f'is_con_full_{self}', box)
-        if percent > 1:
-            percent = 1
         return percent
+
+    def measure_con_arc(self, image, ring_index):
+        """Return the fraction (0..1) of the concerto ring covered by its element colour.
+
+        Args:
+            image (numpy.ndarray): BGR crop of the con box (``get_con_box``).
+            ring_index (int): Index into ``con_colors`` / ``Elements``.
+        """
+        if image is None or image.size == 0 or ring_index < 0:
+            return 0
+        h, w = image.shape[:2]
+        center_y, center_x = (h - 1) / 2, (w - 1) / 2
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        yy, xx = np.mgrid[0:h, 0:w]
+        distance = np.hypot(yy - center_y, xx - center_x)
+        band = (distance >= h * CON_RING_INNER_RATIO) & (distance <= h * CON_RING_OUTER_RATIO + 1)
+        hue_diff = np.abs(hsv[..., 0].astype(np.int16) - con_hues[ring_index])
+        hue_diff = np.minimum(hue_diff, 180 - hue_diff)
+        mask = (band & (hue_diff <= CON_HUE_TOLERANCE) & (hsv[..., 1] >= CON_MIN_SATURATION)
+                & (hsv[..., 2] >= CON_MIN_VALUE))
+        angles = (np.degrees(np.arctan2(xx - center_x, center_y - yy)) + 360) % 360
+        bin_size = 360 / CON_ANGLE_BINS
+        counts = np.bincount((angles[mask] / bin_size).astype(int) % CON_ANGLE_BINS,
+                             minlength=CON_ANGLE_BINS)
+        covered = counts >= CON_MIN_PIXELS_PER_BIN
+        if covered.all():
+            return 1
+        if not covered.any():
+            return 0
+        # Bridge single-bin gaps left by the white tick marks crossing the ring.
+        bridged = covered.copy()
+        for i in range(CON_ANGLE_BINS):
+            if not covered[i] and covered[i - 1] and covered[(i + 1) % CON_ANGLE_BINS]:
+                bridged[i] = True
+        if bridged.all():
+            return 1
+        return min(float(bridged.sum()) / CON_ANGLE_BINS, 0.99)
 
     def count_rings(self, image, color_range, min_area):
         """在指定图像区域内计算特定颜色范围的能量环数量和状态。
@@ -1524,6 +1536,23 @@ con_colors = [  # 不同角色属性的协奏值能量环的颜色范围列表�
         'b': (145, 175)  # Blue range
     }
 ]
+
+# 上游 ok-wuthering-waves 3.0.15 的协奏环识别：按环周角占比而非"面积/保存的
+# 满环面积"计算。旧算法在分辨率变化后满环大小失效，~85% 环被读成满、短弧读成 0。
+def _con_color_hue(color_range):
+    center = np.uint8([[[sum(color_range['b']) // 2, sum(color_range['g']) // 2, sum(color_range['r']) // 2]]])
+    return int(cv2.cvtColor(center, cv2.COLOR_BGR2HSV)[0, 0, 0])
+
+
+con_hues = [_con_color_hue(color_range) for color_range in con_colors]  # OpenCV hue (0-179) per element
+MAX_SUPPORT_CHAIN_WITHOUT_INTRO = 1  # support-to-support switches without intro before returning to main DPS
+CON_RING_INNER_RATIO = 0.35119  # ring band radius as a fraction of the con box height
+CON_RING_OUTER_RATIO = 0.42261
+CON_ANGLE_BINS = 72  # 5 degrees per bin
+CON_HUE_TOLERANCE = 8
+CON_MIN_SATURATION = 100  # filled arc ~130-160; the empty grey track is ~40-65
+CON_MIN_VALUE = 170  # filled arc ~215-235; the empty track is ~120-170
+CON_MIN_PIXELS_PER_BIN = 3
 
 con_templates = [  # 协奏值能量环的模板名称列表 (对应 `con_colors`)。
     'con_spectro',
