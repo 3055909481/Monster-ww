@@ -53,8 +53,38 @@ def _selected_version_info(card):
     return title, notes
 
 
+def _install_progress(self, module):
+    """注入进度回调：后台线程报数，QTimer 排到主线程改状态文字。
+
+    框架 UpdateCard 只有「检查版本」转圈，下载/安装阶段没有可见反馈。
+    这里复用它的 status_label 显示「下载更新文件 45/151 · 30%」，用户在
+    整个更新过程中都能看到当前在做什么。任何一步失败都静默降级。
+    """
+    try:
+        from PySide6.QtCore import QTimer
+
+        def show(message):
+            def apply():
+                label = getattr(self, 'status_label', None)
+                if label is not None:
+                    label.setText(message)
+                    label.setToolTip(message)
+            QTimer.singleShot(0, apply)
+
+        def progress(done, total, phase):
+            if total and total > 0:
+                percent = min(100, int(done * 100 / total))
+                show(f'{phase} {done}/{total} · {percent}%')
+            else:
+                show(str(phase))
+
+        setattr(module, 'progress_callback', progress)
+    except Exception as error:
+        logger.warning('failed to install update progress callback: %s', error)
+
+
 def update_to_selected_version(self, checked=False):
-    """包装原方法：先确认，再真正开始更新。
+    """包装原方法：先确认，再带进度显示真正开始更新。
 
     ``checked`` absorbs the bool Qt's ``clicked`` signal passes when this is
     wired directly to the Update button (the framework's own method relies on
@@ -73,6 +103,9 @@ def update_to_selected_version(self, checked=False):
     if _ORIGINAL is None:
         logger.warning('original update_to_selected_version missing; aborting')
         return
+    module = getattr(self, 'pyappify_module', None)
+    if module is not None and hasattr(module, 'progress_callback'):
+        _install_progress(self, module)
     return _ORIGINAL(self)
 
 

@@ -39,6 +39,9 @@ from urllib.request import Request
 from src.net_ssl import open_url
 
 APP_ROOT = Path(__file__).resolve().parent.parent
+# PyInstaller 打包后没有独立 pythonw.exe, 更新助手必须由 app exe 自己运行。
+# 抽成常量便于离线测试注入两种环境。
+IS_FROZEN = getattr(sys, "frozen", False)
 
 # 框架在 Mon/__init__.py 里读这些名字: app_version 有值会覆盖 config 里的版本号。
 # 便携版把 config.py 编译成 config.pyd 且其中的 version 仍是 "dev", 若保持 None,
@@ -63,6 +66,21 @@ pyappify_version = None
 pyappify_upgradeable = False
 pyappify_executable = None
 logger = None
+
+# 可选进度回调: progress(done, total, phase)。UI 层注入后能显示下载进度,
+# 纯下载逻辑无回调时零开销; 回调异常绝不能中断更新。
+progress_callback = None
+
+
+def _report_progress(done, total, phase):
+    callback = progress_callback
+    if callback is None:
+        return
+    try:
+        callback(done, total, phase)
+    except Exception as error:
+        _log().warning("Monster-ww update: progress callback failed: %s", error)
+
 
 REPO = "3055909481/Monster-ww"
 API_RELEASES = f"https://api.github.com/repos/{REPO}/releases?per_page=50"
@@ -539,14 +557,19 @@ def _restart_command():
     return {"cmd": [str(executable)] + args, "cwd": os.getcwd()}
 
 
-def _helper_python():
-    """用 pythonw 跑助手, 调试启动 (python.exe) 时也不弹黑框。"""
-    pythonw = Path(sys.executable).with_name("pythonw.exe")
-    return str(pythonw if pythonw.is_file() else sys.executable)
-
-
 def _spawn_helper(plan_path, helper):
-    cmd = [_helper_python(), "-X", "utf8", "-I", str(helper), str(plan_path)]
+    if IS_FROZEN:
+        # Packaged app: the exe itself is the Python runtime (there is no
+        # pythonw.exe to launch). main.py recognises --pyappify-apply before any
+        # GUI import and runs the copied helper. Passing the old
+        # `-X utf8 -I helper.py` here would just start a second GUI instance and
+        # leave apply_update.py untouched, so the update would never be applied.
+        cmd = [sys.executable, "--pyappify-apply", str(plan_path)]
+    else:
+        # Dev / source launch: use pythonw so no console window pops up.
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        python = str(pythonw) if pythonw.is_file() else sys.executable
+        cmd = [python, "-X", "utf8", "-I", str(helper), str(plan_path)]
     flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     try:
         subprocess.Popen(cmd, cwd=str(APP_ROOT), close_fds=True,
@@ -557,6 +580,7 @@ def _spawn_helper(plan_path, helper):
 
 def prepare_update(version, exit_event=None, restart=True):
     """下载并校验 version 要用的文件, 写好 plan.json。返回 (plan, plan 路径)。"""
+    _report_progress(0, 1, '准备更新')
     if is_local_checkout():
         raise RuntimeError("这里是 git 开发目录，不走在线更新，请用 git pull")
     entry = _releases.get(version)
@@ -586,13 +610,19 @@ def prepare_update(version, exit_event=None, restart=True):
     _clean_other_staging(version)
     files_dir = stage / "files"
     build_ref = target.get("build_ref") or target["commit"]
+    total = len(download)
+    _report_progress(0, total, '下载更新文件')
+    done = 0
     with ThreadPoolExecutor(DOWNLOAD_WORKERS) as pool:
         futures = [pool.submit(_download_file, build_ref, version, rel,
                                target["files"][rel]["sha256"],
                                files_dir / rel, exit_event) for rel in download]
         for future in futures:
             future.result()
+            done += 1
+            _report_progress(done, total, '下载更新文件')
 
+    _report_progress(total, total, '安装更新')
     # 用当前版本的助手: plan.json 是当前代码写的, 格式对得上; 拷出去跑, 换掉 pyappify/ 也不影响它
     helper = stage / "apply_update.py"
     shutil.copyfile(HELPER_SCRIPT, helper)
@@ -615,6 +645,7 @@ def prepare_update(version, exit_event=None, restart=True):
 
 def update_to_version(version, exit_event=None, language=None, **_kwargs):
     _plan, plan_path, helper = prepare_update(version, exit_event=exit_event)
+    _report_progress(1, 1, '正在安装并重启')
     _spawn_helper(plan_path, helper)
     # UpdateCard 看到这两个标记就让程序退出, 助手等进程退了再换文件
     return {"updated": True, "restart_required": True}

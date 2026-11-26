@@ -404,5 +404,112 @@ class TestPortableVersion(unittest.TestCase):
         self.assertIn('app_version = _read_version_file()', source)
 
 
+class TestHelperLaunch(unittest.TestCase):
+    """打包版没有 pythonw.exe；助手必须由 app exe 自己以私有参数运行。
+
+    回退到 `app.exe -X utf8 -I helper.py` 只会启动第二个 GUI 实例,
+    apply_update.py 不执行, 在线更新看起来成功但文件一个都没换。
+    """
+
+    def test_frozen_uses_app_exe_with_apply_flag(self):
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            exe = root / 'Monster-ww.exe'
+            exe.write_text('', encoding='utf-8')
+            plan = root / 'plan.json'
+            plan.write_text('{}', encoding='utf-8')
+            calls = []
+            real_exe = sys.executable
+            try:
+                sys.executable = str(exe)
+                with patch.object(pyappify, 'APP_ROOT', root), \
+                     patch.object(pyappify, 'IS_FROZEN', True), \
+                     patch.object(pyappify.subprocess, 'Popen',
+                                  side_effect=lambda cmd, **kw: calls.append(cmd)):
+                    pyappify._spawn_helper(plan, root / 'apply_update.py')
+            finally:
+                sys.executable = real_exe
+        self.assertTrue(calls)
+        cmd = calls[0]
+        self.assertEqual(cmd[0], str(exe))
+        self.assertIn('--pyappify-apply', cmd)
+        self.assertIn(str(plan), cmd)
+        self.assertNotIn('-X', cmd)  # exe 不认 Python 解释器参数
+
+    def test_source_launch_uses_pythonw(self):
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            pythonw = root / 'pythonw.exe'
+            pythonw.write_text('', encoding='utf-8')
+            plan = root / 'plan.json'
+            plan.write_text('{}', encoding='utf-8')
+            helper = root / 'apply_update.py'
+            calls = []
+            real_exe = sys.executable
+            try:
+                sys.executable = str(root / 'python.exe')
+                with patch.object(pyappify, 'APP_ROOT', root), \
+                     patch.object(pyappify, 'IS_FROZEN', False), \
+                     patch.object(pyappify.subprocess, 'Popen',
+                                  side_effect=lambda cmd, **kw: calls.append(cmd)):
+                    pyappify._spawn_helper(plan, helper)
+            finally:
+                sys.executable = real_exe
+        cmd = calls[0]
+        self.assertEqual(cmd[0], str(pythonw))
+        self.assertIn('-I', cmd)
+        self.assertIn(str(helper), cmd)
+
+    def test_main_handles_apply_flag_before_gui_imports(self):
+        from pathlib import Path
+        source = Path('main.py').read_text(encoding='utf-8')
+        self.assertIn("'--pyappify-apply' in _sys.argv", source)
+        self.assertIn("runpy.run_path", source)
+        # The helper dispatch must sit before the first GUI/framework import.
+        flag_at = source.index('--pyappify-apply')
+        gui_at = source.index('from src.identity import')
+        self.assertLess(flag_at, gui_at)
+
+
+class TestUpdateProgress(unittest.TestCase):
+
+    def test_report_progress_passes_phase_and_counts(self):
+        seen = []
+        original = pyappify.progress_callback
+        try:
+            pyappify.progress_callback = lambda done, total, phase: seen.append((done, total, phase))
+            pyappify._report_progress(3, 10, '下载更新文件')
+        finally:
+            pyappify.progress_callback = original
+        self.assertEqual(seen, [(3, 10, '下载更新文件')])
+
+    def test_failing_callback_never_breaks_update(self):
+        def boom(done, total, phase):
+            raise RuntimeError('ui gone')
+        original = pyappify.progress_callback
+        try:
+            pyappify.progress_callback = boom
+            pyappify._report_progress(1, 2, '安装更新')  # must not raise
+        finally:
+            pyappify.progress_callback = original
+
+    def test_prepare_and_update_report_progress(self):
+        from pathlib import Path
+        source = Path('pyappify/__init__.py').read_text(encoding='utf-8')
+        self.assertIn("_report_progress(0, 1, '准备更新')", source)
+        self.assertIn("_report_progress(0, total, '下载更新文件')", source)
+        self.assertIn("_report_progress(done, total, '下载更新文件')", source)
+        self.assertIn("_report_progress(total, total, '安装更新')", source)
+        self.assertIn("_report_progress(1, 1, '正在安装并重启')", source)
+
+    def test_ui_patch_injects_progress_callback(self):
+        from pathlib import Path
+        source = Path('src/update_confirm.py').read_text(encoding='utf-8')
+        self.assertIn("setattr(module, 'progress_callback', progress)", source)
+        self.assertIn('QTimer.singleShot(0, apply)', source)  # UI thread safety
+
+
 if __name__ == "__main__":
     unittest.main()
