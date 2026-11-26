@@ -42,7 +42,9 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
         here (every click goes through it) prevents further account switches
         even while a nested task is still unwinding.
         """
-        if not self.enabled:
+        # Default to "not stopped" when the attribute is absent (test stubs and
+        # hand-built task objects); only an explicit False means user stopped.
+        if getattr(self, 'enabled', True) is False:
             raise TaskDisabledException('multi-account task stopped')
 
     def click(self, x=-1, y=-1, *args, **kwargs):

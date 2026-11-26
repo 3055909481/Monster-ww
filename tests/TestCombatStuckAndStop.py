@@ -40,7 +40,7 @@ class MultiAccountStopTest(unittest.TestCase):
 
     def test_stop_check_exists_and_guards_click(self):
         self.assertIn('def _check_stopped(self):', self.source)
-        self.assertIn('if not self.enabled:', self.source)
+        self.assertIn("getattr(self, 'enabled', True) is False", self.source)
         self.assertIn('raise TaskDisabledException', self.source)
         click = next(n for n in ast.walk(ast.parse(self.source))
                      if isinstance(n, ast.FunctionDef) and n.name == 'click')
