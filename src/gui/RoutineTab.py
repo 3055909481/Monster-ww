@@ -83,8 +83,12 @@ class _StepRow(QWidget):
 
         glyph = QLabel(self)
         glyph.setFixedSize(18, 18)
-        icon = kit_icon(entry.icon, 'text_secondary')
-        glyph.setPixmap(icon.pixmap(QSize(16, 16), self.devicePixelRatioF()))
+        try:
+            icon = kit_icon(entry.icon, 'text_secondary')
+            glyph.setPixmap(icon.pixmap(QSize(16, 16), self.devicePixelRatioF()))
+        except Exception:
+            # A bad icon must not prevent the whole step row from being built.
+            pass
         layout.addWidget(glyph)
 
         name = Label(entry.name, 'strong' if enabled else 'secondary', self)

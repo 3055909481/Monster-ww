@@ -1,15 +1,38 @@
 """Guards the per-step metadata the routine editor renders."""
 
+import re
 import unittest
+from pathlib import Path
 
 from src.task.routine.RoutinePlans import (
     ENTRIES, ENTRIES_BY_ID, NIGHTMARE_MODE_ALL, NIGHTMARE_MODE_CAPTURE,
     NIGHTMARE_TARGETS, describe_params, nightmare_nest_runtime_config, stamina_text,
 )
 
-# Icons the kit ships; a typo here would leave a blank row in the editor.
-KIT_ICONS = {'bell', 'pulse', 'calendar', 'bolt', 'layers', 'grid', 'scan',
-             'history', 'tasks', 'nightmare'}
+
+def kit_icon_names():
+    """Read the framework's real icon whitelist.
+
+    A hand-written copy once listed ``nightmare`` as valid; that let an invalid
+    icon through and left the step's row blank in the editor. Always verify
+    against the shipped source instead of a local duplicate.
+    """
+    candidates = []
+    try:
+        from Mon.ui.qt.kit import icons as kit_icons
+        candidates.append(Path(kit_icons.__file__))
+    except ImportError:
+        pass
+    vendored = Path('.mon-tmp/Mon/ui/qt/kit/icons.py')
+    if vendored.is_file():
+        candidates.append(vendored)
+    if not candidates:
+        raise AssertionError('Cannot locate Mon kit icons module')
+    source = candidates[0].read_text(encoding='utf-8')
+    whitelist = set(re.findall(r'"([a-z0-9-]+)"\s*:', source))
+    if not whitelist:
+        raise AssertionError('Could not parse kit icon whitelist')
+    return whitelist
 
 
 class RoutineCatalogMetadataTest(unittest.TestCase):
@@ -20,9 +43,10 @@ class RoutineCatalogMetadataTest(unittest.TestCase):
                 self.assertTrue(entry.description.endswith('。'), entry.description)
 
     def test_every_step_uses_a_kit_icon(self):
+        whitelist = kit_icon_names()
         for entry in ENTRIES:
             with self.subTest(step=entry.task_id):
-                self.assertIn(entry.icon, KIT_ICONS)
+                self.assertIn(entry.icon, whitelist)
 
     def test_stamina_matches_the_known_costs(self):
         for entry in ENTRIES:
@@ -78,7 +102,7 @@ class NightmareNestStepTest(unittest.TestCase):
     def test_entry_is_a_free_configurable_step(self):
         entry = ENTRIES_BY_ID['nightmare_nest']
         self.assertEqual(entry.stamina, 0)
-        self.assertEqual(entry.icon, 'nightmare')
+        self.assertEqual(entry.icon, 'bug')
         self.assertEqual(entry.default_config['模式'], NIGHTMARE_MODE_ALL)
         self.assertEqual(entry.default_config['刷取目标'], list(NIGHTMARE_TARGETS))
         self.assertIn('运行日', entry.default_config)

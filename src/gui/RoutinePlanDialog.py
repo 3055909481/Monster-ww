@@ -139,8 +139,13 @@ class _StepDelegate(QStyledItemDelegate):
 
         if entry is not None:
             icon_rect = QRectF(inner.left() + ICON_LEFT, inner.center().y() - 8, 16, 16)
-            kit_icon(entry.icon, 'text_secondary').paint(painter, icon_rect.toRect(),
-                                                       Qt.AlignmentFlag.AlignCenter)
+            try:
+                kit_icon(entry.icon, 'text_secondary').paint(painter, icon_rect.toRect(),
+                                                           Qt.AlignmentFlag.AlignCenter)
+            except Exception:
+                # A bad icon name must never swallow the step label: the paint
+                # event is already past the check box, so keep drawing text.
+                pass
 
             name_left = inner.left() + TEXT_LEFT
             name_width = inner.right() - 14 - name_left

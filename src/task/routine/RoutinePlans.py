@@ -212,7 +212,7 @@ def _build_entries():
                       '刷取目标': {'type': 'multi_selection', 'options': list(NIGHTMARE_TARGETS)},
                       **days_type},
                      description='自动清梦魇巢穴或仅补一个日常声骸，不消耗体力。',
-                     icon='nightmare', stamina=0),
+                     icon='bug', stamina=0),
         RoutineEntry('boss_challenge', '讨伐强敌', '清体力',
                      {'BOSS': catalog.boss_challenges()[0], '次数': 1},
                      {'BOSS': '获取共鸣者突破材料；一次 60 体力。',
