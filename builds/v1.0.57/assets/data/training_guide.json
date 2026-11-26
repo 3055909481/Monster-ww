@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "note": "第2期培养目标规划：副本单次产出材料数量默认值 + 体力消耗。数值可在界面逐行覆盖。产出量为常见值，实际以游戏为准。",
+  "stamina": {
+    "simulation": 40,
+    "forgery": 40,
+    "tacet": 60,
+    "boss_challenge": 60,
+    "weekly_boss": 60
+  },
+  "default_yield": {
+    "simulation": 1,
+    "forgery": 2,
+    "tacet": 1,
+    "boss_challenge": 1,
+    "weekly_boss": 1
+  },
+  "domain_types": [
+    {
+      "id": "simulation",
+      "name": "模拟领域",
+      "material_hint": "共鸣促剂（角色经验）/ 能源核心（武器经验）/ 贝币",
+      "locator": ["地区", "材料"],
+      "stamina": 40
+    },
+    {
+      "id": "forgery",
+      "name": "凝素领域",
+      "material_hint": "武器与技能素材（按武器类型）",
+      "locator": ["地区", "武器类型"],
+      "stamina": 40
+    },
+    {
+      "id": "tacet",
+      "name": "无音清剿",
+      "material_hint": "声骸材料 / 声骸经验",
+      "locator": ["无音区"],
+      "stamina": 60
+    },
+    {
+      "id": "boss_challenge",
+      "name": "讨伐强敌",
+      "material_hint": "共鸣者突破材料（按 BOSS）",
+      "locator": ["BOSS"],
+      "stamina": 60
+    },
+    {
+      "id": "weekly_boss",
+      "name": "战歌重奏",
+      "material_hint": "高级技能材料 / 周常（按周本）",
+      "locator": ["周本"],
+      "stamina": 60
+    }
+  ],
+  "material_groups": [
+    "共鸣者突破材料",
+    "武器与技能素材",
+    "突破材料",
+    "技能升级材料",
+    "声骸材料",
+    "经验与货币"
+  ],
+  "common_materials": [
+    "共鸣促剂",
+    "能源核心",
+    "贝币"
+  ]
+}
