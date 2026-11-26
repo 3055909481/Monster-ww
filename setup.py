@@ -27,7 +27,7 @@ from setuptools import Extension
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
 ROOT = pathlib.Path(__file__).resolve().parent
-EXCLUDE_FILES = {"__init__.py", "identity.py", "schedule_patch.py", "adaptive_interval.py", "team_overlay.py", "click_jitter.py",
+EXCLUDE_FILES = {"__init__.py", "identity.py", "schedule_patch.py", "adaptive_interval.py", "team_overlay.py", "click_jitter.py", "update_confirm.py",
                  # 跑轴记录给框架类 patch 嵌套函数作为方法(axis_mark); Cython 编译后
                  # cyfunction 不绑定 self, 与 identity.py 同理, 必须保留纯 Python 源码。
                  "recorder.py"}

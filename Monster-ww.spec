@@ -42,7 +42,7 @@ if (root / 'config.cp312-win_amd64.pyd').is_file():
     datas.append((str(root / 'config.cp312-win_amd64.pyd'), '.'))
 # Patch modules must stay as source (runtime monkeypatches need real descriptors).
 for name in ('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py',
-             'team_overlay.py', 'click_jitter.py'):
+             'team_overlay.py', 'click_jitter.py', 'update_confirm.py'):
     src = root / 'src' / name
     if src.is_file():
         datas.append((str(src), 'src'))

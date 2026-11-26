@@ -53,8 +53,14 @@ def _selected_version_info(card):
     return title, notes
 
 
-def update_to_selected_version(self):
-    """包装原方法：先确认，再真正开始更新。"""
+def update_to_selected_version(self, checked=False):
+    """包装原方法：先确认，再真正开始更新。
+
+    ``checked`` absorbs the bool Qt's ``clicked`` signal passes when this is
+    wired directly to the Update button (the framework's own method relies on
+    PyQt dropping that extra arg; keeping it explicit makes both call paths
+    safe and keeps the function a plain Python descriptor after packaging).
+    """
     global _ORIGINAL
     title, notes = _selected_version_info(self)
     message = _tr('即将下载并安装更新：{version}').format(version=title or _tr('选中版本'))

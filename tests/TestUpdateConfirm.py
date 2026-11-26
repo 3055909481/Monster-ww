@@ -60,6 +60,29 @@ class TestUpdateConfirm(unittest.TestCase):
         title, notes = update_confirm._selected_version_info(card)
         self.assertEqual(('', ''), (title, notes))
 
+    def test_qt_clicked_bool_is_accepted(self):
+        """Qt's clicked(bool) signal may pass a checked flag to the slot."""
+        original = Mock(return_value='done')
+        with patch.object(update_confirm, '_ORIGINAL', original), \
+             patch.object(update_confirm, '_confirm', return_value=True):
+            card = make_card()
+            result = update_confirm.update_to_selected_version(card, False)
+        original.assert_called_once_with(card)
+        self.assertEqual('done', result)
+
+    def test_stays_pure_python_when_packaged(self):
+        """Cython cyfunctions cannot bind self when assigned onto framework classes.
+
+        This patch is installed as UpdateCard.update_to_selected_version, so it
+        MUST be excluded from .pyd compilation and shipped as source.
+        """
+        from pathlib import Path
+
+        setup_source = Path('setup.py').read_text(encoding='utf-8')
+        self.assertIn('"update_confirm.py"', setup_source)
+        spec_source = Path('Monster-ww.spec').read_text(encoding='utf-8')
+        self.assertIn("'update_confirm.py'", spec_source)
+
     def test_install_patches_update_card_once(self):
         fake_card_class = type('FakeUpdateCard', (), {'update_to_selected_version': lambda self: None})
         fake_module = SimpleNamespace(UpdateCard=fake_card_class)
