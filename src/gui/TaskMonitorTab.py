@@ -10,7 +10,7 @@ import time
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -110,7 +110,7 @@ class TaskMonitorTab(CustomTab):
         trigger_header = QHBoxLayout()
         trigger_header.addWidget(QLabel(self.tr('触发类任务'), body))
         trigger_header.addStretch(1)
-        self.trigger_stop_all = QPushButton(self.tr('停止全部'), body)
+        self.trigger_stop_all = Button(self.tr('停止全部'), parent=body, size='small')
         self.trigger_stop_all.clicked.connect(lambda: self._stop_group('trigger'))
         trigger_header.addWidget(self.trigger_stop_all)
         layout.addLayout(trigger_header)
@@ -121,7 +121,7 @@ class TaskMonitorTab(CustomTab):
         manual_header = QHBoxLayout()
         manual_header.addWidget(QLabel(self.tr('手动任务'), body))
         manual_header.addStretch(1)
-        self.manual_stop_all = QPushButton(self.tr('停止全部'), body)
+        self.manual_stop_all = Button(self.tr('停止全部'), parent=body, size='small')
         self.manual_stop_all.clicked.connect(lambda: self._stop_group('manual'))
         manual_header.addWidget(self.manual_stop_all)
         layout.addLayout(manual_header)
@@ -200,7 +200,7 @@ class TaskMonitorTab(CustomTab):
                     item.setText(value)
             button = table.cellWidget(row, 4)
             if button is None:
-                button = QPushButton(self.tr('停止'), table)
+                button = Button(self.tr('停止'), parent=table, variant='subtle', size='small')
                 button.clicked.connect(self._on_row_stop)
                 table.setCellWidget(row, 4, button)
             # Keep the mapping in a plain Python dict (setProperty would store

@@ -92,6 +92,25 @@ class TestThemedInputDialog(unittest.TestCase):
             self.assertIn(title, source, path)
 
 
+class TestThemeConsistency(unittest.TestCase):
+    """自建滚动内容与按钮必须命中 kit 主题，不能露出原生浅色块。"""
+
+    def test_scroll_contents_carry_kit_object_name(self):
+        for path in ('src/gui/CustomFlowDialog.py', 'src/gui/RoutinePlanDialog.py'):
+            source = Path(path).read_text(encoding='utf-8')
+            # 自建的 info_page / 空表单都必须带 scrollContents；
+            # 上游 ConfigForm 自带该 objectName，不需要也不应重复设置。
+            self.assertIn("self.info_page.setObjectName('scrollContents')", source, path)
+            self.assertGreaterEqual(source.count("setObjectName('scrollContents')"), 3, path)
+
+    def test_task_monitor_buttons_are_kit_buttons(self):
+        source = Path('src/gui/TaskMonitorTab.py').read_text(encoding='utf-8')
+        self.assertNotIn('QPushButton(', source)
+        self.assertIn('from Mon.ui.qt.kit.buttons import Button', source)
+        self.assertIn("Button(self.tr('停止'), parent=table, variant='subtle', size='small')", source)
+        self.assertEqual(2, source.count("Button(self.tr('停止全部'), parent=body, size='small')"))
+
+
 class TestFixedStaminaCost(unittest.TestCase):
     """各副本单次体力固定，不给用户可配置项；双倍由 use_stamina 按 once*2 推导。"""
 

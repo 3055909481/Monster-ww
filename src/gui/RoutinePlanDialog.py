@@ -338,6 +338,7 @@ class RoutinePlanDialog(Dialog):
         self.info_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.info_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.info_page = QWidget(self.info_scroll)
+        self.info_page.setObjectName('scrollContents')  # 让 kit 的透明背景规则命中，避免浅色块
         self.info_layout = QVBoxLayout(self.info_page)
         self.info_layout.setContentsMargins(0, 0, 0, 0)
         self.info_layout.setSpacing(10)
@@ -411,7 +412,9 @@ class RoutinePlanDialog(Dialog):
             self.reset_button.setEnabled(False)
             self.tabs.setEnabled(False)
             self.pages.setEnabled(False)
-            self.form_scroll.setWidget(QWidget(self.form_scroll))
+            empty = QWidget(self.form_scroll)
+            empty.setObjectName('scrollContents')
+            self.form_scroll.setWidget(empty)
             return
         self.tabs.setEnabled(True)
         self.pages.setEnabled(True)
@@ -431,6 +434,7 @@ class RoutinePlanDialog(Dialog):
             self.form_scroll.setWidget(self._form)
         else:
             self._form = QWidget(self.form_scroll)
+            self._form.setObjectName('scrollContents')
             empty_layout = QVBoxLayout(self._form)
             empty_layout.setContentsMargins(0, 8, 0, 0)
             empty_layout.setSpacing(6)
