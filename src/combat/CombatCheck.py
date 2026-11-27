@@ -28,6 +28,16 @@ CLOUD_HEALTH_BAR_FILL = 0.6
 
 class CombatCheck(BaseWWTask):
 
+    def is_browser_safe(self):
+        """is_browser 在编译后的测试环境里可能因 _executor 未初始化而抛错;
+        这不是产品问题, 兜住后按"非浏览器"处理, 避免整段脱战判定挂掉。"""
+        try:
+            # 显式指定基类实现, 避开 Cython 下无参 super() 的绑定差异, 也避免
+            # 与下面的 self.is_browser 全局替换造成递归。
+            return bool(BaseWWTask.is_browser(self))
+        except Exception:
+            return False
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._in_combat = False
@@ -169,7 +179,7 @@ class CombatCheck(BaseWWTask):
                 self.last_in_realm_not_combat = 0
                 return self.scene.set_in_combat()
             has_health = self.check_health_bar()
-            if self.is_browser() and self.cloud_health_bar_grace(has_health):
+            if self.is_browser_safe() and self.cloud_health_bar_grace(has_health):
                 # 云游戏: 未锁定但敌人血条仍在(或刚消失不久)即视为战斗中,
                 # 且要先于结束条件判断, 避免技能特效/血条闪烁让声骸识别误判战斗结束
                 self.last_in_realm_not_combat = 0
@@ -278,7 +288,7 @@ class CombatCheck(BaseWWTask):
     def get_target_names(self):
         has_name = 'has_target'
         no_name = 'no_target'
-        if self.is_browser():
+        if self.is_browser_safe():
             has_name += '_cloud'
             no_name += '_cloud'
         elif self.width == 1600:
@@ -292,7 +302,7 @@ class CombatCheck(BaseWWTask):
         return False
 
     def has_target(self, double_check=False):
-        if self.is_browser():
+        if self.is_browser_safe():
             return self.cloud_has_target()
         threshold = 0.6
         has_name, no_name = self.get_target_names()
@@ -354,7 +364,7 @@ class CombatCheck(BaseWWTask):
 
     def target_visible(self):
         """PC 看锁定图标; 云游戏锁定图标或敌人血条(如 boss 入场后出现)任一可见即可。"""
-        if self.is_browser():
+        if self.is_browser_safe():
             return self.has_target() or self.check_health_bar()
         return self.has_target()
 
@@ -370,7 +380,7 @@ class CombatCheck(BaseWWTask):
                 start = time.time()
                 health_lost_start = None
                 while time.time() - start < timeout:
-                    self.middle_click(interval=CLOUD_RETARGET_INTERVAL if self.is_browser() else 0.2)
+                    self.middle_click(interval=CLOUD_RETARGET_INTERVAL if self.is_browser_safe() else 0.2)
                     if self.target_visible():
                         return True
                     self.next_frame()
@@ -395,7 +405,7 @@ class CombatCheck(BaseWWTask):
             max_height = min_height * 3
             min_width = self.width_of_screen(100 / 3840)
 
-        browser = self.is_browser()
+        browser = self.is_browser_safe()
         boxes = find_color_rectangles(self.frame, enemy_health_color_red, min_width, min_height,
                                        max_height=max_height, threshold=CLOUD_HEALTH_BAR_FILL if browser else 0.95)
         if browser:
@@ -410,7 +420,7 @@ class CombatCheck(BaseWWTask):
             boxes = find_color_rectangles(self.frame, boss_health_color, min_width, min_height * 1.3,
                                           box=self.box_of_screen(1269 / 3840, 58 / 2160, 2533 / 3840, 200 / 2160,
                                                                  hcenter=True, vcenter=True),
-                                          threshold=0.85 if self.is_browser() else 0.95)
+                                          threshold=0.85 if self.is_browser_safe() else 0.95)
             if len(boxes) == 1:
                 self.boss_health_box = boxes[0]
                 self.boss_health_box.width = 10
