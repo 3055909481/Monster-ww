@@ -607,7 +607,15 @@ class RoutinePlanDialog(Dialog):
         self._sync_buttons()
 
     def _new_plan(self):
-        name, ok = QInputDialog.getText(self, self.task.tr('新建计划'), self.task.tr('计划名称'))
+        # 静态 QInputDialog.getText() 的原生弹窗不继承主窗口深色 stylesheet,
+        # 用实例 + theme.install 让它跟随主题(weakref 注册, 关闭后自动清理)。
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle(self.task.tr('新建计划'))
+        dialog.setLabelText(self.task.tr('计划名称'))
+        dialog.setTextValue('')
+        theme.install(dialog)
+        ok = dialog.exec() == QInputDialog.Accepted
+        name = dialog.textValue() if ok else ''
         if not ok or not name.strip():
             return
         name = name.strip()

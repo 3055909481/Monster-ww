@@ -575,7 +575,16 @@ class CustomFlowDialog(Dialog):
         self._sync_buttons()
 
     def _new_flow(self):
-        name, ok = QInputDialog.getText(self, self.task.tr('新建任务流'), self.task.tr('任务流名称'))
+        # 静态 QInputDialog.getText() 创建的是原生弹窗, 不继承主窗口的深色
+        # stylesheet, 在深色主题下显示为刺眼的浅色块。用实例 + theme.install
+        # 让它跟随主题(weakref 注册, 关闭后自动清理)。
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle(self.task.tr('新建任务流'))
+        dialog.setLabelText(self.task.tr('任务流名称'))
+        dialog.setTextValue('')
+        theme.install(dialog)
+        ok = dialog.exec() == QInputDialog.Accepted
+        name = dialog.textValue() if ok else ''
         if not ok or not name.strip():
             return
         name = name.strip()
