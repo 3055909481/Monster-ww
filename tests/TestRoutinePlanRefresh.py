@@ -6,6 +6,7 @@
 """
 
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from src.task.RoutineTask import RoutineTask
@@ -48,6 +49,27 @@ class TestConfigurePlansRefresh(unittest.TestCase):
         self._run_configure(on_saved, False, refresh)
         on_saved.assert_not_called()
         refresh.assert_not_called()
+
+
+class TestAddStepAfterSelection(unittest.TestCase):
+    """添加步骤时插入到选中条目之后, 而不是一律追加到末尾。"""
+
+    def _add_step_source(self, path):
+        source = Path(path).read_text(encoding='utf-8')
+        start = source.index('    def _add_step(self):')
+        end = source.index('    def _delete_step(self):', start)
+        return source[start:end]
+
+    def test_routine_plan_inserts_after_current_row(self):
+        body = self._add_step_source('src/gui/RoutinePlanDialog.py')
+        self.assertIn('current_row = self.step_list.currentRow()', body)
+        self.assertIn('self.step_list.insertItem(current_row + 1, widget_item)', body)
+        self.assertIn('self.step_list.addItem(widget_item)', body)  # 无选中时兜底
+
+    def test_custom_flow_inserts_after_current_row(self):
+        body = self._add_step_source('src/gui/CustomFlowDialog.py')
+        self.assertIn('current_row = self.step_list.currentRow()', body)
+        self.assertIn('self.step_list.insertItem(current_row + 1, widget_item)', body)
 
 
 if __name__ == '__main__':

@@ -540,7 +540,12 @@ class CustomFlowDialog(Dialog):
         widget_item.setData(UID_ROLE, item['uid'])
         widget_item.setData(PARAMS_ROLE, deepcopy(item['params']))
         widget_item.setToolTip(entry.description or entry.name)
-        self.step_list.addItem(widget_item)
+        # 插到选中条目之后, 方便按执行顺序连续编排; 没有选中时仍追加到末尾。
+        current_row = self.step_list.currentRow()
+        if current_row >= 0:
+            self.step_list.insertItem(current_row + 1, widget_item)
+        else:
+            self.step_list.addItem(widget_item)
         self.step_list.setCurrentItem(widget_item)
         self.flows[self.active_name] = self._collect_steps()
         self._sync_buttons()
