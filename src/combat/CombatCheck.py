@@ -32,9 +32,9 @@ class CombatCheck(BaseWWTask):
         """is_browser 在编译后的测试环境里可能因 _executor 未初始化而抛错;
         这不是产品问题, 兜住后按"非浏览器"处理, 避免整段脱战判定挂掉。"""
         try:
-            # 显式指定基类实现, 避开 Cython 下无参 super() 的绑定差异, 也避免
-            # 与下面的 self.is_browser 全局替换造成递归。
-            return bool(BaseWWTask.is_browser(self))
+            # 调实例方法本身(可被测试 mock), 仅当框架未初始化 _executor 时兜底。
+            # 注意这里调用的是 is_browser 而非 is_browser_safe, 不会递归。
+            return bool(self.is_browser())
         except Exception:
             return False
 
