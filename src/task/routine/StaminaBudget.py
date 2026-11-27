@@ -44,7 +44,7 @@ class StaminaWaitLedger:
     def __init__(self, folder='configs'):
         self.path = Path(folder) / LEDGER_NAME
 
-    def load(self):
+    def load(self, now=None):
         try:
             with self.path.open(encoding='utf-8') as stream:
                 data = json.load(stream)
@@ -53,14 +53,17 @@ class StaminaWaitLedger:
         if not isinstance(data, dict):
             return {}
         # Drop entries from past game-days so the file stays small.
-        today = reset_day().isoformat()
+        # Use the same `now` as the caller's day_key so read/write stay in the
+        # same game-day context (important for tests with a fixed date and for
+        # callers that query a specific day).
+        today = reset_day(now).isoformat()
         return {key: value for key, value in data.items()
                 if isinstance(key, str) and key.split('|', 1)[0] == today
                 and isinstance(value, (int, float))}
 
     def waited(self, now=None, account=''):
         """How much stamina this account has already waited for today."""
-        return float(self.load().get(day_key(now, account), 0) or 0)
+        return float(self.load(now=now).get(day_key(now, account), 0) or 0)
 
     def remaining(self, now=None, account=''):
         """Remaining wait budget for today (never negative)."""
@@ -69,7 +72,7 @@ class StaminaWaitLedger:
     def add(self, amount, now=None, account=''):
         """Record ``amount`` of stamina gained by waiting and return the total."""
         amount = max(0.0, float(amount or 0))
-        data = self.load()
+        data = self.load(now=now)
         key = day_key(now, account)
         value = min(DAILY_STAMINA_CAP, float(data.get(key, 0) or 0) + amount)
         data[key] = value
