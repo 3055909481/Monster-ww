@@ -39,9 +39,7 @@ class Carlotta(BaseChar):
             return self.switch_next_char()
         if self.liberation_available() and not self.need_fast_perform():
             auto_dodge = -1
-            lib_loop_start = time.time()
-            # 图标亮着却放不出(空中/被控)最多点 8 秒
-            while self.liberation_available() and time.time() - lib_loop_start < 8:
+            while self.liberation_available():
                 if auto_dodge != -1 and time.time() - auto_dodge > 0.5 and self.flying():
                     self.shorekeeper_auto_dodge()
                 if self.click_liberation_1():
@@ -53,7 +51,7 @@ class Carlotta(BaseChar):
         if self.resonance_available():
             if self.bullet == 0:
                 self.heavy_attack()
-            if self.click_resonance(time_out=1)[0]:
+            if self.click_resonance()[0]:
                 return self.switch_next_char()
         if self.click_echo():
             return self.switch_next_char()
@@ -61,22 +59,16 @@ class Carlotta(BaseChar):
         self.switch_next_char()
 
     def click_liberation_1(self):
-        if not self.task.use_liberation:
-            return False
         if self.press_w == 1:
             self.task.send_key_down(key='w')
-            try:
-                click = self.click_liberation()
-            finally:
-                self.task.send_key_up(key='w')
+            click = self.click_liberation()
+            self.task.send_key_up(key='w')
             return click
         else:
             return self.click_liberation()
 
     def click_liberation(self, con_less_than=-1, send_click=False, wait_if_cd_ready=0.1,
                          animation_min_duration=0, click_f=True):
-        if not self.task.use_liberation:
-            return False
         self.logger.debug('click_liberation start')
         start = time.time()
         last_click = 0
@@ -218,7 +210,7 @@ class Carlotta(BaseChar):
         if self.get_forte() < 4 and self.resonance_available() and not self.liberation_ready:
             if self.bullet == 0:
                 self.heavy_attack()
-            if self.click_resonance(time_out=1)[0]:
+            if self.click_resonance()[0]:
                 self.forte += 2
                 self.switch_lock = time.time()
                 return self.switch_next_char()
@@ -229,9 +221,7 @@ class Carlotta(BaseChar):
             return self.switch_next_char()
         if self.liberation_available() and self.continue_liberation:
             auto_dodge = -1
-            lib_loop_start = time.time()
-            # 图标亮着却放不出(空中/被控)最多点 8 秒
-            while self.liberation_available() and time.time() - lib_loop_start < 8:
+            while self.liberation_available():
                 if auto_dodge != -1 and time.time() - auto_dodge > 0.5 and self.flying():
                     self.shorekeeper_auto_dodge()
                 if self.click_liberation():
@@ -251,7 +241,7 @@ class Carlotta(BaseChar):
         if not self.liberation_ready:
             while not self.is_mouse_forte_full():
                 if self.resonance_available():
-                    self.click_resonance(time_out=1)
+                    self.click_resonance()
                 else:
                     self.click_with_interval()
                 if self.time_elapsed_accounting_for_freeze(self.last_perform) > 6:
@@ -261,17 +251,15 @@ class Carlotta(BaseChar):
             self.liberation_ready = True
             self.forte = 0
         self.check_combat()
-        self._liberation_available = False
-        self._resonance_available = False
+        self._liberation_available == False
+        self._resonance_available == False
         click = False
         liber = False
         if self.liberation_ready:
             while self.time_elapsed_accounting_for_freeze(self.last_perform) < 14:
                 if self.liberation_available() and not liber:
                     auto_dodge = -1
-                    lib_loop_start = time.time()
-                    # 图标亮着却放不出(空中/被控)最多点 8 秒
-                    while self.liberation_available() and time.time() - lib_loop_start < 8:
+                    while self.liberation_available():
                         if auto_dodge != -1 and time.time() - auto_dodge > 0.5 and self.flying():
                             self.shorekeeper_auto_dodge()
                         if self.click_liberation():
@@ -282,7 +270,7 @@ class Carlotta(BaseChar):
                         self.check_combat()
                     if liber:
                         self.sleep(0.2)
-                if self.click_resonance(time_out=1)[0]:
+                if self.click_resonance()[0]:
                     self.continues_normal_attack(0.8)
                     self.forte += 1
                     click = True
@@ -342,7 +330,7 @@ class Carlotta(BaseChar):
     def shorekeeper_auto_dodge(self):
         from src.char.ShoreKeeper import ShoreKeeper
         for i, char in enumerate(self.task.chars):
-            if char is not None and char.is_character(ShoreKeeper):
+            if isinstance(char, ShoreKeeper):
                 return char.auto_dodge(condition=self.flying)
 
 

@@ -121,7 +121,7 @@ class Brant(BaseChar):
         from src.char.Lupa import Lupa
         for _, char in enumerate(self.task.chars):
             self.logger.debug(f'teammate char: {char.char_name}')
-            if char is not None and char.is_character(Lupa):
+            if isinstance(char, Lupa):
                 self.char_lupa = char
                 self.attribute = 1
                 return

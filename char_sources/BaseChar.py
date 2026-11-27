@@ -9,14 +9,7 @@ from Mon import Config, Logger  # noqa
 from src import text_white_color  # noqa
 
 SKILL_TIME_OUT = 15
-# 按下 E 后图标仍显示可用超过这么久就停按（技能有层数/后续形态/按键被游戏忽略）。
-# 上游 3.0.15：否则会一直白等到 15 秒技能超时，角色长时间占场。
-RESONANCE_STILL_READY_TIME_OUT = 2
-
-
-class CharPerformTimeout(Exception):
-    """原生角色单次上场超过硬上限时由战斗任务抛出, 只在 BaseChar.perform 里接住。"""
-    pass
+RESONANCE_STILL_READY_TIME_OUT = 2  # stop pressing E once it has stayed ready this long after the first press
 
 
 class CharType(StrEnum):
@@ -72,13 +65,6 @@ class BaseChar:
     """
 
     HEALER_FULL_CON_SWITCH_LOCKOUT = 16.0
-    # 原生 do_perform 单次上场的硬上限(秒, 扣除大招/变奏时停)。到点就松开所有按键并强制切人,
-    # 防止读屏判据失灵时在一个角色身上死循环。站场久的角色在子类里调大。
-    # 自定义队伍代码重写了 do_perform 的不受这个限制(宏自己管时间)。
-    PERFORM_HARD_TIMEOUT = 30.0
-    # click_liberation 连按多久大招图标还亮着就放弃
-    LIBERATION_CLICK_TIME_OUT = 5.0
-    NATIVE_SKILL_TIME_OUT = 3.0
 
     def __init__(self, task, index, char_name=None, confidence=1, ring_index=-1, char_type=CharType.MAIN_DPS,
                  buff_time=None):
@@ -126,22 +112,6 @@ class BaseChar:
         self.cycle_intro_time = 1.2
         self.target_box_short_combat_check = False
 
-    def is_character(self, character_cls):
-        """按游戏身份匹配角色，不受自定义轮转继承关系影响。
-
-        工坊自定义角色代码会继承内置角色类，用 isinstance 会把自定义角色
-        误判成内置角色；这里以 char_dict 注册的 cls 为准（xjtu 1.2.0 fix）。
-        """
-        name = getattr(self, 'char_name', None)
-        if not name:
-            return isinstance(self, character_cls)
-        try:
-            from src.char.CharFactory import char_dict
-            info = char_dict.get(name)
-            return info is not None and issubclass(info['cls'], character_cls)
-        except Exception:
-            return isinstance(self, character_cls)
-
     def set_char_type(self, char_type=CharType.MAIN_DPS):
         """设置角色定位，默认为主输出。"""
         self._char_type = CharType(char_type or CharType.MAIN_DPS)
@@ -177,16 +147,6 @@ class BaseChar:
 
     def get_buff_time(self):
         return self._buff_time
-
-    def burst_intro(self):
-        """这次上场是不是主C的爆发窗口: 有副C的队只认副C变奏入场(吃延奏增伤),
-        队里没副C就任何变奏入场都算, 不然配奶妈队永远打不出整套。"""
-        if self.has_sub_dps_intro:
-            return True
-        if not self.has_intro:
-            return False
-        teammates = [c for c in getattr(self.task, 'chars', []) if c and c is not self]
-        return not any(c.is_sub_dps for c in teammates)
 
     @property
     def buff_time(self):
@@ -266,119 +226,8 @@ class BaseChar:
         intact so timing/logging behavior remains consistent.
         """
         self.last_perform = time.time()
-        watched = self.native_perform()
-        if watched:
-            self.task.perform_watch = (self, self.last_perform, self.perform_hard_timeout())
-        try:
-            self.do_perform()
-        except CharPerformTimeout as e:
-            self.task.perform_watch = None
-            self.logger.warning(f'{self} perform hard timeout, release inputs and switch: {e}')
-            self.release_inputs()
-            self.on_perform_timeout()
-            self.switch_next_char()
-        except BaseException:
-            # 脱战/停任务/死亡: 别把蓄力中的左键、长按的 E 留在按下状态
-            self.release_inputs()
-            raise
-        finally:
-            watch = getattr(self.task, 'perform_watch', None)
-            if watch and watch[0] is self:
-                self.task.perform_watch = None
+        self.do_perform()
         self.logger.debug(f'set current char false {self.index}')
-
-    # ---------------- 原生角色代码共用的有界小动作 ----------------
-
-    def field_time(self):
-        """本次上场已经多久(秒, 扣除大招/变奏时停)。"""
-        return self.time_elapsed_accounting_for_freeze(self.last_perform)
-
-    def hold_mouse(self, seconds, until=None, min_time=0.0):
-        """按住左键最多 seconds 秒; until() 成立且已按满 min_time 就提前松开。不管怎样退出都会松开。
-
-        Returns:
-            bool: until 成立而提前松开返回 True, 按满时长返回 False。
-        """
-        self.check_combat()
-        start = time.time()
-        hit = False
-        self.task.mouse_down()
-        try:
-            while time.time() - start < seconds:
-                if until is not None and time.time() - start >= min_time and until():
-                    hit = True
-                    break
-                self.task.next_frame()
-        finally:
-            self.task.mouse_up()
-        self.sleep(0.01)
-        return hit
-
-    def hold_key(self, key, seconds, until=None, min_time=0.0):
-        """按住某个键最多 seconds 秒, 用法同 hold_mouse。"""
-        self.check_combat()
-        start = time.time()
-        hit = False
-        self.task.send_key_down(key)
-        try:
-            while time.time() - start < seconds:
-                if until is not None and time.time() - start >= min_time and until():
-                    hit = True
-                    break
-                self.task.next_frame()
-        finally:
-            self.task.send_key_up(key)
-        self.sleep(0.01)
-        return hit
-
-    def tap_until(self, send, done, time_out, interval=0.12):
-        """每 interval 秒做一次 send(), 直到 done() 成立或超时。返回 done 是否成立。"""
-        start = time.time()
-        last = 0
-        while time.time() - start < time_out:
-            if done():
-                return True
-            now = time.time()
-            if now - last >= interval:
-                send()
-                last = now
-            self.check_combat()
-            self.task.next_frame()
-        return bool(done())
-
-    def attack_while(self, seconds, stop=None, interval=0.1):
-        """普攻 seconds 秒, stop() 成立提前结束。返回是否因 stop 提前结束。"""
-        start = time.time()
-        while time.time() - start < seconds:
-            if stop is not None and stop():
-                return True
-            self.task.click(interval=interval)
-            self.check_combat()
-            self.task.next_frame()
-        return False
-
-    def native_perform(self):
-        """do_perform 是不是框架自带的(src.char.*), 自定义队伍代码重写了就返回 False。"""
-        module = getattr(type(self).do_perform, '__module__', '') or ''
-        return module.startswith('src.char.')
-
-    def perform_hard_timeout(self):
-        return self.PERFORM_HARD_TIMEOUT
-
-    def on_perform_timeout(self):
-        """硬超时后、切人前的清理, 子类可重置自己的状态机。"""
-        pass
-
-    def release_inputs(self):
-        """松开战斗任务自己按住的键/鼠标, 防止超时/异常后角色一直蓄力或一直往前跑。"""
-        task = self.task
-        try:
-            if hasattr(task, 'release_held_inputs'):
-                task.release_held_inputs()
-            else:
-                task.mouse_up()
-        except Exception as e:
-            self.logger.debug(f'release_inputs failed {e}')
 
     def wait_down(self, click=True):
         """等待角色从空中落下到地面。"""
@@ -517,7 +366,7 @@ class BaseChar:
             self.task.skip_combat_check = previous_skip_combat_check
 
     def alert_skill_failed(self):
-        self.task.log_error(self.task.tr('Click skill failed, check if the keybinding is correct in Monster-ww settings!'),
+        self.task.log_error(self.task.tr('Click skill failed, check if the keybinding is correct in ok-ww settings!'),
                             notify=True)
         self.task.screenshot('click_resonance too long, breaking')
 
@@ -545,7 +394,7 @@ class BaseChar:
         animation_start = 0
         last_f_click = 0
         if time_out == 0:
-            the_time_out = self.NATIVE_SKILL_TIME_OUT if self.native_perform() else SKILL_TIME_OUT
+            the_time_out = SKILL_TIME_OUT
         else:
             the_time_out = time_out
         while True:
@@ -563,7 +412,7 @@ class BaseChar:
                     now = time.time()
                     if animation_start == 0:
                         animation_start = now
-                    the_time_out = self.NATIVE_SKILL_TIME_OUT if self.native_perform() else SKILL_TIME_OUT
+                    the_time_out = SKILL_TIME_OUT
                     if now - resonance_click_time > 6:
                         self.task.in_liberation = False
                         self.logger.error(f'resonance animation too long, breaking')
@@ -587,8 +436,9 @@ class BaseChar:
                 break
             if (time_out == 0 and not has_animation and resonance_click_time != 0
                     and now - resonance_click_time > RESONANCE_STILL_READY_TIME_OUT):
-                # 按过之后图标仍显示可用：多层技能/后续形态/按键被忽略。
-                # 上游 3.0.15：别白等到 15 秒技能超时把角色长时间留在场上。
+                # The icon still reads as ready after pressing (a skill with charges, a
+                # follow-up form, or a press the game ignored). Waiting out
+                # SKILL_TIME_OUT here kept characters on field for 15s+.
                 self.logger.info(f'click_resonance still available '
                                  f'{now - resonance_click_time:.1f}s after first press, stop')
                 break
@@ -648,11 +498,8 @@ class BaseChar:
             check_fun = self.is_forte_full
         if check_fun():
             self.task.mouse_down()
-            try:
-                success = self.task.wait_until(lambda: not check_fun(), time_out=2)
-            finally:
-                # wait_until 异常时也必须释放鼠标，避免持续按住（xjtu 1.2.0 fix）
-                self.task.mouse_up()
+            success = self.task.wait_until(lambda: not check_fun(), time_out=2)
+            self.task.mouse_up()
             self.sleep(0.05)
             return success
 
@@ -787,13 +634,9 @@ class BaseChar:
                     if not clicked:
                         clicked = True
                     last_click = now
-                if time.time() - start > self.LIBERATION_CLICK_TIME_OUT:
-                    # 图标一直亮却放不出来(被控/空中/键位不对/图标另有含义): 放弃这次, 别判脱战
-                    self.logger.error(f'click_liberation still available after '
-                                      f'{self.LIBERATION_CLICK_TIME_OUT}s of clicking, give up')
+                if time.time() - start > SKILL_TIME_OUT:
                     self.alert_skill_failed()
-                    self._liberation_available = False
-                    return False
+                    self.task.raise_not_in_combat('too long clicking a liberation')
                 self.task.next_frame()
             if clicked:
                 if self.task.wait_until(lambda: not self.task.in_team()[0], time_out=0.4,
@@ -877,10 +720,6 @@ class BaseChar:
         # The selector applies the shared healer lockout separately so its
         # deadlock fallback can still respect character-specific NO priorities.
         return SwitchPriority.NORMAL
-
-    def blocks_switch_in(self):
-        """角色显式屏蔽切入(如 Lily 梦状态): 饿死保护不得把它的 NO 强行抬高。"""
-        return False
 
     def healer_full_con_switch_locked(self):
         return (

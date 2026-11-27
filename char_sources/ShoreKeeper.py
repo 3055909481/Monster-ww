@@ -4,18 +4,6 @@ from src.char.BaseChar import BaseChar, SwitchPriority
 
 
 class ShoreKeeper(BaseChar):
-    """守岸人(治疗, 大招区域给全队暴击/暴伤)。
-
-    机制: 普攻一套 4 段正好攒满 5 格能量, 满了重击「演绎」把敌人周围的坍缩核立刻变成蝴蝶;
-    不满时长按普攻会变蝴蝶飞(跑图用), 所以没满别长按。E 回血 + 5 只蝴蝶。
-    大招区域被变奏入场触发两次升级(暴击→暴伤), 后面的人要在区域里打。
-    """
-
-    # How long an intro animation may suppress combat checks. Long enough for
-    # the real animation, short enough that a stale flag cannot hang the fight.
-    INTRO_COMBAT_CHECK_GRACE = 8.0
-    FIELD_TIME_OUT = 6.0
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.outrotime = -1
@@ -31,21 +19,7 @@ class ShoreKeeper(BaseChar):
         return super().get_switch_priority(current_char, has_intro, target_low_con)
 
     def skip_combat_check(self):
-        # An intro that never clears (e.g. combat ends while this char is still
-        # on field) used to keep this True forever, forcing do_check_in_combat()
-        # to report "in combat" and leaving combat_once() stuck attacking a
-        # dead fight. Bound the intro grace period to the actual animation.
-        if self.has_intro:
-            switched_at = float(getattr(self, 'last_switch_in_time', -1) or -1)
-            if switched_at < 0:
-                # No switch timestamp (tests / hand-built state): treat the
-                # intro as fresh rather than stale.
-                return True
-            elapsed = time.time() - switched_at
-            if 0 <= elapsed <= self.INTRO_COMBAT_CHECK_GRACE:
-                return True
-            self.has_intro = False
-        return self.flying()
+        return self.has_intro or self.flying()
 
     def decide_teammate(self):
         from src.char.Augusta import Augusta
@@ -70,16 +44,8 @@ class ShoreKeeper(BaseChar):
                 self.task.skip_combat_check = False
         self.click_echo(time_out=0)
         self.click_liberation()
-        if self.resonance_available():
-            self.click_resonance(time_out=1)
-        # 一套 4 段普攻正好攒满 5 格, 满了重击把坍缩核变成蝴蝶; 协奏没满就再来一轮
-        for _ in range(2):
-            if self.is_con_full() or self.field_time() > self.FIELD_TIME_OUT:
-                break
-            if not self.is_mouse_forte_full():
-                self.attack_while(1.6, stop=lambda: self.is_mouse_forte_full() or self.is_con_full())
-            if self.is_mouse_forte_full():
-                self.heavy_click_forte(self.is_mouse_forte_full)
+        if not self.click_resonance():
+            self.heavy_click_forte(self.is_mouse_forte_full)
         self.switch_next_char()
 
     def switch_next_char(self, *args, **kwargs):

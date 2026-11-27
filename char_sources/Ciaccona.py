@@ -92,12 +92,9 @@ class Ciaccona(BaseChar):
             self.task.next_frame()
 
     def continues_click_a(self, duration=0.6):
-        # 演唱会的按钮要在光环走到圆环时按下才算(攻略: 大招一放就一直点那个按钮), 按住只算按下那一下;
-        # 原来连发没有间隔, 加 0.05 秒间隔
         start = time.time()
         while time.time() - start < duration:
-            self.task.send_key('a')
-            time.sleep(0.05)
+            self.task.send_key(key='a')
 
     def judge_forte(self):
         if self.is_mouse_forte_full():
@@ -112,12 +109,12 @@ class Ciaccona(BaseChar):
         from src.char.Cartethyia import Cartethyia
         for i, char in enumerate(self.task.chars):
             self.logger.debug(f'ciaccona teammate char: {char.char_name}')
-            if char is not None and char.is_character(Cartethyia):
+            if isinstance(char, (Cartethyia)):
                 self.logger.debug('ciaccona set attribute: wind dot')
                 self.cartethyia = char
                 self.attribute = 3
                 return
-            if char is not None and char.is_character((Phoebe, Zani)):
+            if isinstance(char, (Phoebe, Zani)):
                 self.logger.debug('ciaccona set attribute: light dot')
                 self.attribute = 2
                 return

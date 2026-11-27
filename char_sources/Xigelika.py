@@ -24,7 +24,7 @@ class Xigelika(BaseChar):
     def perform_everything(self):
         start = time.time()
         time_out = 0.5
-        if self.burst_intro():
+        if self.has_sub_dps_intro:
             time_out = 15
         while self.time_elapsed_accounting_for_freeze(start) < time_out:
             self.click_echo(time_out=0)
@@ -72,7 +72,7 @@ class Xigelika(BaseChar):
     def shorekeeper_auto_dodge(self):
         from src.char.ShoreKeeper import ShoreKeeper
         for i, char in enumerate(self.task.chars):
-            if char is not None and char.is_character(ShoreKeeper):
+            if isinstance(char, ShoreKeeper):
                 return char.auto_dodge(condition = self.flying)  
                 
     def is_forte_full(self):
