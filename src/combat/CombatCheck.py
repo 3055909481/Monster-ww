@@ -237,19 +237,28 @@ class CombatCheck(BaseWWTask):
                 self._end_seen_since = 0.0
                 return self.scene.set_in_combat()
             # Boss 还在(残血也算)就没打完, 只是一时没锁住(跳开/演出), 不能凭画面里有声骸收手
-            if (self.combat_end_condition is not None and not self.boss_still_alive()
-                    and self.combat_end_condition()):
-                # 一帧看到「声骸」不算: 识别会误报, 而 Boss 没死时收手要空站好几秒才接上。
-                # 隔一次判定再看到才收手, 中间照常出招
-                now = time.time()
-                if self._end_seen_since <= 0:
-                    self._end_seen_since = now
-                    self.log_info('end condition seen, confirm on next check')
+            # 这段用到 OCR / connectedComponents / 帧切片, 任一瞬时失败(frame 空、crop 越界、
+            # 模型异常)都不能让 in_combat 的兜底 except 把这一帧当成"脱战"→误去领奖/退本。
+            # 局部兜住: 识别失败时按"仍在战斗"处理, 下一帧再判。
+            try:
+                if (self.combat_end_condition is not None and not self.boss_still_alive()
+                        and self.combat_end_condition()):
+                    # 一帧看到「声骸」不算: 识别会误报, 而 Boss 没死时收手要空站好几秒才接上。
+                    # 隔一次判定再看到才收手, 中间照常出招
+                    now = time.time()
+                    if self._end_seen_since <= 0:
+                        self._end_seen_since = now
+                        self.log_info('end condition seen, confirm on next check')
+                        return self.scene.set_in_combat()
+                    if now - self._end_seen_since >= END_CONFIRM_SECONDS:
+                        return self.reset_to_false(reason='end condition reached')
                     return self.scene.set_in_combat()
-                if now - self._end_seen_since >= END_CONFIRM_SECONDS:
-                    return self.reset_to_false(reason='end condition reached')
+                self._end_seen_since = 0.0
+            except Exception as e:
+                # 识别异常按"仍在战斗", 绝不吞成脱战; 用 debug 避免 log_error 触发截图误报。
+                self._end_seen_since = 0.0
+                logger.debug(f'end-condition check failed, stay in combat: {e}')
                 return self.scene.set_in_combat()
-            self._end_seen_since = 0.0
             has_health = self.check_health_bar()
             if _is_cloud(self) and self.cloud_health_bar_grace(has_health):
                 # 云游戏: 血条仍在(或刚消失不久)即视为战斗中, 先于结束条件判断,

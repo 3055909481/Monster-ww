@@ -878,6 +878,10 @@ class BaseChar:
         # deadlock fallback can still respect character-specific NO priorities.
         return SwitchPriority.NORMAL
 
+    def blocks_switch_in(self):
+        """角色显式屏蔽切入(如 Lily 梦状态): 饿死保护不得把它的 NO 强行抬高。"""
+        return False
+
     def healer_full_con_switch_locked(self):
         return (
             self.is_healer

@@ -228,5 +228,67 @@ class PyAppifyLauncherTest(unittest.TestCase):
         self.assertNotIn('Monster-ww.spec', workflow)
 
 
+class ReviewRound3Test(unittest.TestCase):
+    """三轮审查修复守卫。"""
+
+    def test_end_condition_failure_stays_in_combat(self):
+        source = Path('src/combat/CombatCheck.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        method = next(n for n in ast.walk(tree)
+                      if isinstance(n, ast.FunctionDef) and n.name == 'do_check_in_combat')
+        body = ast.unparse(method)
+        self.assertIn('boss_still_alive', body)
+        self.assertIn('stay in combat', body)
+        # 识别异常必须局部兜住, 不能冒泡到 in_combat 的"当脱战"分支
+        self.assertIn('except Exception', body)
+
+    def test_lily_blocks_switch_in(self):
+        source = Path('src/char/Lily.py').read_text(encoding='utf-8')
+        self.assertIn('def get_switch_priority', source)
+        self.assertIn('def blocks_switch_in', source)
+        self.assertIn('SLUMBERLAND_INTRO_LOCKOUT', source)
+        # 饿死保护必须尊重显式 NO
+        base = Path('src/task/BaseCombatTask.py').read_text(encoding='utf-8')
+        self.assertIn("getattr(char, 'blocks_switch_in', lambda: False)()", base)
+
+    def test_domain_uses_ocr_rechallenge(self):
+        source = Path('src/task/DomainTask.py').read_text(encoding='utf-8')
+        self.assertIn('self.rechallenge(', source)
+        self.assertNotIn("self.click(0.68, 0.84, after_sleep=1)", source)
+        base = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')
+        self.assertIn('def rechallenge(', base)
+        self.assertIn('RECHALLENGE_TEXT', base)
+
+    def test_self_f_note_wired(self):
+        source = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')
+        self.assertIn('def _note_self_f(', source)
+        self.assertIn('f_key_watcher.note_self_key', source)
+        self.assertIn('f_key_watcher.note_self_key_up', source)
+
+    def test_fkey_thread_stops_on_disable(self):
+        source = Path('src/task/AutoCombatTask.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        disable = next(n for n in ast.walk(tree)
+                       if isinstance(n, ast.FunctionDef) and n.name == 'disable')
+        self.assertIn('f_key_watcher.stop()', ast.unparse(disable))
+        run = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == 'run')
+        self.assertIn('f_key_watcher.start', ast.unparse(run))
+
+    def test_login_timeout_exits(self):
+        source = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')
+        self.assertIn('login_screen_visible', source)
+        self.assertIn("raise CannotFindException(self.tr('Timed out on the game login screen.'))", source)
+        routine = Path('src/task/RoutineTask.py').read_text(encoding='utf-8')
+        self.assertIn('except (_TaskDisabled, _CannotFind):', routine)
+
+    def test_mon_script_sync_tag(self):
+        req = Path('requirements.txt').read_text(encoding='utf-8')
+        self.assertIn('v3.0.15-mon1', req)
+        self.assertNotIn('v3.0.10-mon1', req)
+        setup = Path('.mon-tmp/setup.py').read_text(encoding='utf-8')
+        self.assertIn("or '3.0.15'", setup)
+
+
 if __name__ == '__main__':
     unittest.main()

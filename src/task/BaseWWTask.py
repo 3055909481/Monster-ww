@@ -55,6 +55,9 @@ class BaseWWTask(BaseTask):
         self.char_config = self.get_global_config('Character Config')
         self.key_config = self.get_global_config('Game Hotkey')  # 游戏热键配置
         self.next_monthly_card_start = 0
+        # 登录页可见标志: ensure_main 超时且确实卡在登录页时抛 CannotFindException
+        # 让执行器退出, 不被外层恢复循环接住反复重试(上游 ok-ww c0d097d0)。
+        self.login_screen_visible = False
         self.scene: WWScene | None = None
 
     @property
@@ -367,6 +370,44 @@ class BaseWWTask(BaseTask):
         return self.find_one('treasure_icon', box=self.box_of_screen(0.03, 0.1, 0.97, 0.81, hcenter=True, vcenter=True),
                              threshold=0.8,
                              target_height=720)
+
+    # 前台输入(SendInput)下脚本自己按的 F 会改按键状态, 让 "按 F 开战" 把
+    # 开箱/领奖的 F 误判成玩家开战。发键前通知 watcher, 这段上升沿会被忽略。
+    # 后台 PostMessage 下 watcher 本就读不到, note 是 no-op, 无副作用。
+    def _note_self_f(self, key, down_time=None):
+        if str(key).lower() != 'f':
+            return
+        try:
+            from src.combat.FKeyStart import f_key_watcher
+            f_key_watcher.note_self_key(key, down_time=down_time)
+        except Exception:
+            pass
+
+    def _note_self_f_up(self, key):
+        if str(key).lower() != 'f':
+            return
+        try:
+            from src.combat.FKeyStart import f_key_watcher
+            f_key_watcher.note_self_key_up(key)
+        except Exception:
+            pass
+
+    def send_key(self, key, down_time=0.02, interval=-1, after_sleep=0):
+        self._note_self_f(key, down_time=down_time)
+        try:
+            return super().send_key(key, down_time=down_time, interval=interval, after_sleep=after_sleep)
+        finally:
+            self._note_self_f_up(key)
+
+    def send_key_down(self, key, after_sleep=0):
+        self._note_self_f(key)  # 按住, 等 send_key_up / note_self_key_up 才放行
+        return super().send_key_down(key, after_sleep=after_sleep)
+
+    def send_key_up(self, key, after_sleep=0):
+        try:
+            return super().send_key_up(key, after_sleep=after_sleep)
+        finally:
+            self._note_self_f_up(key)
 
     def click(self, x=-1, y=-1, move_back=False, name=None, interval=-1, move=False, down_time=0.01, after_sleep=0,
               key="left"):
@@ -841,9 +882,22 @@ class BaseWWTask(BaseTask):
 
     def ensure_main(self, esc=True, time_out=30):
         self.info_set('current task', f'wait main esc={esc}')
+        self.login_screen_visible = False
         if not self.logged_in:
             time_out = 600
         if not self.wait_until(lambda: self.is_main(esc=esc), time_out=time_out, raise_if_not_found=False):
+            if not self.logged_in and self.login_screen_visible:
+                # 确实卡在登录页: 让定时批量任务退出, 抛 CannotFindException 走失败路径,
+                # 而不是通用异常被恢复循环接住后无限重试(任务卡住不动)。
+                try:
+                    active_task = self.executor.current_task
+                    if active_task is not None and getattr(active_task, 'exit_after_task', False):
+                        from Mon.core.events import communicate
+                        # 先让执行器记录失败与截图, 再退出。
+                        self.executor.submit(communicate.quit.emit, name='quit after login timeout')
+                except Exception:
+                    pass
+                raise CannotFindException(self.tr('Timed out on the game login screen.'))
             raise Exception(self.tr('Please start in game world and in team!'))
         self.sleep(0.5)
         self.info_set('current task', f'in main esc={esc}')
@@ -854,7 +908,7 @@ class BaseWWTask(BaseTask):
             if self.in_realm():
                 self.esc_world_confirm()
             return True
-        if self.wait_login():
+        if self.wait_login() or self.login_screen_visible:
             return False
         if self.handle_monthly_card():
             return False
@@ -887,6 +941,7 @@ class BaseWWTask(BaseTask):
         return True
 
     def wait_login(self):
+        self.login_screen_visible = False
         if not self.logged_in:
             if self.in_team_and_world():
                 self.logged_in = True
@@ -902,6 +957,7 @@ class BaseWWTask(BaseTask):
             if login := self.find_boxes(texts,
                                         boundary=login_box,
                                         match=LOGIN_TEXTS):
+                self.login_screen_visible = True
                 if not self.find_boxes(texts, boundary=login_box, match="+86"):
                     # the game may be auto logging in with saved credentials, wait and
                     # confirm the login button is still there before clicking (#1356)
@@ -909,6 +965,7 @@ class BaseWWTask(BaseTask):
                     texts = self.ocr(log=self.debug)
                     login = self.find_boxes(texts, boundary=login_box,
                                             match=LOGIN_TEXTS)
+                    self.login_screen_visible = bool(login)
                     if login and not self.find_boxes(texts, boundary=login_box,
                                                      match="+86"):
                         self.click(login, after_sleep=1)
@@ -1261,6 +1318,27 @@ class BaseWWTask(BaseTask):
             time_out=time_out,
             raise_if_not_found=False,
         )
+
+    # 「重新挑战 / 再次挑战」按钮的 OCR 文本(中繁英), Domain/Tacet 共用。
+    RECHALLENGE_TEXT = re.compile(
+        r'^\s*(?:重新挑战|重新挑戰|再次挑战|再次挑戰|Rechallenge)\s*$', re.IGNORECASE)
+
+    def rechallenge(self, ocr_box=(0.54, 0.81, 0.72, 0.90),
+                    fallback=(0.640, 0.851), time_out=3):
+        """副本结算页重新挑战: 先 OCR 找按钮, 找不到用固定坐标兜底。
+
+        旧 DomainTask 只点固定坐标, 分辨率/UI 变化点空后就走恢复流程整段中断;
+        与 TacetTask 的 OCR 版行为对齐, 上游 ok-ww 33ddf50c 同型修复。
+        """
+        def find_button():
+            return self.ocr(*ocr_box, match=self.RECHALLENGE_TEXT) or None
+
+        buttons = self.wait_until(find_button, time_out=time_out, raise_if_not_found=False)
+        if buttons:
+            self.click(buttons[0], after_sleep=0.2)
+        else:
+            self.click_relative(fallback[0], fallback[1], hcenter=True, after_sleep=0.2)
+        self.wait_click_skip_dialog_confirm()
 
     def click_team_challenge(self, time_out=120, retry_interval=4):
         """从等级页/队伍页一路点到进副本，点击丢了会补点。

@@ -984,6 +984,8 @@ jobs:
 
             解压后双击 `Monster-ww/Monster-ww.exe` 启动；需要命令行参数或完全离线启动时可运行 `Monster-ww/Monster-ww.cmd`。
 
+            - **本版自动战斗修复**：战斗结束识别的 OCR/帧切片异常不再被误判为脱战；Lily 梦状态 50 秒内不会被饿死保护强切进来；副本「重新挑战」改用 OCR 找按钮（找不到才用旧坐标）；脚本自按的 F 不再误触发「按 F 开战」；登录卡在登录页会退出任务而非无限重试；内置框架同步到 Mon-script 3.0.15-mon1（对应 ok-script 3.0.15b1）。
+
             - **必须以管理员权限运行**：`Monster-ww.exe` 已内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权；`Monster-ww.cmd` 通过 `fltmc` 自提权。鸣潮客户端本身是管理员权限，脚本若以普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应
             - 本次启动器模式：`${{ inputs.launcher }}`
             - 更新源（`pyappify.yml` 的 `git_url`）：`${{ inputs.update_repo || format('{0}/{1}.git', github.server_url, github.repository) }}`

@@ -796,6 +796,10 @@ class BaseCombatTask(CombatCheck):
         return len([c for c in self.chars if c is not None]) >= 2
 
     def _starving_priority(self, char, priority):
+        # 角色显式屏蔽切入时(Lily 梦状态), 饿死保护必须尊重它的 NO,
+        # 否则 50 秒窗口内会被强切进来, 清掉摇篮曲加成。
+        if priority <= SwitchPriority.NO and getattr(char, 'blocks_switch_in', lambda: False)():
+            return priority
         starved = self._off_field_seconds(char)
         if starved > self.STARVE_MUST_SECONDS and priority < self.STARVE_PRIORITY:
             logger.info(f'switch starvation guard: {char} off field {starved:.0f}s, priority {priority} -> starve')
@@ -827,7 +831,8 @@ class BaseCombatTask(CombatCheck):
                 switch_priority = self._starving_priority(char, switch_priority)
                 if (char.is_main_dps and not current_char.is_main_dps
                         and self._off_field_seconds(char) > self.MAIN_DPS_MAX_WAIT
-                        and switch_priority < self.STARVE_PRIORITY):
+                        and switch_priority < self.STARVE_PRIORITY
+                        and not getattr(char, 'blocks_switch_in', lambda: False)()):
                     # 辅助报 MUST(比如穗穗太久没满协奏退场)也不能让主C一直等
                     logger.info(f'switch starvation guard: main dps {char} off field '
                                 f'{self._off_field_seconds(char):.0f}s, priority {switch_priority} -> starve')

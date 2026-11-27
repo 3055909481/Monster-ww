@@ -194,6 +194,12 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
     def disable(self):
         # The UI thread only invalidates state; the executor performs the reset.
         self._reset_combat_on_run = True
+        # 自动战斗停了就不再需要 50ms 轮询 GetAsyncKeyState 的常驻线程;
+        # 按"任务结束不留后台脚本"的口径在 disable 里停掉, 重新启用时 run() 会重启。
+        try:
+            f_key_watcher.stop()
+        except Exception:
+            pass
         super().disable()
 
     def reset_auto_combat(self, reason):
@@ -215,6 +221,11 @@ class AutoCombatTask(BaseCombatTask, TriggerTask):
         logger.info(f'warm_up_char_features loaded {len(char_names)} character templates')
 
     def run(self):
+        # 重新启用时 on_create 不会再次触发, 在这里确保 F 监听线程活着。
+        try:
+            f_key_watcher.start(self.is_game_foreground)
+        except Exception:
+            pass
         if self._reset_combat_on_run:
             self.reset_auto_combat('auto combat restarted')
         try:

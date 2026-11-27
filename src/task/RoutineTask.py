@@ -233,10 +233,13 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
                 # 登录进入大世界偶发超时：重试一次再确认失败，避免偶发
                 # 加载慢导致整条流水线/账号队列被误判为失败。
                 from Mon.task.exceptions import TaskDisabledException as _TaskDisabled
+                from Mon import CannotFindException as _CannotFind
                 try:
                     self.ensure_main(time_out=180)
-                except _TaskDisabled:
-                    raise  # 用户主动停止，不重试
+                except (_TaskDisabled, _CannotFind):
+                    # 用户主动停止 / 卡在登录页(已触发退出), 都不再重试,
+                    # 否则 retry 会把登录超时吞掉继续空转。
+                    raise
                 except Exception as first_error:
                     self.log_warning(self.tr('Login did not reach the game world ({error}); retrying once.').format(error=first_error))
                     self.ensure_main(time_out=180)

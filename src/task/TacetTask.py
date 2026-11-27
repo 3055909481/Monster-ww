@@ -227,12 +227,9 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
 
     def rechallenge_tacet(self):
         """优先 OCR 识别「重新挑战」按钮，找不到时沿用旧固定坐标兜底。"""
-        button = self.wait_until(self.find_rechallenge_button, time_out=3, raise_if_not_found=False)
-        if button:
-            self.click(button, after_sleep=0.2)
-        else:
-            self.click_relative(0.640, 0.851, hcenter=True, after_sleep=0.2)
-        self.wait_click_skip_dialog_confirm()
+        # 通用实现在 BaseWWTask, Domain/Tacet 共用同一套 OCR + 坐标兜底。
+        return self.rechallenge(ocr_box=(0.54, 0.81, 0.72, 0.90),
+                                fallback=(0.640, 0.851))
 
     def not_enough_stamina(self, back=True):
         self.log_info(self.tr('used all stamina'))

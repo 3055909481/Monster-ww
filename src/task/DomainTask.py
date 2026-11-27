@@ -158,7 +158,9 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
             if not can_continue:
                 self.log_info(self.tr('used all stamina'))
                 break
-            self.click(0.68, 0.84, after_sleep=1)  # farm again
+            # 重新挑战: OCR 找按钮, 找不到回落到旧坐标(0.68, 0.84)。
+            # 旧版只点固定坐标, 点空后 wait_in_team_and_world 超时→整段恢复/中断。
+            self.rechallenge(fallback=(0.68, 0.84), time_out=3)
             if confirm := self.wait_feature(
                     ['confirm_btn_hcenter_vcenter', 'confirm_btn_highlight_hcenter_vcenter'],
                     raise_if_not_found=False,
