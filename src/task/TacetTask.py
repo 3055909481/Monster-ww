@@ -23,9 +23,6 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         self.support_schedule_task = True
         default_config = {
             'Which Tacet Suppression to Farm': 1,  # starts with 1
-            # 单次消耗: 标准无音区 60, 但部分副本/版本实际扣 40。写死 60 会
-            # 在 34 体力时误判"差 26"而不等待, 实际差 6 就该等恢复补刷。
-            'Tacet Stamina Cost': 60,
         }
         self.structure = [4, 5, 5, 7]
         self.total_number = sum(self.structure)
@@ -33,7 +30,6 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         default_config.update(self.default_config)
         self.config_description = {
             'Which Tacet Suppression to Farm': 'The Tacet Suppression number in the F2 list.',
-            'Tacet Stamina Cost': '无音区单次体力消耗（标准 60；若你的副本实际扣 40 请改为 40，影响体力是否够/是否等待恢复的判断）。',
         }
         self.default_config = default_config
         self.door_walk_method = {  # starts with 0
@@ -50,6 +46,8 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
             10: [["d", 0.6]],
             11: [["a", 1.5], ["w", 3], ["a", 2.5]],
         }
+        # 无音清剿单次固定 60 体力（双倍领取由 use_stamina 按 once*2 自动处理）。
+        # 凝素领域/模拟领域固定 40，由各自的 ForgeryTask/SimulationTask 定义，不在此配置。
         self.stamina_once = 60
 
     def run(self):
@@ -68,15 +66,6 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         """
         if config is None:
             config = self.config
-        # 单次体力消耗按配置覆盖: 标准无音区 60, 但部分副本/版本实际扣 40。
-        # 写死 60 会在 34 体力时误判"差 26"跳过等待, 实际 40 只需等 6 点。
-        configured_cost = config.get('Tacet Stamina Cost', self.stamina_once)
-        try:
-            configured_cost = int(configured_cost)
-        except (TypeError, ValueError):
-            configured_cost = self.stamina_once
-        if configured_cost > 0:
-            self.stamina_once = configured_cost
         if daily:
             must_use = 180 - used_stamina
         else:
@@ -186,7 +175,9 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 can_continue, used = self.use_stamina(once=self.stamina_once, must_use=must_use)
                 self.info_incr('used stamina', used)
                 self.sleep(4)
-                runs += 1
+                # 双倍领取一次扣双份体力，次数也按两次算：
+                # used=once→1 次，used=once*2→2 次，max_runs 按双倍扣减。
+                runs += used // self.stamina_once if self.stamina_once else 1
                 if max_runs and runs >= max_runs:
                     self.click_relative(0.365, 0.853, hcenter=True)
                     self.wait_in_team_and_world(time_out=120)

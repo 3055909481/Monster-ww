@@ -150,7 +150,8 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
             can_continue, used = self.use_stamina(once=self.stamina_once, must_use=must_use)
             self.info_incr('used stamina', used)
             must_use -= used
-            runs += 1
+            # 双倍领取算两次：used=once→1 次，used=once*2→2 次。
+            runs += used // self.stamina_once if self.stamina_once else 1
             self.sleep(4)
             if max_runs and runs >= max_runs:
                 self.log_info(self.tr('reached configured run count ({runs})').format(runs=runs))

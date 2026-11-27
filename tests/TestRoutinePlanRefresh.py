@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from src.task.RoutineTask import RoutineTask
+from src.task.TacetTask import TacetTask
 
 
 class TestConfigurePlansRefresh(unittest.TestCase):
@@ -91,14 +92,84 @@ class TestThemedInputDialog(unittest.TestCase):
             self.assertIn(title, source, path)
 
 
-class TestTacetStaminaCost(unittest.TestCase):
-    """无音区单次体力消耗可配置(部分副本 40, 标准 60)。"""
+class TestFixedStaminaCost(unittest.TestCase):
+    """各副本单次体力固定，不给用户可配置项；双倍由 use_stamina 按 once*2 推导。"""
 
-    def test_config_overrides_stamina_once(self):
+    def test_each_domain_has_fixed_cost(self):
+        cases = (
+            ('src/task/TacetTask.py', 60, '无音清剿'),
+            ('src/task/ForgeryTask.py', 40, '凝素领域'),
+            ('src/task/SimulationTask.py', 40, '模拟领域'),
+        )
+        for path, cost, name in cases:
+            source = Path(path).read_text(encoding='utf-8')
+            self.assertIn(f'self.stamina_once = {cost}', source, f'{name} 固定消耗')
+
+    def test_tacet_has_no_stamina_config(self):
         source = Path('src/task/TacetTask.py').read_text(encoding='utf-8')
-        self.assertIn("'Tacet Stamina Cost': 60", source)
-        self.assertIn("config.get('Tacet Stamina Cost', self.stamina_once)", source)
-        self.assertIn('self.stamina_once = configured_cost', source)
+        self.assertNotIn('Tacet Stamina Cost', source)
+        self.assertNotIn('configured_cost', source)
+
+    def test_stale_config_cannot_override_fixed_cost(self):
+        """旧配置里残留的 Tacet Stamina Cost 也不能改变固定 60。"""
+        task = TacetTask.__new__(TacetTask)
+        task.tr = lambda message, **kwargs: message
+        task.stamina_once = 60
+        config = {'Tacet Stamina Cost': 40, 'Which Tacet Suppression to Farm': 1}
+        calls = []
+        noop = lambda *args, **kwargs: None
+        for name in ('info_incr', 'sleep', 'openF2Book', 'click_relative', 'open_boss_book',
+                     'click_team_challenge', 'wait_in_team_and_world', 'walk_to_treasure',
+                     'pick_f', 'ensure_main', 'esc_cancel'):
+            setattr(task, name, noop)
+        task.get_stamina = lambda: (120, 0, 120)
+        task.teleport_to_tacet = noop
+        task.clear_tacet_and_reach_reward = noop
+        task.has_claim_stamina = lambda: True
+        task.use_stamina = lambda once, must_use: calls.append((once, must_use)) or (False, once)
+        task.log_info = noop
+        task.log_warning = noop
+        task.realm_entry_at_heal_point = False
+        self.assertIsNone(task.farm_tacet(config=config))
+        self.assertEqual([(60, 0)], calls)
+        self.assertEqual(60, task.stamina_once)
+
+    def test_double_claim_costs_double_stamina(self):
+        """双倍领取按 once*2 扣体力/日常进度。"""
+        source = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')
+        body = source[source.index('    def use_stamina('):source.index('    @contextmanager', source.index('    def use_stamina('))]
+        self.assertIn('used = once * 2', body)
+        self.assertIn('must_use -= used', body)
+        self.assertIn('return can_continue, used', body)
+
+    def test_double_claim_counts_as_two_runs(self):
+        """双倍领取一次按两次计入 max_runs，单次挑战不再只加 1。"""
+        for path in ('src/task/TacetTask.py', 'src/task/DomainTask.py'):
+            source = Path(path).read_text(encoding='utf-8')
+            self.assertIn('runs += used // self.stamina_once if self.stamina_once else 1',
+                          source, path)
+            self.assertNotIn('runs += 1', source, path)
+
+        task = TacetTask.__new__(TacetTask)
+        task.tr = lambda message, **kwargs: message
+        task.stamina_once = 60
+        task.config = {}
+        logs = []
+        noop = lambda *args, **kwargs: None
+        for name in ('info_incr', 'sleep', 'openF2Book', 'click_relative', 'open_boss_book',
+                     'click_team_challenge', 'wait_in_team_and_world', 'walk_to_treasure',
+                     'pick_f', 'ensure_main', 'esc_cancel', 'teleport_to_tacet',
+                     'clear_tacet_and_reach_reward'):
+            setattr(task, name, noop)
+        task.get_stamina = lambda: (160, 0, 160)
+        task.has_claim_stamina = lambda: True
+        task.use_stamina = lambda once, must_use: (True, once * 2)
+        task.log_info = lambda message, **kwargs: logs.append(message)
+        task.log_warning = noop
+        task.rechallenge_tacet = noop
+        task.realm_entry_at_heal_point = False
+        self.assertIsNone(task.farm_tacet(max_runs=2))
+        self.assertEqual(1, len([m for m in logs if 'reached configured run count' in m]))
 
 
 if __name__ == '__main__':
