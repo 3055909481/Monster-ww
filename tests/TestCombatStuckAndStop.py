@@ -194,6 +194,25 @@ class PyAppifyLauncherTest(unittest.TestCase):
         self.assertNotIn('PyInstaller', workflow)
         self.assertNotIn('Monster-ww.spec', workflow)
 
+    def test_workflow_auto_releases_on_version_tag(self):
+        """推 v* tag 自动发布；归一化 inputs 默认值供 push 事件使用。"""
+        workflow = Path('.github/workflows/portable-release.yml').read_text(encoding='utf-8')
+        # push tag 触发器
+        self.assertIn('  push:', workflow)
+        self.assertIn("      - 'v*'", workflow)
+        # 版本解析用 push 的 tag 名
+        self.assertIn("PUSH_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}", workflow)
+        self.assertIn("if ($env:EVENT_NAME -eq 'push'", workflow)
+        # inputs 归一化（push 无 inputs），且没有自引用
+        self.assertIn("PKG_FORMAT: ${{ inputs.package_format || '7z' }}", workflow)
+        self.assertIn("LAUNCHER: ${{ inputs.launcher || 'updater' }}", workflow)
+        self.assertIn("PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish_release }}", workflow)
+        # 下游用归一化变量，而不是裸 inputs.*
+        self.assertIn('package_zip_format: ${{ env.PKG_FORMAT }}', workflow)
+        self.assertIn('if: ${{ env.LAUNCHER == \'updater\' }}', workflow)
+        self.assertIn('if: ${{ env.PUBLISH_RELEASE', workflow)
+        self.assertNotIn('inputs.package_format }}', workflow.split('jobs:')[1])
+
 
 class ReviewRound3Test(unittest.TestCase):
     """三轮审查修复守卫。"""

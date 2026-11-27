@@ -1,4 +1,9 @@
-# Manually triggered, portable-archive-only release for Monster-ww.
+# Portable-archive-only release for Monster-ww.
+# Triggered manually (workflow_dispatch) or automatically by pushing a v* tag.
+# Pushing a tag such as `git tag v1.0.74 && git push origin v1.0.74` starts a
+# release of that exact version. The slim tags this workflow creates with the
+# GITHUB_TOKEN do NOT re-trigger it (GitHub suppresses GITHUB_TOKEN pushes),
+# so tag-triggered releases cannot recurse.
 #
 # Compared with build.yml this workflow deliberately drops:
 #   * repository synchronisation (CNB / upstream update repos),
@@ -48,9 +53,12 @@
 #   updater launcher" step patches the extracted exe's RT_MANIFEST the same way.
 
 name: Monster-ww Portable Release
-run-name: Monster-ww portable · ${{ inputs.version || format('auto run {0}', github.run_number) }}
+run-name: Monster-ww portable · ${{ github.ref_type == 'tag' && github.ref_name || inputs.version || format('auto run {0}', github.run_number) }}
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -97,6 +105,13 @@ jobs:
     name: Build portable archive
     runs-on: windows-latest
     env:
+      # workflow_dispatch supplies inputs; a pushed tag does not. Normalize the
+      # defaults here so tag-triggered releases behave exactly like a manual
+      # run with the default options (7z / updater / publish release).
+      PKG_FORMAT: ${{ inputs.package_format || '7z' }}
+      LAUNCHER: ${{ inputs.launcher || 'updater' }}
+      UPDATE_REPO: ${{ inputs.update_repo || '' }}
+      PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish_release }}
       # Injected into every git / libgit2 process in this job, including the
       # repository PyAppify clones, so paths beyond MAX_PATH are accepted.
       GIT_CONFIG_COUNT: '1'
@@ -147,8 +162,17 @@ jobs:
         id: version
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          $tag = "$env:INPUT_VERSION".Trim()
+          # A pushed v* tag is the exact version to release; manual dispatch
+          # uses the input (or auto-bumps when left empty).
+          if ($env:EVENT_NAME -eq 'push' -and -not [string]::IsNullOrWhiteSpace($env:PUSH_TAG)) {
+            $tag = "$env:PUSH_TAG".Trim()
+            Write-Host "Tag-triggered release: using pushed tag $tag"
+          } else {
+            $tag = "$env:INPUT_VERSION".Trim()
+          }
 
           # Versions follow SemVer starting at v1.0.0. Old upstream tags were
           # purged when this project restarted its own release line; if any
@@ -435,9 +459,9 @@ jobs:
           }
 
       - name: Validate custom update repository
-        if: ${{ inputs.update_repo != '' }}
+        if: ${{ env.UPDATE_REPO != '' }}
         env:
-          CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
+          CUSTOM_UPDATE_REPO: ${{ env.UPDATE_REPO }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           # PyAppify clones git_url during setup and checks out --setup-version.
@@ -456,7 +480,7 @@ jobs:
       - name: Write portable-only PyAppify config
         env:
           APP_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
+          CUSTOM_UPDATE_REPO: ${{ env.UPDATE_REPO }}
         run: |
           # git_url is the UPDATE SOURCE. By default it is this fork: the tag
           # created above is one of OUR OWN slim release tags, so the launcher
@@ -505,7 +529,7 @@ jobs:
       # assets, so a compiler problem fails fast instead of after a 20 min build.
       # updater mode skips this and uses the real launcher extracted later.
       - name: Build offline icon-only Monster-ww.exe wrapper
-        if: ${{ inputs.launcher == 'cmd-only' }}
+        if: ${{ env.LAUNCHER == 'cmd-only' }}
         run: |
           $compiler = @(
             (Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe')
@@ -533,7 +557,7 @@ jobs:
           version: v1.2.7
           build_setup: false
           package_zip: true
-          package_zip_format: ${{ inputs.package_format }}
+          package_zip_format: ${{ env.PKG_FORMAT }}
           add_version_name: true
           app_version: ${{ steps.version.outputs.tag }}
 
@@ -566,7 +590,7 @@ jobs:
       # reads data/apps/Monster-ww/app.json, fetches new tags from git_url and
       # checks them out into working/, keeping configs/ and the Python env.
       - name: Extract PyAppify updater launcher
-        if: ${{ inputs.launcher == 'updater' }}
+        if: ${{ env.LAUNCHER == 'updater' }}
         run: |
           $zip = Join-Path (Get-Location) 'pyappify_dist/Monster-ww-win32.zip'
           if (-not (Test-Path $zip)) {
@@ -593,7 +617,7 @@ jobs:
       # Patch RT_MANIFEST/1 so double-clicking the launcher requests elevation
       # once, and the whole process tree (launcher -> pythonw) is HIGH.
       - name: Require administrator for the updater launcher
-        if: ${{ inputs.launcher == 'updater' }}
+        if: ${{ env.LAUNCHER == 'updater' }}
         run: |
           $script = Join-Path (Get-Location) '.github/scripts/patch_launcher_manifest.py'
           $manifest = Join-Path (Get-Location) '.github/scripts/MonsterUpdater.manifest.xml'
@@ -618,7 +642,7 @@ jobs:
       # to place next to Monster-ww.cmd inside Monster-ww/.
       - name: Embed Monster-ww.exe in the portable archive
         env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
+          PACKAGE_FORMAT: ${{ env.PKG_FORMAT }}
         run: |
           $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
           if (-not $seven) {
@@ -655,7 +679,7 @@ jobs:
       # longer be inspected on disk here: verify the ARCHIVE's file list instead.
       - name: Verify the packaged working tree is slim
         env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
+          PACKAGE_FORMAT: ${{ env.PKG_FORMAT }}
         run: |
           $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
           if (-not $seven) {
@@ -723,7 +747,7 @@ jobs:
       # defects (bad imports compiled into .pyd) that only surface at runtime.
       - name: Smoke-test packaged app
         env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
+          PACKAGE_FORMAT: ${{ env.PKG_FORMAT }}
         run: |
           $seven = (Get-Command 7z -ErrorAction SilentlyContinue).Source
           if (-not $seven) {
@@ -774,11 +798,11 @@ jobs:
       - name: Collect portable archives only
         id: collect
         env:
-          PACKAGE_FORMAT: ${{ inputs.package_format }}
+          PACKAGE_FORMAT: ${{ env.PKG_FORMAT }}
           VERSION_TAG: ${{ steps.version.outputs.tag }}
-          LAUNCHER_MODE: ${{ inputs.launcher }}
+          LAUNCHER_MODE: ${{ env.LAUNCHER }}
           APP_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          CUSTOM_UPDATE_REPO: ${{ inputs.update_repo }}
+          CUSTOM_UPDATE_REPO: ${{ env.UPDATE_REPO }}
         run: |
           New-Item -ItemType Directory -Path release_assets -Force | Out-Null
           $pattern = "Monster-ww-win32-Portable-*.$env:PACKAGE_FORMAT"
@@ -881,7 +905,7 @@ jobs:
       # 7z l / t / x against a multi-volume set with the original removed.
       - name: Split oversized 7z into release parts
         id: split
-        if: ${{ steps.collect.outputs.release_ready != 'true' && inputs.package_format == '7z' }}
+        if: ${{ steps.collect.outputs.release_ready != 'true' && env.PKG_FORMAT == '7z' }}
         env:
           VERSION_NUMBER: ${{ steps.version.outputs.number }}
         run: |
@@ -961,7 +985,7 @@ jobs:
           "publish=$publish" >> $env:GITHUB_OUTPUT
 
       - name: Explain skipped GitHub release
-        if: ${{ inputs.publish_release && steps.release.outputs.publish != 'true' }}
+        if: ${{ env.PUBLISH_RELEASE && steps.release.outputs.publish != 'true' }}
         env:
           VERSION_NUMBER: ${{ steps.version.outputs.number }}
         run: |
@@ -970,7 +994,7 @@ jobs:
           Write-Host 'Use the default 7z format so an oversized archive can be split into sub-2-GiB Release parts.'
 
       - name: Publish GitHub release
-        if: ${{ inputs.publish_release && steps.release.outputs.publish == 'true' }}
+        if: ${{ env.PUBLISH_RELEASE && steps.release.outputs.publish == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -987,8 +1011,8 @@ jobs:
             - **本版自动战斗修复**：战斗结束识别的 OCR/帧切片异常不再被误判为脱战；Lily 梦状态 50 秒内不会被饿死保护强切进来；副本「重新挑战」改用 OCR 找按钮（找不到才用旧坐标）；脚本自按的 F 不再误触发「按 F 开战」；登录卡在登录页会退出任务而非无限重试；内置框架同步到 Mon-script 3.0.15-mon1（对应 ok-script 3.0.15b1）。
 
             - **必须以管理员权限运行**：`Monster-ww.exe` 已内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权；`Monster-ww.cmd` 通过 `fltmc` 自提权。鸣潮客户端本身是管理员权限，脚本若以普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应
-            - 本次启动器模式：`${{ inputs.launcher }}`
-            - 更新源（`pyappify.yml` 的 `git_url`）：`${{ inputs.update_repo || format('{0}/{1}.git', github.server_url, github.repository) }}`
+            - 本次启动器模式：`${{ env.LAUNCHER }}`
+            - 更新源（`pyappify.yml` 的 `git_url`）：`${{ env.UPDATE_REPO || format('{0}/{1}.git', github.server_url, github.repository) }}`
             - `updater` 模式：`Monster-ww.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster-ww/working`；Python 环境、pip 依赖和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
             - **本版使用精简发布 tag**：发布 tag 只包含运行时文件，不含 `templates_src/`（894 MB 测试截图）、`tests/`、`docs/` 和构建脚本。PyAppify 会把 tag 同时打包成 git 对象库和 `working/` 检出目录，两份一起缩小，因此压缩包从原来的 2.2 GiB 降到约 205 MB（v22.0.22 实测 205.6 MB），且**增量更新能力完全保留**。运行时只读 `assets/`、`icons/`、`i18n/`、`src/` 和根目录的 Python 文件，功能不受影响
             - **队伍创意工坊已完全离线**：`workshop_bundle/` 内置 49 个队伍、69 个共享配置（约 3 MB），浏览和导入工坊配置不再访问外部 CDN；也可继续用「导入队伍」导入本地 ZIP
