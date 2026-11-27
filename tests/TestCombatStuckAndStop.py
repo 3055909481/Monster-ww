@@ -131,6 +131,23 @@ class CombatTimeoutTest(unittest.TestCase):
         self.assertIn('task._enabled = False', source)
         self.assertNotIn('task.disable()', source)
 
+    def test_install_defers_when_no_qapplication_yet(self):
+        """main.py calls install() before OK() creates QApplication.
+
+        install() must defer via init_app_config instead of silently returning
+        (the old bug: cleanup never registered, trigger tasks stayed enabled
+        at exit and the framework wrote config['_enabled']=False).
+        """
+        source = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
+        self.assertIn('from Mon.ui.qt.util import app as app_util', source)
+        self.assertIn('app_util.init_app_config = patched', source)
+        self.assertIn("patched._exit_cleanup_wrapped = True", source)
+        # The deferred path must still hook aboutToQuit when the app is created.
+        self.assertIn('_connect(qapp)', source)
+        # main.py must install before OK() so the wrapper is in place in time.
+        main = Path('main.py').read_text(encoding='utf-8')
+        self.assertLess(main.index('install_exit_cleanup()'), main.index('ok = OK(config)'))
+
 
 if __name__ == "__main__":
     unittest.main()

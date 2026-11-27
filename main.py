@@ -4,6 +4,16 @@ if __name__ == '__main__':
     apply_identity()
 
     from config import config
+
+    # 配置统一到 %APPDATA%/Monster-ww/configs：首次启动时把旧版程序目录的
+    # 配置按结构核对迁移过来，并清理已废弃任务的残留配置。必须在 OK() 加载
+    # 任务之前执行，且失败时静默降级（下次仍会重试）。
+    try:
+        from src.config_migration import install as install_config_migration
+        install_config_migration()
+    except Exception:
+        pass
+
     from Mon import OK
 
     # 定时任务弹窗增强（计划配置/执行账号）：项目层补丁，失败自动降级为原行为

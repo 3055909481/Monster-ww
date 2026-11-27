@@ -67,18 +67,43 @@ def stop_all_manual_tasks():
         logger.warning('exit cleanup failed: %s', error)
 
 
+def _connect(app):
+    app.aboutToQuit.connect(stop_all_manual_tasks)
+
+
 def install():
-    """Install the quit cleanup once; failures degrade to framework default."""
+    """Install the quit cleanup once; failures degrade to framework default.
+
+    ``main.py`` calls this before ``OK(config)`` creates the QApplication, so
+    ``QApplication.instance()`` is still None here. Defer the connection by
+    wrapping ``init_app_config`` (which the framework imports lazily inside
+    ``App.__init__``) and hook aboutToQuit the moment the app exists.
+    """
     global _INSTALLED
     if _INSTALLED:
         return
     try:
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
-        if app is None:
+        if app is not None:
+            _connect(app)
+            _INSTALLED = True
+            logger.info('exit cleanup installed')
             return
-        app.aboutToQuit.connect(stop_all_manual_tasks)
+        from Mon.ui.qt.util import app as app_util
+        original = app_util.init_app_config
+        if getattr(original, '_exit_cleanup_wrapped', False):
+            return
+
+        def patched(*args, **kwargs):
+            result = original(*args, **kwargs)
+            qapp = result[0]
+            _connect(qapp)
+            return result
+
+        patched._exit_cleanup_wrapped = True
+        app_util.init_app_config = patched
         _INSTALLED = True
-        logger.info('exit cleanup installed')
+        logger.info('exit cleanup deferred to QApplication creation')
     except Exception as error:
         logger.warning('failed to install exit cleanup: %s', error)
