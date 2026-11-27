@@ -35,6 +35,7 @@ class TestTacetDeathReentry(unittest.TestCase):
 
     def make_task(self, deaths):
         task = TacetTask.__new__(TacetTask)
+        task.tr = lambda message, **kwargs: message
         task.stamina_once = 60
         task.teleports = []
         task.logs = []
@@ -111,6 +112,7 @@ class TestFarmEchoDeathReentry(unittest.TestCase):
 
     def make_task(self, deaths, teleport_enabled=True, repeat=2):
         task = FarmEchoTask.__new__(FarmEchoTask)
+        task.tr = lambda message, **kwargs: message
         task.config = {'Repeat Farm Count': repeat}
         task.combat_wait_time = 0
         task.bypass_end_wait = True
@@ -137,6 +139,7 @@ class TestFarmEchoDeathReentry(unittest.TestCase):
 
     def test_realm_revive_exits_and_heals_only_when_teleport_enabled(self):
         task = FarmEchoTask.__new__(FarmEchoTask)
+        task.tr = lambda message, **kwargs: message
         task._in_realm = True
         with patch.object(BaseCombatTask, 'revive_action', return_value=True) as base_revive:
             task.teleport_to_boss_enabled = lambda: False
@@ -185,6 +188,7 @@ class TestFarmEchoDeathReentry(unittest.TestCase):
         for is_team, expected in ((True, True), (False, False)):
             with self.subTest(is_team=is_team):
                 task = FarmEchoTask.__new__(FarmEchoTask)
+                task.tr = lambda message, **kwargs: message
                 task.config = {'Teleport to Boss': 'Boss Challenge', 'Which Boss Challenge to Teleport': 1}
                 task.total_boss_number = 20
                 task.realm_entry_at_heal_point = True
@@ -205,6 +209,7 @@ class TestDomainHealPoint(unittest.TestCase):
 
     def test_heal_point_set_only_after_recovery(self):
         task = DomainTask.__new__(DomainTask)
+        task.tr = lambda message, **kwargs: message
         task.stamina_once = 40
         task.realm_entry_at_heal_point = True  # 上一次运行的残留
         task.open_F2_book_and_get_stamina = lambda: (120, 0, 120)
@@ -222,6 +227,7 @@ class TestReviveAtHealPoint(unittest.TestCase):
 
     def make_task(self, cls, heal_point, in_realm=True):
         task = cls.__new__(cls)
+        task.tr = lambda message, **kwargs: message
         task.realm_entry_at_heal_point = heal_point
         task.teleport_timeout = 100
         task.exits = []
@@ -254,10 +260,12 @@ class TestReviveAtHealPoint(unittest.TestCase):
                 self.assertEqual(teleports, len(task.teleports))
 
 
+@unittest.skip('upstream-aligned combat: fork-specific exit-realm-on-death option removed')
 class TestExitRealmOnDeathOption(unittest.TestCase):
 
     def make_task(self, enabled, heal_point=True, in_realm=True):
         task = TacetTask.__new__(TacetTask)
+        task.tr = lambda message, **kwargs: message
         task.realm_entry_at_heal_point = heal_point
         task.exits = []
         task.teleports = []
