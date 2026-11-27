@@ -14,31 +14,44 @@ _INSTALLED = False
 
 
 def stop_all_manual_tasks():
-    """Disable every one-time/trigger task and stop the current one."""
+    """Abort any running task on exit without changing saved task settings.
+
+    Only the in-memory ``_enabled`` flag is cleared for the task that is
+    actually running, so the framework's next ``check_enabled()`` aborts it.
+    ``Task.disable()`` is deliberately NOT used here: for TriggerTask it also
+    writes ``config['_enabled'] = False`` and persists the file, which made
+    every trigger task come back disabled on the next launch ("残留配置").
+    Trigger tasks that are merely enabled (not running) need no action at all
+    - process exit stops their scheduling and must not erase the user's
+    preference to have them auto-enabled next time.
+    """
     try:
         from Mon import og
         executor = getattr(og, 'executor', None) or getattr(
             getattr(og, 'app', None), 'executor', None)
         if executor is None:
             return
+        current = getattr(executor, 'current_task', None)
         for task in list(executor.get_all_tasks()):
-            # Release held keys/buttons BEFORE disabling: send_key_up on the
-            # task calls executor.reset_scene() -> check_enabled(), which raises
-            # TaskDisabledException once _enabled is False and drops the first
-            # key (set iteration order then randomly leaks one held key, e.g. W).
+            # Release held keys/buttons BEFORE clearing the flag: send_key_up
+            # calls reset_scene() -> check_enabled(), which raises once
+            # _enabled is False and would otherwise drop a held key (e.g. W).
+            if task is not current:
+                continue
             try:
                 release = getattr(task, 'release_held_inputs', None)
                 if callable(release):
                     release()
             except Exception as error:
                 logger.warning('failed to release held inputs for %s: %s', task, error)
+            # In-memory only: no config write, so the setting survives restart.
             try:
-                if getattr(task, 'enabled', False) or getattr(task, 'running', False):
-                    task.disable()
+                task._enabled = False
             except Exception as error:
-                logger.warning('failed to disable %s on exit: %s', task, error)
+                logger.warning('failed to stop %s on exit: %s', task, error)
         try:
-            executor.stop_current_task()
+            if current is not None:
+                current.unpause()  # wake any wait_until so it hits check_enabled
         except Exception:
             pass
         # Stop the always-on F-key watcher thread and restore the global

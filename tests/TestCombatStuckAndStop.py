@@ -125,7 +125,11 @@ class CombatTimeoutTest(unittest.TestCase):
         self.assertIn('from src.exit_cleanup import install as install_exit_cleanup', main)
         source = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
         self.assertIn('app.aboutToQuit.connect(stop_all_manual_tasks)', source)
-        self.assertIn('task.disable()', source)
+        # Exit cleanup must abort only the running task via the in-memory flag,
+        # never call disable() (TriggerTask.disable persists config['_enabled']=False,
+        # which made every trigger task come back disabled on next launch).
+        self.assertIn('task._enabled = False', source)
+        self.assertNotIn('task.disable()', source)
 
 
 if __name__ == "__main__":
@@ -204,6 +208,51 @@ class ReviewRound3Test(unittest.TestCase):
         req = Path('requirements.txt').read_text(encoding='utf-8')
         self.assertIn('v3.0.15-mon1', req)
         self.assertNotIn('v3.0.10-mon1', req)
+
+
+class ExitCleanupConfigTest(unittest.TestCase):
+    """退出清理不得把触发任务的启用状态写进配置(否则下次启动全关)。"""
+
+    def test_exit_abort_does_not_call_disable_or_write_config(self):
+        from unittest.mock import Mock, patch
+        import importlib.util
+
+        # Load exit_cleanup without an installed framework/app: stop_all_manual_tasks
+        # only needs `from Mon import og` at call time, which we patch.
+        spec = importlib.util.spec_from_file_location('_exit_cleanup', 'src/exit_cleanup.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        running = Mock()
+        running._enabled = True
+        running.enabled = True
+        running.running = True
+        running.release_held_inputs = Mock()
+        running.unpause = Mock()
+        # A trigger task that is enabled but NOT running must be left alone.
+        idle = Mock()
+        idle._enabled = True
+        idle.enabled = True
+        idle.running = False
+
+        executor = Mock()
+        executor.get_all_tasks.return_value = [running, idle]
+        executor.current_task = running
+        og = Mock()
+        og.executor = executor
+        og.app = None
+
+        with patch.dict('sys.modules', {'Mon': Mock(og=og)}):
+            module.stop_all_manual_tasks()
+
+        # Running task aborted in memory only; disable() (which persists config) never used.
+        self.assertFalse(running._enabled)
+        running.disable.assert_not_called()
+        running.release_held_inputs.assert_called_once()
+        running.unpause.assert_called_once()
+        # Idle trigger task untouched - its enabled preference must survive restart.
+        self.assertTrue(idle._enabled)
+        idle.disable.assert_not_called()
 
 
 if __name__ == '__main__':
