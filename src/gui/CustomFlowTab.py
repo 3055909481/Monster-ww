@@ -17,6 +17,7 @@ from Mon.ui.qt.kit.labels import Label
 from Mon.ui.qt.kit.theme import theme
 from Mon.ui.qt.widget.CustomTab import CustomTab
 
+from src.gui.task_control import stop_task
 from src.task.CustomFlowTask import CustomFlowTask
 from src.task.routine.FlowSteps import (
     DEFAULT_FLOW_NAME, ENTRIES_BY_ID, FLOW_SELECTOR, FlowStepStore,
@@ -181,7 +182,7 @@ class CustomFlowTab(CustomTab):
         self.edit_button = Button(self.tr('编辑任务流'), icon='pen', parent=card)
         self.edit_button.clicked.connect(self._edit_steps)
         self.run_button = Button(self.tr('运行任务'), icon='play', variant='primary', parent=card)
-        self.run_button.clicked.connect(self._start_task)
+        self.run_button.clicked.connect(self._on_run_clicked)
         for button in (self.edit_button, self.run_button):
             header.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
@@ -242,10 +243,24 @@ class CustomFlowTab(CustomTab):
             return
         running = bool(self.task is not None and self.task.enabled)
         try:
-            button.setEnabled(self.task is not None and not running)
-            button.setText(self.tr('运行中…') if running else self.tr('运行任务'))
+            button.setEnabled(self.task is not None)
+            button.setText(self.tr('停止任务') if running else self.tr('运行任务'))
+            button.set_icon('stop' if running else 'play')
         except RuntimeError:
             self.run_button = None
+
+    def _on_run_clicked(self):
+        if self.task is None:
+            return
+        if self.task.enabled:
+            self._stop_task()
+        else:
+            self._start_task()
+
+    def _stop_task(self):
+        stop_task(self.task, self.executor)
+        show_toast(self, self.tr('已停止自定义任务流'), tone='success')
+        self._sync_run_button()
 
     def _start_task(self):
         if self.task is None:
