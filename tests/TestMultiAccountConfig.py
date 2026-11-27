@@ -94,6 +94,25 @@ class TestMultiAccountMode(unittest.TestCase):
         # No current task (e.g. stub): do not abort.
         MultiAccountConfigTask._check_stopped(child(None))
 
+    def test_stop_check_with_real_task_enabled_semantics(self):
+        # Use the real framework `enabled` property (backed by `_enabled`) so
+        # a future change to the stop signal can't be masked by attribute-less
+        # stubs again. The hidden child's own _enabled stays False throughout;
+        # only the top-level task's enable()/disable() should drive the check.
+        top = daily_runner()
+        executor = SimpleNamespace(current_task=top)
+        child = object.__new__(MultiAccountConfigTask)
+        child._executor = executor  # executor is a read-only property backed by _executor
+        child._enabled = False  # a run_task_by_class child is never enabled
+
+        top._enabled = True  # top-level running; child was never enabled
+        self.assertIs(child.enabled, False)  # hidden child stays disabled
+        MultiAccountConfigTask._check_stopped(child)  # must NOT abort
+
+        top._enabled = False  # user stopped the top-level task
+        with self.assertRaises(TaskDisabledException):
+            MultiAccountConfigTask._check_stopped(child)
+
     def test_default_mode_keeps_original_daily_flow(self):
         runner = daily_runner()
         self.assertIs(runner.config['Per-account Configuration'], False)
