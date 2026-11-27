@@ -283,11 +283,11 @@ class ReviewRound3Test(unittest.TestCase):
         self.assertIn('except (_TaskDisabled, _CannotFind):', routine)
 
     def test_mon_script_sync_tag(self):
+        # .mon-tmp 是本地 vendored 目录, 不随仓库提交, CI 上不存在;
+        # 只校验已跟踪的 requirements.txt 指向新 tag。
         req = Path('requirements.txt').read_text(encoding='utf-8')
         self.assertIn('v3.0.15-mon1', req)
         self.assertNotIn('v3.0.10-mon1', req)
-        setup = Path('.mon-tmp/setup.py').read_text(encoding='utf-8')
-        self.assertIn("or '3.0.15'", setup)
 
 
 if __name__ == '__main__':
