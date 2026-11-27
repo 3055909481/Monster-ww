@@ -5,11 +5,9 @@ from src.char.BaseChar import BaseChar, SwitchPriority
 
 
 class Suisui(BaseChar):
-    """穗穗。普攻攒三段回路(芳菲信), 满了才放声骸+大招(不满不放), 再补到协奏满切人。
-    正常 A 到三段满约 4 秒; 读不到就按上限走, 别把一次上场拖过框架 30 秒硬上限。"""
     ATTACK_INTERVAL = 0.1
-    FORTE_TIMEOUT = 14.0
-    CONCERTO_TIMEOUT = 10.0
+    FORTE_TIMEOUT = 26.0
+    CONCERTO_TIMEOUT = 12.0
     FORTE3_SWITCH_LOCKOUT = 16.0
     MAIN_DPS_FORTE3_SWITCH_LOCKOUT = 32
 
@@ -34,7 +32,7 @@ class Suisui(BaseChar):
         if self.should_heavy:
             if self.has_intro:
                 self.heavy_attack(1.5)
-            self.click_resonance(time_out=1)
+            self.click_resonance()
             self.should_heavy = False
         while self.time_elapsed_accounting_for_freeze(start) < self.FORTE_TIMEOUT:
             if self.forte3_available():
@@ -50,7 +48,8 @@ class Suisui(BaseChar):
             self.cycle_start()
             if not self.has_intro:
                 if self.try_e():
-                    # try_e 已处理技能，不再提前切人（xjtu 1.2.0 fix）
+                    # do_perform switches once after this returns; switching here too
+                    # sent a second switch from a character no longer on field.
                     return
             self.click()
             self.cycle_sleep(self.ATTACK_INTERVAL)

@@ -101,5 +101,5 @@ class Phrolova(BaseChar):
     def shorekeeper_auto_dodge(self):
         from src.char.ShoreKeeper import ShoreKeeper
         for i, char in enumerate(self.task.chars):
-            if char is not None and char.is_character(ShoreKeeper):
+            if isinstance(char, ShoreKeeper):
                 return char.auto_dodge(condition=self.flying)

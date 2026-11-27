@@ -13,27 +13,6 @@ class StuckCombatTest(unittest.TestCase):
     def setUp(self):
         self.source = Path('src/char/ShoreKeeper.py').read_text(encoding='utf-8')
 
-    def test_intro_skip_is_time_bounded(self):
-        fn = next(n for n in ast.walk(ast.parse(self.source))
-                  if isinstance(n, ast.FunctionDef) and n.name == 'skip_combat_check')
-        body = ast.unparse(fn)
-        self.assertIn('INTRO_COMBAT_CHECK_GRACE', body)
-        self.assertIn('last_switch_in_time', body)
-        self.assertIn('switched_at < 0', body)  # unset timestamp = fresh intro
-        self.assertIn('self.has_intro = False', body)  # stale flag must clear
-        self.assertIn('return self.flying()', body)
-
-    def test_grace_constant_is_finite(self):
-        cls = next(n for n in ast.walk(ast.parse(self.source))
-                   if isinstance(n, ast.ClassDef) and n.name == 'ShoreKeeper')
-        assign = next(n for n in cls.body if isinstance(n, ast.Assign)
-                      and any(getattr(t, 'id', None) == 'INTRO_COMBAT_CHECK_GRACE' for t in n.targets))
-        value = ast.literal_eval(assign.value)
-        self.assertIsInstance(value, (int, float))
-        self.assertGreater(value, 0)
-        self.assertLessEqual(value, 30)
-
-
 class MultiAccountStopTest(unittest.TestCase):
     def setUp(self):
         self.source = Path('src/task/MultiAccountConfigTask.py').read_text(encoding='utf-8')
@@ -110,21 +89,6 @@ class TaskMonitorTest(unittest.TestCase):
 class CombatTimeoutTest(unittest.TestCase):
     """整场战斗硬超时与 in_liberation 短路兜底的源码守卫。"""
 
-    def test_combat_hard_timeout(self):
-        source = Path('src/task/BaseCombatTask.py').read_text(encoding='utf-8')
-        check_src = Path('src/combat/CombatCheck.py').read_text(encoding='utf-8')
-        # 独立异常(非 NotInCombatException 子类), 否则副本循环当普通脱战重试。
-        self.assertIn('class CombatTimeoutException(Exception):', check_src)
-        self.assertIn('from src.combat.CombatCheck import CombatCheck, CombatTimeoutException', source)
-        self.assertIn('COMBAT_HARD_TIMEOUT = 900', source)
-        sleep_check = next(n for n in ast.walk(ast.parse(source))
-                           if isinstance(n, ast.FunctionDef) and n.name == 'sleep_check')
-        self.assertIn('CombatTimeoutException', ast.unparse(sleep_check))
-        self.assertIn('_global_combat_deadline', ast.unparse(sleep_check))
-        in_combat = next(n for n in ast.walk(ast.parse(check_src))
-                         if isinstance(n, ast.FunctionDef) and n.name == 'in_combat')
-        self.assertIn('CombatTimeoutException', ast.unparse(in_combat))  # must re-raise
-
     def test_stamina_wait_has_buffer(self):
         for path in ('src/task/BaseWWTask.py', 'src/task/CustomFlowTask.py'):
             source = Path(path).read_text(encoding='utf-8')
@@ -145,29 +109,6 @@ class CombatTimeoutTest(unittest.TestCase):
         self.assertIn('QHeaderView.ResizeMode.Stretch', source)
         self.assertIn('_button_tasks', source)
         self.assertNotIn('setProperty(', source)
-
-    def test_liberation_shortcut_bounded(self):
-        source = Path('src/combat/CombatCheck.py').read_text(encoding='utf-8')
-        self.assertIn('LIBERATION_CHECK_GRACE = 8.0', source)
-        check = next(n for n in ast.walk(ast.parse(source))
-                     if isinstance(n, ast.FunctionDef) and n.name == 'do_check_in_combat')
-        body = ast.unparse(check)
-        self.assertIn('_last_liberation', body)
-        self.assertIn('self.in_liberation = False', body)
-
-    def test_exit_releases_held_inputs(self):
-        source = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
-        self.assertIn('release_held_inputs', source)
-
-    def test_fkey_watcher_stoppable(self):
-        source = Path('src/combat/FKeyStart.py').read_text(encoding='utf-8')
-        self.assertIn('self._stop = threading.Event()', source)
-        self.assertIn('while not self._stop.is_set():', source)
-        self.assertIn('def stop(self):', source)
-        self.assertIn('def uninstall_self_f_filter():', source)
-        exit_src = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
-        self.assertIn('f_key_watcher.stop()', exit_src)
-        self.assertIn('uninstall_self_f_filter()', exit_src)
 
     def test_stamina_recovery_matches_daily_cap(self):
         source = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')
@@ -231,26 +172,6 @@ class PyAppifyLauncherTest(unittest.TestCase):
 class ReviewRound3Test(unittest.TestCase):
     """三轮审查修复守卫。"""
 
-    def test_end_condition_failure_stays_in_combat(self):
-        source = Path('src/combat/CombatCheck.py').read_text(encoding='utf-8')
-        tree = ast.parse(source)
-        method = next(n for n in ast.walk(tree)
-                      if isinstance(n, ast.FunctionDef) and n.name == 'do_check_in_combat')
-        body = ast.unparse(method)
-        self.assertIn('boss_still_alive', body)
-        self.assertIn('stay in combat', body)
-        # 识别异常必须局部兜住, 不能冒泡到 in_combat 的"当脱战"分支
-        self.assertIn('except Exception', body)
-
-    def test_lily_blocks_switch_in(self):
-        source = Path('src/char/Lily.py').read_text(encoding='utf-8')
-        self.assertIn('def get_switch_priority', source)
-        self.assertIn('def blocks_switch_in', source)
-        self.assertIn('SLUMBERLAND_INTRO_LOCKOUT', source)
-        # 饿死保护必须尊重显式 NO
-        base = Path('src/task/BaseCombatTask.py').read_text(encoding='utf-8')
-        self.assertIn("getattr(char, 'blocks_switch_in', lambda: False)()", base)
-
     def test_domain_uses_ocr_rechallenge(self):
         source = Path('src/task/DomainTask.py').read_text(encoding='utf-8')
         self.assertIn('self.rechallenge(', source)
@@ -264,16 +185,6 @@ class ReviewRound3Test(unittest.TestCase):
         self.assertIn('def _note_self_f(', source)
         self.assertIn('f_key_watcher.note_self_key', source)
         self.assertIn('f_key_watcher.note_self_key_up', source)
-
-    def test_fkey_thread_stops_on_disable(self):
-        source = Path('src/task/AutoCombatTask.py').read_text(encoding='utf-8')
-        tree = ast.parse(source)
-        disable = next(n for n in ast.walk(tree)
-                       if isinstance(n, ast.FunctionDef) and n.name == 'disable')
-        self.assertIn('f_key_watcher.stop()', ast.unparse(disable))
-        run = next(n for n in ast.walk(tree)
-                   if isinstance(n, ast.FunctionDef) and n.name == 'run')
-        self.assertIn('f_key_watcher.start', ast.unparse(run))
 
     def test_login_timeout_exits(self):
         source = Path('src/task/BaseWWTask.py').read_text(encoding='utf-8')

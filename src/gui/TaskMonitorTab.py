@@ -153,12 +153,16 @@ class TaskMonitorTab(CustomTab):
         except Exception:
             tasks = list(getattr(self.executor, 'onetime_tasks', []) or []) + \
                     list(getattr(self.executor, 'trigger_tasks', []) or [])
-        # Only visible, enabled/running tasks. Hidden shells (FStartCombatTask,
+        # Only visible, still-active tasks. Hidden shells (FStartCombatTask,
         # MultiAccountConfigTask) are config proxies: stopping them does nothing
         # (their `enabled` is a read-only property), so don't show them at all.
+        # A stopped task keeps running=True until the executor finishes its
+        # control check; dropping it here avoids a stale "已停止" row that
+        # lingers until the next task transition.
+        current = getattr(self.executor, 'current_task', None)
         return [task for task in tasks
                 if getattr(task, 'visible', True)
-                and (getattr(task, 'enabled', False) or getattr(task, 'running', False))]
+                and (getattr(task, 'enabled', False) or task is current)]
 
     @staticmethod
     def _is_trigger(task):

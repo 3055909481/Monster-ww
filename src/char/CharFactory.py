@@ -58,6 +58,7 @@ from src.char.Youhu import Youhu
 from src.char.Yuanwu import Yuanwu
 from src.char.Zani import Zani
 from src.char.Zhezhi import Zhezhi
+# 本地工坊/角色代码特有的自定义类加载器（上游无），保留以不破坏流程配置 UI。
 from src.char.CustomCharLoader import load_team_char_class, normalize_team
 
 _char_dict_raw = {
@@ -230,7 +231,10 @@ def get_char_by_pos(task, box, index, old_char):
 
 
 def apply_team_char_classes(task, chars):
-    """Apply custom code only after the complete three-character team is known."""
+    """Apply custom code only after the complete three-character team is known.
+
+    本地工坊自定义角色代码（上游无），保留以不破坏流程配置 UI。
+    """
     if len(chars) != 3 or any(char is None for char in chars):
         return chars
     infos = [char_dict.get(char.char_name) for char in chars]

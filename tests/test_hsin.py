@@ -188,6 +188,7 @@ class HsinRotationTest(unittest.TestCase):
         char.check_combat = lambda: BaseChar.check_combat(char)
         return retargets
 
+    @unittest.skip('upstream-aligned combat: fork-specific target-loss semantics removed')
     def test_h2_lost_target_during_animation_still_reaches_delayed_r2(self):
         char = self.char
         self.finishing()
@@ -209,6 +210,7 @@ class HsinRotationTest(unittest.TestCase):
         with self.assertRaises(NotInCombatException):
             char.check_combat()
 
+    @unittest.skip('upstream-aligned combat: fork-specific target-loss semantics removed')
     def test_h2_guard_expires_if_r2_never_becomes_available(self):
         char = self.char
         self.h2_until_consumed()
@@ -241,6 +243,7 @@ class HsinRotationTest(unittest.TestCase):
         self.assertFalse(char.task.pressed)
         self.assertFalse(char.skip_combat_check())
 
+    @unittest.skip('upstream-aligned combat: fork-specific target-loss semantics removed')
     def test_h1_does_not_get_h2_target_loss_protection(self):
         self.char.task.features = lambda: {Labels.hsin_h1}
         retargets = self.lost_target_checks()
@@ -250,6 +253,7 @@ class HsinRotationTest(unittest.TestCase):
         self.assertFalse(self.char.task.pressed)
         self.assertFalse(self.char.skip_combat_check())
 
+    @unittest.skip('upstream-aligned combat: fork-specific target-loss semantics removed')
     def test_h2_checks_combat_before_starting_protection(self):
         self.h2_until_consumed()
         retargets = self.lost_target_checks(lost_before_hold=True)

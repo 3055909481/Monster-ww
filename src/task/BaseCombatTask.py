@@ -1,19 +1,17 @@
 import re
 import time
 import unicodedata
-from decimal import Decimal, ROUND_UP, ROUND_DOWN
 
 import cv2
 import numpy as np
 
-from Mon import Logger, Config
-from Mon import color_range_to_bound
+from Mon import Logger
 from Mon import safe_get
 from src import text_white_color
 from src.char import BaseChar
-from src.char.BaseChar import SwitchPriority, dot_color, CharPerformTimeout  # noqa
-from src.char.CharFactory import apply_team_char_classes, get_char_by_pos
-from src.combat.CombatCheck import CombatCheck, CombatTimeoutException
+from src.char.BaseChar import SwitchPriority, dot_color  # noqa
+from src.char.CharFactory import get_char_by_pos
+from src.combat.CombatCheck import CombatCheck
 from src.task.BaseWWTask import isolate_white_text_to_black, binarize_for_matching
 
 logger = Logger.get_logger(__name__)
@@ -36,10 +34,10 @@ class CharRevivedException(CharDeadException):
 
 
 class ClaimRewardException(Exception):
-    """领奖识别失败（找不到宝箱/领奖点，或领奖后未确认）。
+    """领奖识别失败的兼容 shim。
 
-    与死亡恢复一样属于副本内可恢复错误：由副本恢复循环接住，走
-    「退出副本 → 回大世界 → F2 重新进本」闭环，并计入重试上限。
+    本地副本任务(未随上游覆盖)捕获它走「退本重进」恢复流程；上游战斗核心
+    本身不抛这个异常，仅保留符号避免流程配置任务的 import 断裂。
     """
     pass
 
@@ -59,22 +57,9 @@ mismatched_names = {
 class BaseCombatTask(CombatCheck):
     owns_switch_healer_config = False
     """基础战斗任务类，封装了游戏"鸣潮"中角色自动化操作的通用逻辑。"""
-    # 整场战斗硬上限(秒)。任何任务卡在"永久战斗中"(标志残留/未锁目标)时
-    # 由 sleep_check 抛出 CombatTimeoutException, 让上层走副本恢复而非死等。
-    COMBAT_HARD_TIMEOUT = 900
     CD_OCR_REFERENCE_ASPECT_RATIO = 16 / 9
     hot_key_verified = False  # 热键是否已验证
-    con_full_size = None  # 不同角色协奏值充满时的大小记录
     freeze_durations = []  # 记录冻结/卡肉的持续时间
-    if con_full_size is None:
-        con_full_size = Config("_con_full_size", {
-            "0": 0,
-            "1": 0,
-            "2": 0,
-            "3": 0,
-            "4": 0,
-            "5": 0,
-        })
 
     def __init__(self, *args, **kwargs):
         """初始化战斗任务。
@@ -84,7 +69,6 @@ class BaseCombatTask(CombatCheck):
             **kwargs: 传递给父类的关键字参数。
         """
         super().__init__(*args, **kwargs)
-        self._global_combat_deadline = 0.0  # 整场战斗硬超时(由 combat_once 设置)
         self.chars = [None, None, None]  # 角色列表
         self.char_texts = ['char_1_text', 'char_2_text', 'char_3_text']  # 角色文本标识符列表
         self.mouse_pos = None  # 当前鼠标位置
@@ -99,8 +83,6 @@ class BaseCombatTask(CombatCheck):
         self.use_liberation = True
         # 由副本恢复循环维护: 本轮从信标直接进本时, 退本即回到信标并自动回血
         self.realm_entry_at_heal_point = False
-        # (char, 上场时刻, 上限秒) 原生角色单次上场的硬超时, 见 BaseChar.PERFORM_HARD_TIMEOUT
-        self.perform_watch = None
 
     def reset_combat_state(self, reason='combat reset'):
         self.reset_to_false(reason)
@@ -249,30 +231,11 @@ class BaseCombatTask(CombatCheck):
         self.sleep(1)
         return False
 
-    def exit_realm_on_death_enabled(self):
-        """是否开启「阵亡退出副本、大世界锚点复活」开关（Basic Options）。"""
-        try:
-            basic = self.get_global_config('Basic Options') or {}
-            return bool(basic.get('Exit Realm on Death'))
-        except Exception:
-            return False
-
     def revive_action(self):
-        """角色死亡恢复：关闭弹窗 → 传最近传送点回血。
-
-        开启「Exit Realm on Death」后，即便在信标附近阵亡也先退出副本，
-        统一到大世界找锚点复活；默认关闭时沿用原地/信标复活逻辑。
-        """
+        """角色死亡恢复：关闭弹窗 → 传最近传送点回血。"""
         try:
             self.close_revive_popup()  # ① 关闭复活弹窗 (点按钮优先, esc 兜底)
-            in_realm = self.in_realm()
-            if self.exit_realm_on_death_enabled() and in_realm:
-                # 开关开启：先退出副本回大世界，再走锚点复活流程。
-                self.ensure_main(time_out=120)
-                logger.info('revive_action: exit realm on death (option enabled)')
-                self.revive_at_tower_and_heal()
-                return True
-            if self.realm_entry_at_heal_point and in_realm:
+            if self.realm_entry_at_heal_point and self.in_realm():
                 self.ensure_main(time_out=120)  # 退本回到信标, 游戏自动回血
                 logger.info('revive_action: left realm at heal point, skip teleport')
                 return True
@@ -357,9 +320,7 @@ class BaseCombatTask(CombatCheck):
         if not travel:
             raise RuntimeError(self.tr('Can not find the travel button'))
         self.click_box(travel, relative_x=1.5)
-        # 传送加载偶发超过 20s（尤其副本退出后重进/网络慢），过短会导致
-        # 复活被误判失败、整段副本任务中断、体力刷不完。放宽到 60s。
-        self.wait_in_team_and_world(time_out=60)
+        self.wait_in_team_and_world(time_out=120)
         self.sleep(2)
 
     def raise_not_in_combat(self, message):
@@ -612,10 +573,6 @@ class BaseCombatTask(CombatCheck):
             self.load_chars()
             self.switch_healer()
         self.info['Combat Count'] = self.info.get('Combat Count', 0) + 1
-        # 整场战斗硬上限: 任何标志残留导致 in_combat 永真时, sleep_check 会
-        # 抛 CombatTimeoutException(独立异常)退出循环。它不被当作普通脱战
-        # 静默重试, 而是冒泡到任务级停止, 避免每轮白烧 15 分钟。
-        self._global_combat_deadline = time.monotonic() + self.COMBAT_HARD_TIMEOUT
         try:
             while self.in_combat():
                 logger.debug(f'combat_once loop {self.chars}')
@@ -624,8 +581,6 @@ class BaseCombatTask(CombatCheck):
             raise e
         except NotInCombatException as e:
             logger.info(f'combat_once out of combat break {e}')
-        finally:
-            self._global_combat_deadline = 0.0
         self.combat_end()
         if self.switch_healer_enabled():
             self.switch_healer()
@@ -746,11 +701,11 @@ class BaseCombatTask(CombatCheck):
             lowest_buff_remaining = self._lowest_buff_remaining_target(candidates)
             if lowest_buff_remaining:
                 return lowest_buff_remaining
-        elif self._starvation_guard_enabled():
-            # 两个辅助都没挂上 buff(协奏判满失灵、或者大世界小怪死得快)时会互相切个没完, 主C一直上不了场
-            waiting_main = self._main_dps_waiting_too_long(candidates)
-            if waiting_main:
-                return waiting_main
+
+        if self._support_chain_limit_reached(current_char):
+            main_dps = [char for char in candidates if char.is_main_dps]
+            if main_dps:
+                return self._oldest_switch_target(main_dps)
 
         unbuffed_non_main = self._unbuffed_non_main_target(current_char, candidates)
         if unbuffed_non_main:
@@ -763,51 +718,21 @@ class BaseCombatTask(CombatCheck):
 
         return self._switch_rule_3_target(candidates)
 
-    # 某个角色太久没上场(各家的 NO/MUST 互相顶住了), 逐级抬高他的优先级, 保证三个人都能轮到
-    STARVE_NORMAL_SECONDS = 40.0
-    STARVE_MUST_SECONDS = 70.0
-    # 饿到这个份上要压过别人自己报的 MUST
-    STARVE_PRIORITY = SwitchPriority.MUST + 50
-    # 辅助之间互切时, 主C离场超过这么久就先回主C
-    MAIN_DPS_MAX_WAIT = 25.0
+    def _support_chain_limit_reached(self, current_char):
+        """True when a support was itself reached by a support-to-support switch without intro.
 
-    def _off_field_seconds(self, char):
-        since = max(char.last_switch_time, getattr(self, 'combat_start', 0) or 0)
-        if since <= 0:
-            return 0
-        return char.time_elapsed_accounting_for_freeze(since)
+        Supports only count as buffed after leaving with full concerto. When they keep
+        leaving early, unbuffed supports would hand the field to each other and the
+        main DPS never gets a turn, so allow one such hand-off and then return.
+        """
+        return (not current_char.is_main_dps
+                and getattr(self, 'support_chain_without_intro', 0) >= MAX_SUPPORT_CHAIN_WITHOUT_INTRO)
 
-    def _main_dps_waiting_too_long(self, candidates):
-        mains = [c for c in candidates if c.is_main_dps and self._off_field_seconds(c) > self.MAIN_DPS_MAX_WAIT]
-        if not mains:
-            return None
-        return max(mains, key=lambda c: self._off_field_seconds(c))
-
-    def _starvation_guard_enabled(self):
-        # 队里有自定义代码(宏自己管切人, 比如二人转轴)就不插手
-        for char in self.chars:
-            if char is None:
-                continue
-            if not char.native_perform():
-                return False
-            module = getattr(type(char).get_switch_priority, '__module__', '') or ''
-            if not module.startswith('src.char.'):
-                return False
-        return len([c for c in self.chars if c is not None]) >= 2
-
-    def _starving_priority(self, char, priority):
-        # 角色显式屏蔽切入时(Lily 梦状态), 饿死保护必须尊重它的 NO,
-        # 否则 50 秒窗口内会被强切进来, 清掉摇篮曲加成。
-        if priority <= SwitchPriority.NO and getattr(char, 'blocks_switch_in', lambda: False)():
-            return priority
-        starved = self._off_field_seconds(char)
-        if starved > self.STARVE_MUST_SECONDS and priority < self.STARVE_PRIORITY:
-            logger.info(f'switch starvation guard: {char} off field {starved:.0f}s, priority {priority} -> starve')
-            return self.STARVE_PRIORITY
-        if starved > self.STARVE_NORMAL_SECONDS and priority < SwitchPriority.NORMAL:
-            logger.info(f'switch starvation guard: {char} off field {starved:.0f}s, priority {priority} -> NORMAL')
-            return SwitchPriority.NORMAL
-        return priority
+    def _record_switch_chain(self, current_char, switch_to, has_intro):
+        if has_intro or current_char.is_main_dps or switch_to.is_main_dps:
+            self.support_chain_without_intro = 0
+        else:
+            self.support_chain_without_intro = getattr(self, 'support_chain_without_intro', 0) + 1
 
     def _choose_switch_target(self, current_char, has_intro, target_low_con=False):
         candidates = [
@@ -819,7 +744,6 @@ class BaseCombatTask(CombatCheck):
 
         prioritized_candidates = []
         locked_healers = []
-        guard_starving = self._starvation_guard_enabled()
         for char in candidates:
             switch_priority = char.get_switch_priority(current_char=current_char, has_intro=has_intro,
                                                        target_low_con=target_low_con)
@@ -827,16 +751,6 @@ class BaseCombatTask(CombatCheck):
                 if switch_priority > SwitchPriority.NO:
                     locked_healers.append(char)
                 switch_priority = SwitchPriority.NO
-            if guard_starving:
-                switch_priority = self._starving_priority(char, switch_priority)
-                if (char.is_main_dps and not current_char.is_main_dps
-                        and self._off_field_seconds(char) > self.MAIN_DPS_MAX_WAIT
-                        and switch_priority < self.STARVE_PRIORITY
-                        and not getattr(char, 'blocks_switch_in', lambda: False)()):
-                    # 辅助报 MUST(比如穗穗太久没满协奏退场)也不能让主C一直等
-                    logger.info(f'switch starvation guard: main dps {char} off field '
-                                f'{self._off_field_seconds(char):.0f}s, priority {switch_priority} -> starve')
-                    switch_priority = self.STARVE_PRIORITY
             self._log_switch_candidate(char, switch_priority)
             if switch_priority > SwitchPriority.NO:
                 prioritized_candidates.append((switch_priority, char))
@@ -859,10 +773,7 @@ class BaseCombatTask(CombatCheck):
                 target = self._oldest_switch_target(candidates) or current_char
                 return self._log_switch_choice(
                     current_char, target, has_intro, f'priority_{highest_priority}')
-            target = None
-            if not current_char.is_main_dps and self._starvation_guard_enabled():
-                target = self._main_dps_waiting_too_long(candidates)
-            target = target or self._choose_intro_switch_target(candidates) or current_char
+            target = self._choose_intro_switch_target(candidates) or current_char
             if target != current_char and not target.is_main_dps and not target.has_buff():
                 reason = f'intro_unbuffed_{target.char_type.value.lower()}'
             else:
@@ -873,8 +784,11 @@ class BaseCombatTask(CombatCheck):
         if candidates_without_switch_cd:
             candidates = candidates_without_switch_cd
 
+        chain_limited = self._support_chain_limit_reached(current_char)
         target = self._choose_switch_target_by_buff_time(current_char, candidates)
-        if target != current_char and not target.is_main_dps and not target.has_buff():
+        if chain_limited and target.is_main_dps:
+            reason = 'support_chain_limit_return_to_main_dps'
+        elif target != current_char and not target.is_main_dps and not target.has_buff():
             reason = f'unbuffed_{target.char_type.value.lower()}'
         elif current_char.is_main_dps and not target.is_main_dps:
             reason = 'lowest_support_buff_remaining'
@@ -926,7 +840,7 @@ class BaseCombatTask(CombatCheck):
         last_click = 0
         start = time.time()
         while True:
-            if not (switch_to is not None and switch_to.is_character(ShoreKeeper) and has_intro):
+            if not (isinstance(switch_to, ShoreKeeper) and has_intro):
                 self.check_combat()
             now = time.time()
             _, current_index, _ = self.in_team()
@@ -982,6 +896,7 @@ class BaseCombatTask(CombatCheck):
                 current_char.switch_out(con_full=has_intro)
                 switch_to.is_current_char = True
                 switch_to.last_switch_in_time = time.time()
+                self._record_switch_chain(current_char, switch_to, has_intro)
                 if has_intro:
                     current_time = time.time()
                     self.add_freeze_duration(current_time, switch_to.intro_motion_freeze_duration, -100)
@@ -1092,14 +1007,6 @@ class BaseCombatTask(CombatCheck):
             timeout (float): 休眠的秒数。
             check_combat (bool, optional): 是否在休眠前检查战斗状态。默认为 True。
         """
-        self.check_perform_watch()
-        # 整场战斗硬超时兜底: 必须在 skip_combat_check 之前, 否则角色标志
-        # 残留导致 skip 常真时, 连超时都检查不到, 又变成无限平 A。
-        deadline = getattr(self, '_global_combat_deadline', 0.0)
-        if deadline and time.monotonic() >= deadline:
-            self._global_combat_deadline = 0.0
-            self.log_warning(f'combat exceeded {self.COMBAT_HARD_TIMEOUT}s hard timeout, force out')
-            raise CombatTimeoutException('combat hard timeout')
         if self.skip_combat_check:
             return
         # self.log_debug(f'sleep_check {self._in_combat}')
@@ -1108,67 +1015,8 @@ class BaseCombatTask(CombatCheck):
             if not self.in_combat():
                 self.raise_not_in_combat('sleep check not in combat')
 
-    # ---- 记住自己按住了什么, 角色上场异常退出时只松这些(不去碰玩家自己按着的键) ----
-    def _held(self):
-        held = self.__dict__.get('_held_inputs')
-        if held is None:
-            held = self.__dict__['_held_inputs'] = set()
-        return held
-
-    def send_key_down(self, key, after_sleep=0):
-        self._held().add(('key', str(key).lower()))
-        return super().send_key_down(key, after_sleep=after_sleep)
-
-    def send_key_up(self, key, after_sleep=0):
-        self._held().discard(('key', str(key).lower()))
-        return super().send_key_up(key, after_sleep=after_sleep)
-
-    def mouse_down(self, x=-1, y=-1, name=None, key="left"):
-        self._held().add(('mouse', key))
-        return super().mouse_down(x, y, name=name, key=key)
-
-    def mouse_up(self, name=None, key="left"):
-        self._held().discard(('mouse', key))
-        return super().mouse_up(name=name, key=key)
-
-    def release_held_inputs(self):
-        held = list(self._held())
-        for kind, key in held:
-            try:
-                if kind == 'mouse':
-                    self.mouse_up(key=key)
-                else:
-                    self.send_key_up(key)
-            except Exception as e:
-                logger.debug(f'release_held_inputs {kind} {key} failed {e}')
-        if held:
-            logger.info(f'released held inputs {held}')
-        return held
-
-    def check_perform_watch(self):
-        """原生角色单次上场超过硬上限就抛 CharPerformTimeout, 由 BaseChar.perform 松键并切人。
-
-        大招/变奏演出里不抛(演出本身会结束, 时停也已从计时里扣掉)。
-        """
-        # 测试 fixture 常用 __new__ 构造、绕过 __init__，这些属性可能未初始化
-        watch = getattr(self, 'perform_watch', None)
-        if not watch or getattr(self, 'in_liberation', False) or not getattr(self, '_in_combat', False):
-            return
-        char, start, limit = watch
-        elapsed = self.time_elapsed_accounting_for_freeze(start)
-        if elapsed > limit:
-            self.perform_watch = None
-            raise CharPerformTimeout(f'{char} on field {elapsed:.1f}s > {limit:.0f}s')
-
-    def next_frame(self):
-        # in_combat() 里会吞掉所有异常, 判战斗状态的过程中不抛, 交给下一次 sleep_check/check_combat
-        if not getattr(self, 'in_sleep_check', False):
-            self.check_perform_watch()
-        return super().next_frame()
-
     def check_combat(self):
         """检查当前是否处于战斗状态, 如果不是则抛出异常。"""
-        self.check_perform_watch()
         if self.skip_combat_check:
             return
         if self._in_combat and not self.in_combat():
@@ -1177,9 +1025,9 @@ class BaseCombatTask(CombatCheck):
             self.raise_not_in_combat('combat check not in combat')
 
     def set_key(self, key, box):
-        # 用户显式配置的鼠标侧键不要被 OCR 自动覆盖（上游 3.0.15 修复）。
         current_key = self.key_config.get(key)
-        if current_key and str(current_key).lower() in ['mouse4', 'mouse5', 'xbutton1', 'xbutton2']:
+        # If the user explicitly configured mouse4, mouse5 or xbutton, never override it
+        if current_key and current_key.lower() in ['mouse4', 'mouse5', 'xbutton1', 'xbutton2']:
             return
         best = self.find_best_match_in_box(box, ['t', 'e', 'r', 'q'], threshold=0.7)
         logger.debug(f'set_key best match {key}: {best}')
@@ -1214,7 +1062,7 @@ class BaseCombatTask(CombatCheck):
 
     def has_char(self, char_cls):
         for char in self.chars:
-            if char is not None and char.is_character(char_cls):
+            if isinstance(char, char_cls):
                 return char
 
     def load_chars(self):
@@ -1239,8 +1087,6 @@ class BaseCombatTask(CombatCheck):
                 self.chars = self.chars[:2]
                 logger.info(f'team size changed to 2')
 
-        apply_team_char_classes(self, self.chars)
-
         for char in self.chars:
             if char is not None:
                 char.reset_state()
@@ -1249,6 +1095,7 @@ class BaseCombatTask(CombatCheck):
                 else:
                     char.is_current_char = False
         self.combat_start = time.time()
+        self.support_chain_without_intro = 0
         if len(self.chars) >= 2:
             if self._char_identity(self.chars) != previous_char_identity:
                 translated_names = []
@@ -1350,9 +1197,10 @@ class BaseCombatTask(CombatCheck):
     def get_current_con(self):
         """获取当前角色的协奏值百分比。
 
-        协奏环是灰色轨道上的彩色弧，并非单向填充，所以按"元素色覆盖的环周角
-        占比"计算。无需按分辨率标定，也不会因保存的满环面积失效而把 ~85%
-        的环读成满、把短弧读成 0（移植自上游 3.0.15 的识别修复）。
+        The concerto bar is a coloured arc on a grey track. It does not fill as a
+        single clockwise sweep, so the value is the share of the ring's angle
+        covered by element-coloured pixels. This needs no per-resolution
+        calibration and counts short arcs that a minimum-area filter would drop.
 
         Returns:
             float: 协奏值百分比 (0.0 到 1.0)。只有整圈都被覆盖时才返回 1。
@@ -1400,94 +1248,6 @@ class BaseCombatTask(CombatCheck):
         if bridged.all():
             return 1
         return min(float(bridged.sum()) / CON_ANGLE_BINS, 0.99)
-
-    def count_rings(self, image, color_range, min_area):
-        """在指定图像区域内计算特定颜色范围的能量环数量和状态。
-
-        Args:
-            image (numpy.ndarray): 要分析的图像 (通常是协奏值UI区域的截图)。
-            color_range (dict): 目标颜色范围。
-            min_area (float): 认为是有效能量环的最小面积。
-
-        Returns:
-            tuple: (检测到的区域面积 (int), 是否为完整环 (bool))。
-        """
-        # Define the color range
-        lower_bound, upper_bound = color_range_to_bound(color_range)
-        masked_image = image.copy()
-        h, w = image.shape[:2]
-        center = (w // 2, h // 2)
-
-        # draw mask
-        r1, r2 = h * 0.35119, h * 0.42261
-        r1 = Decimal(str(r1)).quantize(Decimal('0'), rounding=ROUND_DOWN)
-        r2 = Decimal(str(r2)).quantize(Decimal('0'), rounding=ROUND_UP)
-
-        ring_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.circle(ring_mask, center, int(r2), 255, -1)
-        cv2.circle(ring_mask, center, int(r1), 0, -1)
-        masked_image = cv2.bitwise_and(masked_image, masked_image, mask=ring_mask)
-
-        # Perform closing operation (Dilation followed by Erosion)
-        raw_mask = cv2.inRange(masked_image, lower_bound, upper_bound)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        closed_mask = cv2.morphologyEx(raw_mask, cv2.MORPH_CLOSE, kernel)
-        closed_mask[center[1] - 1:center[1] + 2, center[0] + 1:] = \
-            raw_mask[center[1] - 1:center[1] + 2, center[0] + 1:]
-
-        # Find connected components
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(closed_mask, connectivity=8)
-
-        # Function to check if a component forms a ring
-        def is_full_ring(component_mask):
-            # Find contours
-            contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if len(contours) != 1:
-                return False
-            contour = contours[0]
-
-            # Check if the contour is closed by checking if the start and end points are the same
-            # if cv2.arcLength(contour, True) > 0:
-            #     return True
-            # Approximate the contour with polygons.
-            epsilon = 0.05 * cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-
-            # Check if the polygon is closed (has no gaps) and has a reasonable number of vertices for a ring.
-            if not cv2.isContourConvex(approx) or len(approx) < 4:
-                return False
-
-            # All conditions met, likely a close ring.
-            return True
-
-        # output_image = image.copy()
-        # Iterate over each component
-        ring_count = 0
-        is_full = False
-        the_area = 0
-        for label in range(1, num_labels):
-            x, y, width, height, area = stats[label, :5]
-            bounding_box_area = width * height
-            component_mask = (labels == label).astype(np.uint8) * 255
-            # color = colors[label % len(colors)]
-            # mask = labels == label
-            # output_image[mask] = color
-            if bounding_box_area >= min_area:
-                # Select a color from the list based on the label index
-                if is_full_ring(component_mask):
-                    is_full = True
-                the_area = area
-                ring_count += 1
-
-        # Save or display the image with contours
-        # cv2.imwrite(fr'test\count_rings_{is_full}_{self.screen_width}_mask.png', output_image)
-        # cv2.imwrite(fr'test\count_rings_{is_full}_{self.screen_width}.png', masked_image)
-        if ring_count > 1:
-            is_full = False
-            the_area = 0
-            self.logger.warning(f'is_con_full found multiple rings {ring_count}')
-
-        return the_area, is_full
 
     def update_lib_portrait_icon(self):
         # self.ensure_con_lib_boxes()
@@ -1542,8 +1302,6 @@ con_colors = [  # 不同角色属性的协奏值能量环的颜色范围列表�
     }
 ]
 
-# 上游 ok-wuthering-waves 3.0.15 的协奏环识别：按环周角占比而非"面积/保存的
-# 满环面积"计算。旧算法在分辨率变化后满环大小失效，~85% 环被读成满、短弧读成 0。
 def _con_color_hue(color_range):
     center = np.uint8([[[sum(color_range['b']) // 2, sum(color_range['g']) // 2, sum(color_range['r']) // 2]]])
     return int(cv2.cvtColor(center, cv2.COLOR_BGR2HSV)[0, 0, 0])
@@ -1604,3 +1362,11 @@ def convert_cd(text):
             return float(match.group(0))
         else:
             return 1
+
+
+# 兼容 shim: 本地 FarmEchoTask 从 BaseCombatTask import white_color, 上游已无此符号。
+white_color = {  # 用于检测UI元素可用状态的白色颜色范围。
+    'r': (253, 255),  # Red range
+    'g': (253, 255),  # Green range
+    'b': (253, 255)  # Blue range
+}

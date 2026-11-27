@@ -3,6 +3,7 @@ import time
 
 import cv2
 import numpy as np
+
 import win32api
 
 from Mon import find_boxes_by_name, Logger, calculate_color_percentage, TaskDisabledException
@@ -10,50 +11,19 @@ from Mon import find_color_rectangles, get_mask_in_color_range, is_pure_black
 from src import text_white_color
 from src.Labels import Labels
 from src.char.Roccia import Roccia
-from src.combat.FKeyStart import GRACE_LOG_INTERVAL, GRACE_TARGET_INTERVAL
 from src.task.BaseWWTask import BaseWWTask
 
 logger = Logger.get_logger(__name__)
-
-
-class CombatTimeoutException(Exception):
-    """整场战斗超过硬上限。
-
-    刻意不继承 NotInCombatException: 副本恢复循环会把后者当"死亡/脱战"
-    捕获并重进副本重试, 15 分钟一场会无限循环白烧体力。超时是异常状态,
-    应冒泡到任务级停止, 让用户看到明确原因。
-    """
-
-
-# 大招演出期间跳过脱战判定的最长时间。演出结束后若标志残留, 必须自动放行,
-# 否则 do_check_in_combat 永远 return True, 卡在战斗画面不领奖(同 has_intro bug)。
-LIBERATION_CHECK_GRACE = 8.0
-# 收手前需隔一次判定再确认, 避免一帧误报「声骸」就收手导致空站
-END_CONFIRM_SECONDS = 0.3
 # 云游戏血条消失后仍视为战斗中的秒数, 之后才检查结束条件(声骸识别)
 CLOUD_HEALTH_LOST_GRACE = 3
-# 云游戏锁定图标: 锁定时骷髅外圈为金色, 未锁定为灰色。视频压缩后 has/no_target_cloud
-# 模板分数只差约 0.01, 只用模板定位图标(位置随技能栏布局变化), 再看金色像素占比判断是否锁定。
+# 云游戏锁定图标: 锁定时骷髅外圈为金色, 未锁定为灰色。视频压缩后 has/no_target_cloud 模板分数只差约 0.01,
+# 只用模板定位图标(位置随角色技能栏布局变化), 再看图标内金色像素占比判断是否锁定。
 CLOUD_LOCK_SEARCH_BOX = (0.62, 0.85, 0.84, 0.95)
 CLOUD_LOCK_GOLD_RATIO = 0.02
 # 云游戏画面有串流延迟, 中键锁定后要等更久才能看到金圈, 点得太快会把刚锁定的目标又切掉
 CLOUD_RETARGET_INTERVAL = 0.8
-# 云游戏血条颜色检测: 串流压缩/渐变导致填充率只有约 0.6 (PC 用 0.95)
+# 串流血条的渐变/压缩会让同一条血条仅约 60% 像素落在颜色范围内。
 CLOUD_HEALTH_BAR_FILL = 0.6
-# Boss 血条尖头/分段残血: 按连通块判断, 2K/1K 都能认到约 1% 血
-BOSS_SLIVER_MIN_HEIGHT = 9 / 2160
-BOSS_SLIVER_MAX_HEIGHT = 40 / 2160
-BOSS_SLIVER_MIN_WIDTH = 3 / 3840
-
-
-def _is_cloud(task):
-    """安全判断云游戏模式。只接受真正的 bool；mock/autospec 返回的 Mock
-    对象一律视为 PC，避免测试里云分支被 truthy Mock 错误触发。"""
-    try:
-        result = task.is_browser()
-        return result if isinstance(result, bool) else False
-    except Exception:
-        return False
 
 
 class CombatCheck(BaseWWTask):
@@ -78,7 +48,6 @@ class CombatCheck(BaseWWTask):
         self.target_enemy_time_out = 3
         self.switch_char_time_out = 5
         self.combat_end_condition = None
-        self._end_seen_since = 0.0
         self.has_lavitator = False
         self.target_enemy_error_notified = False
         self._cloud_health_lost_at = 0
@@ -107,7 +76,6 @@ class CombatCheck(BaseWWTask):
 
     def do_reset_to_false(self):
         self.cds = {}
-        self._end_seen_since = 0.0
         self._in_combat = False
         self.skip_combat_check = False
         self.boss_lv_mask = None
@@ -119,6 +87,7 @@ class CombatCheck(BaseWWTask):
         self.boss_lv_box = None
         self.boss_health = None
         self.boss_health_box = None
+        self._cloud_health_lost_at = 0
         self.last_in_realm_not_combat = 0
         self.has_lavitator = False
         self.can_break = False
@@ -183,45 +152,9 @@ class CombatCheck(BaseWWTask):
     def is_boss(self):
         return self.find_one('boss_break_shield') or self.find_one('boss_break_lock')
 
-    # ---- 按 F 开始战斗的钩子（实现在 AutoCombatTask，其它任务保持默认关闭） ----
-    def should_start_combat_by_key(self):
-        return False
-
-    def start_combat_by_key(self):
-        return False
-
-    def f_grace_limit_seconds(self):
-        """保护期最多撑多久，0 = 一直撑到锁到目标。"""
-        return 0.0
-
-    def f_grace_hold(self):
-        """按 F 开打后怪还没出来: 补点一下中键就放行，不判脱战，宏照常出招。"""
-        since = getattr(self, '_f_grace_since', -1.0)
-        if not getattr(self, '_in_combat', False) or since <= 0:
-            return False
-        held = time.time() - since
-        limit = self.f_grace_limit_seconds()
-        if limit > 0 and held >= limit:
-            self._f_grace_since = -1.0
-            self.log_info(f'F 开始战斗: {limit:.0f} 秒还没锁到目标, 按原规则找怪')
-            return False
-        self.middle_click(interval=GRACE_TARGET_INTERVAL)
-        now = time.time()
-        if now - getattr(self, '_f_grace_log', 0) >= GRACE_LOG_INTERVAL:
-            self._f_grace_log = now
-            self.log_info(f'F 开始战斗: 还没锁到目标, 不判脱战({held:.0f}s)')
-        return True
-
     def do_check_in_combat(self, target):
-        if not getattr(self, '_in_combat', False) and self.should_start_combat_by_key():
-            return self.start_combat_by_key()
         if self.in_liberation:
-            # 大招演出有上限; 超时后清掉残留标志, 继续走正常脱战判定,
-            # 避免一次演出没复位就永久被当成"战斗中"。
-            started = float(getattr(self, '_last_liberation', 0) or 0)
-            if started > 0 and time.time() - started <= LIBERATION_CHECK_GRACE:
-                return True
-            self.in_liberation = False
+            return True
         if self._in_combat:
             if self.scene.in_combat() is not None:
                 return self.scene.in_combat()
@@ -234,37 +167,15 @@ class CombatCheck(BaseWWTask):
                 return self.reset_to_false(reason='on_combat_check failed')
             if self.has_target():
                 self.last_in_realm_not_combat = 0
-                self._end_seen_since = 0.0
-                return self.scene.set_in_combat()
-            # Boss 还在(残血也算)就没打完, 只是一时没锁住(跳开/演出), 不能凭画面里有声骸收手
-            # 这段用到 OCR / connectedComponents / 帧切片, 任一瞬时失败(frame 空、crop 越界、
-            # 模型异常)都不能让 in_combat 的兜底 except 把这一帧当成"脱战"→误去领奖/退本。
-            # 局部兜住: 识别失败时按"仍在战斗"处理, 下一帧再判。
-            try:
-                if (self.combat_end_condition is not None and not self.boss_still_alive()
-                        and self.combat_end_condition()):
-                    # 一帧看到「声骸」不算: 识别会误报, 而 Boss 没死时收手要空站好几秒才接上。
-                    # 隔一次判定再看到才收手, 中间照常出招
-                    now = time.time()
-                    if self._end_seen_since <= 0:
-                        self._end_seen_since = now
-                        self.log_info('end condition seen, confirm on next check')
-                        return self.scene.set_in_combat()
-                    if now - self._end_seen_since >= END_CONFIRM_SECONDS:
-                        return self.reset_to_false(reason='end condition reached')
-                    return self.scene.set_in_combat()
-                self._end_seen_since = 0.0
-            except Exception as e:
-                # 识别异常按"仍在战斗", 绝不吞成脱战; 用 debug 避免 log_error 触发截图误报。
-                self._end_seen_since = 0.0
-                logger.debug(f'end-condition check failed, stay in combat: {e}')
                 return self.scene.set_in_combat()
             has_health = self.check_health_bar()
-            if _is_cloud(self) and self.cloud_health_bar_grace(has_health):
-                # 云游戏: 血条仍在(或刚消失不久)即视为战斗中, 先于结束条件判断,
-                # 避免技能特效/血条闪烁让声骸识别误判战斗结束。
+            if self.is_browser() and self.cloud_health_bar_grace(has_health):
+                # 云游戏: 未锁定但敌人血条仍在(或刚消失不久)即视为战斗中,
+                # 且要先于结束条件判断, 避免技能特效/血条闪烁让声骸识别误判战斗结束
                 self.last_in_realm_not_combat = 0
                 return self.scene.set_in_combat()
+            if self.combat_end_condition is not None and self.combat_end_condition():
+                return self.reset_to_false(reason='end condition reached')
             retarget_timeout = 30 if has_health else self.target_enemy_time_out
             if self.target_enemy(wait=True, time_out=retarget_timeout, check_health=has_health):
                 logger.debug(f'retarget enemy succeeded')
@@ -298,9 +209,7 @@ class CombatCheck(BaseWWTask):
         self.in_sleep_check = True
         try:
             return self.do_check_in_combat(target)
-        except (TaskDisabledException, CombatTimeoutException):
-            # 任务停止 / 整场战斗硬超时必须透传, 不能被下面的"当脱战"吞掉,
-            # 否则上层会误判为正常脱战、静默重进副本反复烧体力。
+        except TaskDisabledException:
             raise
         except Exception as e:
             logger.error(f'do_check_in_combat:', e)
@@ -336,14 +245,19 @@ class CombatCheck(BaseWWTask):
         if not levitator:
             self.send_key_up(self.key_config.get('Wheel Key'))
             raise Exception('no levitator tool in the tab wheel!')
-        old = win32api.GetCursorPos()
+        # With the ChildSession interaction the game runs in a separate session: move()
+        # already places that session's cursor, and the host cursor must stay untouched.
+        on_host = type(self.executor.interaction).__name__ != 'ChildSessionInteraction'
+        old = win32api.GetCursorPos() if on_host else None
         self.move(levitator.x, levitator.y)
-        abs_pos = self.executor.interaction.capture.get_abs_cords(levitator.x, levitator.y)
-        win32api.SetCursorPos(abs_pos)
+        if on_host:
+            abs_pos = self.executor.interaction.capture.get_abs_cords(levitator.x, levitator.y)
+            win32api.SetCursorPos(abs_pos)
         self.sleep(0.1)
         self.send_key_up(self.key_config.get('Wheel Key'))
         self.sleep(0.2)
-        win32api.SetCursorPos(old)
+        if on_host:
+            win32api.SetCursorPos(old)
         if not self.wait_feature('edge_levitator', threshold=0.6, time_out=1):
             if self.has_char(Roccia):
                 if self.find_one('levitator_roccia', threshold=0.6):
@@ -378,7 +292,7 @@ class CombatCheck(BaseWWTask):
         return False
 
     def has_target(self, double_check=False):
-        if _is_cloud(self):
+        if self.is_browser():
             return self.cloud_has_target()
         threshold = 0.6
         has_name, no_name = self.get_target_names()
@@ -423,8 +337,8 @@ class CombatCheck(BaseWWTask):
 
     def cloud_lock_icon_gold_ratio(self):
         """云游戏: 定位锁定图标, 返回其中金色像素占比; 找不到图标返回 None。"""
-        icon = self.find_best_match_in_box(self.box_of_screen(*CLOUD_LOCK_SEARCH_BOX),
-                                           list(self.get_target_names()), threshold=0.6)
+        icon = self.find_best_match_in_box(self.box_of_screen(*CLOUD_LOCK_SEARCH_BOX), list(self.get_target_names()),
+                                           threshold=0.6)
         if not icon or self.frame is None:
             return None
         crop = self.frame[icon.y:icon.y + icon.height, icon.x:icon.x + icon.width]
@@ -439,8 +353,8 @@ class CombatCheck(BaseWWTask):
         return ratio is not None and ratio >= CLOUD_LOCK_GOLD_RATIO
 
     def target_visible(self):
-        """PC 看锁定图标; 云游戏锁定图标或敌人血条(如 boss 入场)任一可见即可。"""
-        if _is_cloud(self):
+        """PC 看锁定图标; 云游戏锁定图标或敌人血条(如 boss 入场后出现)任一可见即可。"""
+        if self.is_browser():
             return self.has_target() or self.check_health_bar()
         return self.has_target()
 
@@ -450,16 +364,13 @@ class CombatCheck(BaseWWTask):
         else:
             if self.target_visible():
                 return True
-            elif self.f_grace_hold():
-                return True
             else:
                 timeout = self.target_enemy_time_out if time_out is None else time_out
                 logger.info(f'target lost try retarget {timeout}')
                 start = time.time()
                 health_lost_start = None
-                retarget_interval = CLOUD_RETARGET_INTERVAL if _is_cloud(self) else 0.2
                 while time.time() - start < timeout:
-                    self.middle_click(interval=retarget_interval)
+                    self.middle_click(interval=CLOUD_RETARGET_INTERVAL if self.is_browser() else 0.2)
                     if self.target_visible():
                         return True
                     self.next_frame()
@@ -484,9 +395,9 @@ class CombatCheck(BaseWWTask):
             max_height = min_height * 3
             min_width = self.width_of_screen(100 / 3840)
 
-        browser = _is_cloud(self)
+        browser = self.is_browser()
         boxes = find_color_rectangles(self.frame, enemy_health_color_red, min_width, min_height,
-                                      max_height=max_height, threshold=CLOUD_HEALTH_BAR_FILL if browser else 0.95)
+                                       max_height=max_height, threshold=CLOUD_HEALTH_BAR_FILL if browser else 0.95)
         if browser:
             # 放宽颜色填充后仍要求横向条形, 排除伤害数字和零散红色特效。
             boxes = [box for box in boxes if box.width >= box.height * 3]
@@ -495,42 +406,17 @@ class CombatCheck(BaseWWTask):
             self.draw_boxes('enemy_health_bar_red', boxes, color='blue')
             return True
         else:
+            # 云游戏视频压缩会让少量血条像素偏离颜色范围, 放宽填充比例
             boxes = find_color_rectangles(self.frame, boss_health_color, min_width, min_height * 1.3,
                                           box=self.box_of_screen(1269 / 3840, 58 / 2160, 2533 / 3840, 200 / 2160,
                                                                  hcenter=True, vcenter=True),
-                                          threshold=0.85 if browser else 0.95)
+                                          threshold=0.85 if self.is_browser() else 0.95)
             if len(boxes) == 1:
                 self.boss_health_box = boxes[0]
                 self.boss_health_box.width = 10
                 self.boss_health_box.x += 6
                 self.boss_health = self.boss_health_box.crop_frame(self.frame)
                 self.draw_boxes('boss_health', boxes, color='blue')
-                return True
-        return False
-
-    def boss_health_area(self):
-        return self.box_of_screen(1269 / 3840, 58 / 2160, 2533 / 3840, 200 / 2160,
-                                  hcenter=True, vcenter=True)
-
-    def boss_still_alive(self):
-        """收手前问一句 Boss 还在不在: 破韧图标还挂着, 或者顶上血条还剩一点血色。
-
-        has_boss_health_bar 要求血色块占满外接框, 可血条左端是尖头, 残血时只剩尖头那一截,
-        实机截图量过: 剩 7~8% 以下 2K/1K 都认不到。这里按连通块算, 只要高度够半条血条、面积够,
-        尖头也算。只在要收手时看一次。
-        """
-        if self.is_boss():
-            return True
-        area = self.boss_health_area()
-        crop = self.frame[area.y:area.y + area.height, area.x:area.x + area.width, :3]
-        mask = get_mask_in_color_range(crop, boss_health_color)
-        count, _, stats, _ = cv2.connectedComponentsWithStats(mask)
-        min_h = self.height_of_screen(BOSS_SLIVER_MIN_HEIGHT)
-        max_h = self.height_of_screen(BOSS_SLIVER_MAX_HEIGHT)
-        min_area = min_h * self.width_of_screen(BOSS_SLIVER_MIN_WIDTH)
-        for i in range(1, count):
-            h, a = stats[i, cv2.CC_STAT_HEIGHT], stats[i, cv2.CC_STAT_AREA]
-            if min_h <= h <= max_h and a >= min_area:
                 return True
         return False
 

@@ -20,19 +20,8 @@ class Jinhsi(BaseChar):
         elif self.has_intro or self.incarnation_cd:
             self.handle_intro()
             return self.switch_next_char()
-        self.basic_combo()
+        self.click_echo()
         return self.switch_next_char()
-
-    def basic_combo(self):
-        """没变奏也不在凌霄态(防饿死被切上来/非标准队): 4A 后 E 变 E2 踏空进强化, 再 4A → E。"""
-        self.wait_down()
-        self.click_echo(time_out=0)
-        for _ in range(2):
-            self.attack_while(1.3, stop=self.is_con_full)
-            if self.is_con_full():
-                break
-            if self.resonance_available():
-                self.click_resonance(send_click=False, time_out=1)
 
     def reset_state(self):
         super().reset_state()
@@ -95,10 +84,6 @@ class Jinhsi(BaseChar):
         start = time.time()
         while True:
             elapsed = time.time() - start
-            if elapsed > 4:
-                # E 一直读不到 CD(被控/图标读错), 别卡在这
-                self.logger.info('handle_intro resonance never on cd, give up')
-                break
             if self.has_cd('resonance'):
                 if 0.3 < elapsed < 1.5:
                     self.incarnation_cd = True
@@ -124,8 +109,6 @@ class Jinhsi(BaseChar):
         self.incarnation = True
         self.incarnation_cd = False
 
-    def wait_resonance(self, time_out=3):
-        start = time.time()
-        while not self.resonance_available() and time.time() - start < time_out:
+    def wait_resonance(self):
+        while not self.resonance_available():
             self.send_resonance_key(interval=0.1)
-            self.task.next_frame()
