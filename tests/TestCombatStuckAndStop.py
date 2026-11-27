@@ -19,7 +19,12 @@ class MultiAccountStopTest(unittest.TestCase):
 
     def test_stop_check_exists_and_guards_click(self):
         self.assertIn('def _check_stopped(self):', self.source)
-        self.assertIn("getattr(self, 'enabled', True) is False", self.source)
+        # Must check the top-level task the user actually starts/stops, not
+        # this hidden child's own `enabled` (always False as a run_task_by_class
+        # child) — otherwise the first click of every run aborts as "stopped".
+        self.assertIn("getattr(executor, 'current_task', None)", self.source)
+        self.assertIn("getattr(current, 'enabled', True) is False", self.source)
+        self.assertNotIn("getattr(self, 'enabled', True) is False", self.source)
         self.assertIn('raise TaskDisabledException', self.source)
         click = next(n for n in ast.walk(ast.parse(self.source))
                      if isinstance(n, ast.FunctionDef) and n.name == 'click')

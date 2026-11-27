@@ -35,16 +35,20 @@ class MultiAccountConfigTask(MultiAccountDailyTask):
         self.visible = False
 
     def _check_stopped(self):
-        """Abort immediately once the user disables this task.
+        """Abort immediately once the user stops the top-level multi-account task.
 
-        Child tasks started via run_task_by_class() have their own enabled
-        flag, so stopping the multi-account task does not stop them. Checking
-        here (every click goes through it) prevents further account switches
-        even while a nested task is still unwinding.
+        This runner is a hidden child task (``visible=False``) launched via
+        ``run_task_by_class()``. The framework only enables the top-level task,
+        so this child's own ``enabled`` stays False for its whole life and must
+        never be used as the stop signal. Check the task the user actually
+        starts/stops (``executor.current_task``) instead, otherwise the first
+        click of every run is mistaken for a user stop.
         """
-        # Default to "not stopped" when the attribute is absent (test stubs and
-        # hand-built task objects); only an explicit False means user stopped.
-        if getattr(self, 'enabled', True) is False:
+        executor = getattr(self, 'executor', None)
+        if executor is None:
+            return
+        current = getattr(executor, 'current_task', None)
+        if current is not None and getattr(current, 'enabled', True) is False:
             raise TaskDisabledException('multi-account task stopped')
 
     def click(self, x=-1, y=-1, *args, **kwargs):

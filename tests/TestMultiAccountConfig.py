@@ -73,6 +73,27 @@ def daily_runner():
 
 
 class TestMultiAccountMode(unittest.TestCase):
+    def test_hidden_child_stop_check_follows_top_level_task(self):
+        # The hidden child is never enabled by the framework (its own _enabled
+        # stays False), so `_check_stopped` must follow executor.current_task.
+        # Otherwise every first click of a configured run aborts as "stopped".
+        from types import SimpleNamespace as NS
+
+        def child(current, child_enabled=True):
+            executor = NS(current_task=current)
+            return NS(executor=executor, enabled=child_enabled)
+
+        running = NS(enabled=True)
+        stopped = NS(enabled=False)
+
+        # Top-level running: no abort even though the child reports disabled.
+        MultiAccountConfigTask._check_stopped(child(running, child_enabled=False))
+        # Top-level stopped: abort immediately.
+        with self.assertRaises(TaskDisabledException):
+            MultiAccountConfigTask._check_stopped(child(stopped, child_enabled=True))
+        # No current task (e.g. stub): do not abort.
+        MultiAccountConfigTask._check_stopped(child(None))
+
     def test_default_mode_keeps_original_daily_flow(self):
         runner = daily_runner()
         self.assertIs(runner.config['Per-account Configuration'], False)
