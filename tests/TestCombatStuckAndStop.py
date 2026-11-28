@@ -141,7 +141,11 @@ class CombatTimeoutTest(unittest.TestCase):
         source = Path('src/exit_cleanup.py').read_text(encoding='utf-8')
         self.assertIn('from Mon.ui.qt.util import app as app_util', source)
         self.assertIn('app_util.init_app_config = patched', source)
-        self.assertIn("patched._exit_cleanup_wrapped = True", source)
+        # 幂等靠模块级 _PATCHED，不用函数属性：Cython 编译后函数是 builtin，
+        # setattr 会抛异常导致 install 失败、退出清理从未注册。
+        self.assertIn('global _INSTALLED, _PATCHED', source)
+        self.assertIn('_PATCHED = patched', source)
+        self.assertNotIn('patched._exit_cleanup_wrapped = True', source)
         # The deferred path must still hook aboutToQuit when the app is created.
         self.assertIn('_connect(qapp)', source)
         # main.py must install before OK() so the wrapper is in place in time.

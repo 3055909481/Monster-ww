@@ -16,6 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 _INSTALLED = False
+_PATCHED = None  # 记录包装后的函数，用于幂等（不用函数属性：Cython 编译后 builtin 无法 setattr）
 
 
 def _persist(task, enabled):
@@ -34,23 +35,27 @@ def _persist(task, enabled):
 
 def install():
     """包装 tasks_page.set_trigger_enabled，保证开关状态落盘。失败静默降级。"""
-    global _INSTALLED
+    global _INSTALLED, _PATCHED
     if _INSTALLED:
         return
     try:
         import importlib
         tasks_page = importlib.import_module('Mon.ui.qt.tasks.tasks_page')
-        original = tasks_page.set_trigger_enabled
-        if getattr(original, '_trigger_switch_wrapped', False):
+        current = tasks_page.set_trigger_enabled
+        # 幂等：已装过就不再包第二层。用模块级 _PATCHED 比对，不依赖函数属性
+        # （Cython 编译后函数是 builtin_function_or_method，无法 setattr）。
+        if _PATCHED is not None and current is _PATCHED:
             _INSTALLED = True
             return
+
+        original = current
 
         def patched(task, enabled):
             _persist(task, enabled)
             return original(task, enabled)
 
-        patched._trigger_switch_wrapped = True
         tasks_page.set_trigger_enabled = patched
+        _PATCHED = patched
         _INSTALLED = True
         logger.info('trigger switch persistence installed')
     except Exception as error:

@@ -64,10 +64,11 @@ class TestInstall(unittest.TestCase):
             # 重置模块安装标志以测试包装
             import src.trigger_switch_patch as m
             m._INSTALLED = False
+            m._PATCHED = None
             m.install()
         wrapped = fake_module.set_trigger_enabled
-        self.assertIsNot(wrapped, original)
-        self.assertTrue(getattr(wrapped, '_trigger_switch_wrapped', False))
+        self.assertIsNot(wrapped, original)  # 必须被换成包装函数
+        self.assertIs(m._PATCHED, wrapped)  # 记录包装函数用于幂等
 
         cfg = FakeConfig({'_enabled': False})
         task = MagicMock()
@@ -81,10 +82,11 @@ class TestInstall(unittest.TestCase):
         fake_module.set_trigger_enabled = original
         import src.trigger_switch_patch as m
         m._INSTALLED = False
+        m._PATCHED = None
         with patch('importlib.import_module', return_value=fake_module):
             m.install()
             first = fake_module.set_trigger_enabled
-            m._INSTALLED = False  # 再次 install 会检测 wrapper 标记
+            m._INSTALLED = False  # 再次 install 靠 _PATCHED 比对避免二次包装
             m.install()
         self.assertIs(first, fake_module.set_trigger_enabled)
 

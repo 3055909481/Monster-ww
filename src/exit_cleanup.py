@@ -11,6 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 _INSTALLED = False
+_PATCHED = None  # 记录包装后的 init_app_config，用于幂等（Cython 编译后函数无法挂属性）
 
 
 def stop_all_manual_tasks():
@@ -79,7 +80,7 @@ def install():
     wrapping ``init_app_config`` (which the framework imports lazily inside
     ``App.__init__``) and hook aboutToQuit the moment the app exists.
     """
-    global _INSTALLED
+    global _INSTALLED, _PATCHED
     if _INSTALLED:
         return
     try:
@@ -92,7 +93,11 @@ def install():
             return
         from Mon.ui.qt.util import app as app_util
         original = app_util.init_app_config
-        if getattr(original, '_exit_cleanup_wrapped', False):
+        # 幂等靠模块级 _PATCHED 比对，不用函数属性：Cython 编译后函数是
+        # builtin_function_or_method，无法 setattr，挂属性会让 install 抛异常、
+        # 退出清理从未注册（触发任务因此每次退出被框架写盘关闭）。
+        if _PATCHED is not None and app_util.init_app_config is _PATCHED:
+            _INSTALLED = True
             return
 
         def patched(*args, **kwargs):
@@ -101,8 +106,8 @@ def install():
             _connect(qapp)
             return result
 
-        patched._exit_cleanup_wrapped = True
         app_util.init_app_config = patched
+        _PATCHED = patched
         _INSTALLED = True
         logger.info('exit cleanup deferred to QApplication creation')
     except Exception as error:
