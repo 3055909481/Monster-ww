@@ -209,9 +209,6 @@ export function mount(container, context) {
     container.querySelector("[data-action='reset']")?.addEventListener("click", () => void reset());
     container.querySelector("[data-action='ask-ai']")?.addEventListener("click", () => void copyAskAi());
     container.querySelector("[data-action='how-to']")?.addEventListener("click", showHowTo);
-    container.querySelector("[data-action='contribute']")?.addEventListener("click", () => {
-      if (state.current) window.open(state.current.contribute_url, "_blank", "noopener");
-    });
   }
 
   function updateStatus() {
@@ -253,7 +250,6 @@ export function mount(container, context) {
             </div>
             <button type="button" data-action="ask-ai" ${state.busy ? "disabled" : ""}>${html(context.t("Ask AI"))}</button>
             <button type="button" data-action="how-to">${html(context.t("How To"))}</button>
-            <button type="button" data-action="contribute">${html(context.t("Contribute Code"))}</button>
           </div>
           <div class="character-code-editor"><textarea spellcheck="false" ${state.mode === "builtin" ? "readonly" : ""}>${html(state.code)}</textarea></div>
           <div class="character-code-footer">
