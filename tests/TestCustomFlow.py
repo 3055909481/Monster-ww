@@ -209,9 +209,10 @@ class TestSourceGuards(unittest.TestCase):
 
     def test_routine_exposes_no_switch_entry(self):
         source = Path('src/task/RoutineTask.py').read_text(encoding='utf-8')
-        self.assertIn('def run_selected_plan(self, plan_name):', source)
+        # 签名允许附带可选 status_list（监控页步骤状态），但入口参数必须还是 plan_name
+        self.assertIn('def run_selected_plan(self, plan_name', source)
         # The shared entry must not perform its own account switch.
-        start = source.index('def run_selected_plan(self, plan_name):')
+        start = source.index('def run_selected_plan(self, plan_name')
         body = source[start:start + 400]
         self.assertNotIn('_login_target_account', body)
 
