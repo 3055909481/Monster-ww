@@ -8,8 +8,8 @@ Registered as a custom tab so the framework itself is untouched.
 
 import time
 
-from PySide6.QtCore import QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QPalette
 from PySide6.QtWidgets import (
     QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
@@ -33,7 +33,35 @@ STATUS_LABELS = {
     'running': '执行中',
     'success': '成功',
     'failed': '失败',
+    'skipped': '跳过',
 }
+
+# 语义色：深色主题用亮色阶，浅色主题用深阶，保证对比度且不破坏主题风格。
+# 与 kit 的 Fluent 调色板同色系（蓝/绿/红/中性灰）。
+_STATUS_COLORS_DARK = {
+    'running': '#85B7EB', 'success': '#97C459', 'failed': '#F09595',
+    'pending': '#9A9A94', 'skipped': '#8C8C88', 'queued': '#B4B2A9',
+    'stopped': '#8C8C88',
+}
+_STATUS_COLORS_LIGHT = {
+    'running': '#0F6CBD', 'success': '#3B8A0B', 'failed': '#C42B1C',
+    'pending': '#616161', 'skipped': '#7A7A7A', 'queued': '#616161',
+    'stopped': '#7A7A7A',
+}
+# 当前运行行的高亮背景（低饱和，避免刺眼）
+_ROW_HIGHLIGHT_DARK = QColor('#243447')
+_ROW_HIGHLIGHT_LIGHT = QColor('#E8F1FB')
+
+
+def _status_colors(widget):
+    """按控件当前主题返回状态色表和运行行高亮色。"""
+    try:
+        window = widget.palette().color(QPalette.ColorRole.Window)
+        dark = window.lightness() < 128
+    except Exception:
+        dark = True
+    return (_STATUS_COLORS_DARK, _ROW_HIGHLIGHT_DARK) if dark else (
+        _STATUS_COLORS_LIGHT, _ROW_HIGHLIGHT_LIGHT)
 
 
 def _flow_progress(task):
@@ -49,7 +77,8 @@ def _flow_progress(task):
         return None, '', '', []
     flow_name = info.get('任务流') or ''
     current = info.get('当前步骤') or ''
-    account = info.get('当前账号') or ''
+    # 自定义工作流写「当前账号」，日常一条龙写「执行账号」，两者都要显示
+    account = info.get('当前账号') or info.get('执行账号') or ''
     rows = []
     for step in steps:
         if isinstance(step, dict):
@@ -233,14 +262,12 @@ class TaskMonitorTab(CustomTab):
         elif old_count < new_count:
             table.setRowCount(new_count)
 
+        colors, row_highlight = _status_colors(table)
         for row, task in enumerate(tasks):
             running = bool(getattr(task, 'running', False)) and task is current
-            if running:
-                state = self.tr('运行中')
-            elif getattr(task, 'enabled', False):
-                state = self.tr('排队中')
-            else:
-                state = self.tr('已停止')
+            enabled = bool(getattr(task, 'enabled', False))
+            state_key = 'running' if running else ('queued' if enabled else 'stopped')
+            state = self.tr({'running': '运行中', 'queued': '排队中', 'stopped': '已停止'}[state_key])
             started = float(getattr(task, 'start_time', 0) or 0)
             elapsed = '' if not started or not running else f'{int(now - started)}s'
             details = _value_text(getattr(task, 'info', {}) or {})
@@ -252,6 +279,16 @@ class TaskMonitorTab(CustomTab):
                     table.setItem(row, column, item)
                 if item.text() != value:
                     item.setText(value)
+                # 当前运行任务整行高亮，状态列按语义着色；其余行清除旧背景
+                if running:
+                    item.setBackground(QBrush(row_highlight))
+                elif item.background().style() != Qt.BrushStyle.NoBrush:
+                    item.setBackground(QBrush())
+                if column == 1:
+                    item.setForeground(QBrush(QColor(colors[state_key])))
+                    font = item.font()
+                    font.setBold(running)
+                    item.setFont(font)
             button = table.cellWidget(row, 4)
             if button is None:
                 button = Button(self.tr('停止'), parent=table, variant='subtle', size='small')
@@ -306,6 +343,7 @@ class TaskMonitorTab(CustomTab):
             title += self.tr(' · 账号 {account}').format(account=account)
         self.flow_header.setText(title)
         self.flow_table.setRowCount(len(rows))
+        colors, row_highlight = _status_colors(self.flow_table)
         for row, (index, label, status, error) in enumerate(rows):
             status_text = STATUS_LABELS.get(status, status)
             detail = error if status == 'failed' else ''
@@ -316,16 +354,20 @@ class TaskMonitorTab(CustomTab):
                     self.flow_table.setItem(row, column, item)
                 if item.text() != str(value):
                     item.setText(str(value))
-            # 状态着色：成功绿、失败红、执行中蓝、待执行灰（深色主题可读）
+                # 正在执行的步骤整行高亮，其余步骤清除旧背景
+                if status == 'running':
+                    item.setBackground(QBrush(row_highlight))
+                elif item.background().style() != Qt.BrushStyle.NoBrush:
+                    item.setBackground(QBrush())
+                font = item.font()
+                font.setBold(status == 'running')
+                item.setFont(font)
+            # 状态列按语义着色，成功/失败/执行中/跳过对比明显
             status_item = self.flow_table.item(row, 2)
             if status_item is not None:
-                # 深色主题下用中亮色阶，保证文字可读
-                color = {
-                    'success': '#97C459', 'failed': '#F09595',
-                    'running': '#85B7EB', 'pending': '#B4B2A9',
-                }.get(status)
+                color = colors.get(status)
                 if color:
-                    status_item.setForeground(QColor(color))
+                    status_item.setForeground(QBrush(QColor(color)))
 
     def _on_row_stop(self):
         """Row button slot: read the task bound to the clicked button."""

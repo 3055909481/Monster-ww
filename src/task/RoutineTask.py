@@ -37,8 +37,8 @@ from src.task.account.MultiAccountConfigStore import account_key_from_ocr, displ
 from src.task.account.RuntimeTaskConfig import account_task_config
 from src.task.routine import RoutineCatalog as catalog
 from src.task.routine.RoutinePlans import (
-    DEFAULT_PLAN_NAME, EDIT_PLANS, NIGHTMARE_MODE_ALL, PLAN_SELECTOR,
-    RoutinePlanAccountStore, RoutinePlanStore, is_scheduled_today,
+    DEFAULT_PLAN_NAME, EDIT_PLANS, ENTRIES_BY_ID, NIGHTMARE_MODE_ALL, PLAN_SELECTOR,
+    RoutinePlanAccountStore, RoutinePlanStore, describe_params, is_scheduled_today,
     nightmare_nest_runtime_config, normalize_items,
 )
 from src.task.task_icons import task_icon
@@ -287,14 +287,34 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
             self._switch_to_login()
             self._login_target_account(account_key)
 
-        self.run_selected_plan(self.plan_name)
+        # 结构化步骤状态供任务监控页展示（与 CustomFlowTask 同格式）。只有
+        # 日常一条龙自己运行时传 status_list；自定义工作流复用 run_selected_plan
+        # 时它自己的外层步骤状态不能被内层流水线覆盖。
+        status_list = [
+            {'index': i, 'label': self._step_label(item['id'], item['params']),
+             'status': 'pending', 'error': ''}
+            for i, item in enumerate(selected, 1)
+        ]
+        self.info_set('任务流', self.plan_name)
+        self.info_set('步骤状态', status_list)
+        self.run_selected_plan(self.plan_name, status_list=status_list)
 
-    def run_selected_plan(self, plan_name):
+    def _step_label(self, entry_id, params):
+        entry = ENTRIES_BY_ID.get(entry_id)
+        name = self.tr(entry.name) if entry else entry_id
+        pairs = describe_params(entry, params) if entry else []
+        detail = ' · '.join(str(value) for value in pairs)
+        return f'{name}（{detail}）' if detail else name
+
+    def run_selected_plan(self, plan_name, status_list=None):
         """Run one plan on the currently logged-in account, without any account switch.
 
         Custom task flows log in themselves, then call this entry so the routine
         never re-logs-in or rebinds the plan's account. Keeping the loop here
         also lets the flow reuse the exact same battle/navigation logic.
+
+        ``status_list`` is optional; when provided, each step's running/success/
+        failed/skipped state is written back in place for the monitor page.
         """
         plans = RoutinePlanStore(self.executor.config_folder).load()
         items = normalize_items(plans.get(plan_name, plans[DEFAULT_PLAN_NAME]))
@@ -307,24 +327,38 @@ class RoutineTask(WWOneTimeTask, BaseCombatTask):
         # 跑周常会按新的一天误判。
         from src.task.routine.StaminaBudget import reset_day
         today = reset_day()
-        for item in selected:
+        for index, item in enumerate(selected, 1):
             entry_id = item['id']
+            entry = status_list[index - 1] if status_list else None
             if not is_scheduled_today(item['params'], today):
                 self.log_info(self.tr('步骤「{id}」今日非运行日，跳过。').format(id=entry_id))
                 self.results.append((entry_id, 'skipped', ''))
+                if entry is not None:
+                    entry['status'] = 'skipped'
                 continue
             self.info_set('当前流水线步骤', entry_id)
+            if entry is not None:
+                entry['status'] = 'running'
+                entry['error'] = ''
+            self.info_set('当前步骤', f'{index}/{len(selected)} · {entry["label"] if entry else entry_id}')
             try:
                 self._run_entry(entry_id, item['params'])
             except TaskDisabledException:
+                if entry is not None:
+                    entry['status'] = 'pending'
                 raise
             except Exception as error:
                 self.results.append((entry_id, 'failed', str(error)))
+                if entry is not None:
+                    entry['status'] = 'failed'
+                    entry['error'] = str(error)
                 self.log_error(self.tr('流水线步骤失败：{id}').format(id=entry_id), error)
                 self.screenshot(f'routine_fail_{entry_id}')
                 self.ensure_main(time_out=180)
             else:
                 self.results.append((entry_id, 'success', ''))
+                if entry is not None:
+                    entry['status'] = 'success'
         self.info_set('流水线结果', self.results)
         acted = [row for row in self.results if row[1] != 'skipped']
         self.log_info(self.tr('日常流水线完成：{success}/{total}，跳过 {skipped} 项。').format(
