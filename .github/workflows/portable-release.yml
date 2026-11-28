@@ -167,7 +167,8 @@ jobs:
         run: |
           # A pushed v* tag is the exact version to release; manual dispatch
           # uses the input (or auto-bumps when left empty).
-          if ($env:EVENT_NAME -eq 'push' -and -not [string]::IsNullOrWhiteSpace($env:PUSH_TAG)) {
+          $isPushTag = ($env:EVENT_NAME -eq 'push' -and -not [string]::IsNullOrWhiteSpace($env:PUSH_TAG))
+          if ($isPushTag) {
             $tag = "$env:PUSH_TAG".Trim()
             Write-Host "Tag-triggered release: using pushed tag $tag"
           } else {
@@ -207,17 +208,28 @@ jobs:
           } elseif ($tag -match '^v?(\d+)\.(\d+)\.(\d+)((?:[-.](?:alpha|beta|rc)(?:\.\d+)?)?)$') {
             $inMajor = [int]$Matches[1]; $inMinor = [int]$Matches[2]; $inPatch = [int]$Matches[3]
             $suffix = $Matches[4]
+            # A pushed tag is the user's explicit, exact release decision — use
+            # it verbatim. The checkout already contains that tag, so comparing
+            # it against "newest existing tag" would always see itself and bump
+            # forever (v1.0.77 -> v2.0.0 -> ...). Only a manual dispatch with an
+            # explicitly older version needs raising for PyAppify's newest-tag
+            # constraint.
             $newer = ($inMajor -gt $maxMajor) -or
                      ($inMajor -eq $maxMajor -and $inMinor -gt $maxMinor) -or
                      ($inMajor -eq $maxMajor -and $inMinor -eq $maxMinor -and $inPatch -gt $maxPatch)
-            if (-not $newer) {
+            if (-not $newer -and -not $isPushTag) {
               $raised = "v$($maxMajor + 1).0.0$suffix"
-              Write-Host "Requested $tag is not newer than v$maxMajor.$maxMinor.$maxPatch; raised to $raised because PyAppify packages only the newest release tag."
+              Write-Host "Requested $tag is older than newest v$maxMajor.$maxMinor.$maxPatch; raised to $raised because PyAppify packages only the newest release tag."
               $tag = $raised
+            } elseif ($isPushTag -and -not $newer) {
+              Write-Host "Pushed tag $tag is already the newest existing tag; using it as-is (no version bump)."
             }
           }
 
           # Auto-generated / raised tags must not collide with an existing one.
+          # A pushed tag already exists in the checkout by definition; skipping
+          # collision handling for it keeps the exact requested version intact.
+          if (-not $isPushTag) {
           $used = @((& git tag -l | Out-String).Trim() -split "`n" | ForEach-Object { $_.Trim() })
           while ($used -contains $tag) {
             if ($tag -match '^v(\d+)\.(\d+)\.(\d+)(.*)$') {
@@ -225,6 +237,7 @@ jobs:
               $suf = $Matches[4]
               $tag = "v$collMajor.$collMinor.$collPatch$suf"
             } else { break }
+          }
           }
 
           # Must match PyAppify's version-tag pattern: v?X.Y.Z[-(alpha|beta|rc)[.N]]

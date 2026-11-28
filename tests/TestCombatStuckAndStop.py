@@ -206,7 +206,7 @@ class PyAppifyLauncherTest(unittest.TestCase):
         self.assertIn("      - 'v*'", workflow)
         # 版本解析用 push 的 tag 名
         self.assertIn("PUSH_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}", workflow)
-        self.assertIn("if ($env:EVENT_NAME -eq 'push'", workflow)
+        self.assertIn("$isPushTag = ($env:EVENT_NAME -eq 'push'", workflow)
         # inputs 归一化（push 无 inputs），且没有自引用
         self.assertIn("PKG_FORMAT: ${{ inputs.package_format || '7z' }}", workflow)
         self.assertIn("LAUNCHER: ${{ inputs.launcher || 'updater' }}", workflow)
@@ -216,6 +216,19 @@ class PyAppifyLauncherTest(unittest.TestCase):
         self.assertIn('if: ${{ env.LAUNCHER == \'updater\' }}', workflow)
         self.assertIn('if: ${{ env.PUBLISH_RELEASE', workflow)
         self.assertNotIn('inputs.package_format }}', workflow.split('jobs:')[1])
+
+    def test_pushed_tag_keeps_exact_version(self):
+        """推 v* tag 必须用该 tag 的精确版本，不能被自动升级。
+
+        旧逻辑把 checkout 里已存在的 tag 也算进"最新 tag"，导致 v1.0.77
+        被误判为"不比最新新"而升到 v2.0.0，tag 推送永远跳大版本。
+        """
+        workflow = Path('.github/workflows/portable-release.yml').read_text(encoding='utf-8')
+        self.assertIn("$isPushTag = ($env:EVENT_NAME -eq 'push'", workflow)
+        self.assertIn('if (-not $newer -and -not $isPushTag)', workflow)
+        self.assertIn('using it as-is (no version bump)', workflow)
+        # collision 处理（会改名）必须跳过 push tag
+        self.assertIn('if (-not $isPushTag) {\n          $used = @(', workflow)
 
     def test_full_installer_is_manual_only(self):
         """完整安装包仅手动触发：避免与便携版在同一 tag 上双流并跑。"""
