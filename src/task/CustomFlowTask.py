@@ -179,6 +179,58 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
             account=display_account(account_key)))
         RoutineTask._login_target_account(self, account_key)
 
+    def _ensure_account_list_visible(self, account_key):
+        """确保登录页显示完整账号列表，而不是上次登录账号的直达界面。
+
+        鸣潮重启后会记住上次登录的账号：此时登录页只显示"登录 <账号>"，
+        没有账号选择下拉/列表。若此时直接选目标账号，会因为列表里只有
+        当前账号而失败。检测到目标账号不在当前可见账号里时，先点画面上的
+        「切换账号」按钮（Labels.switch_account 模板）回到账号选择界面。
+        """
+        from src.Labels import Labels
+        from src.task.MultiAccountDailyTask import combo_items
+
+        # 1) 原生 ComboBox：目标账号已在列表中就无需切换
+        combo = self._login_combo()
+        if combo:
+            items = combo_items(combo)
+            if any(account_key_from_ocr(text) == account_key for text in items):
+                return
+            # 列表里只有别的账号（多半是上次登录的）-> 需要切回账号选择页
+            switch = self.find_one(Labels.switch_account, vertical_variance=0.1, threshold=0.7)
+            if switch:
+                self.log_info(self.tr('Account list hidden; clicking switch-account'))
+                self.click(switch, after_sleep=3)
+                self.wait_until(lambda: self._account_list_contains(account_key),
+                                time_out=30, settle_time=2, raise_if_not_found=False)
+            return
+
+        # 2) 无 ComboBox：OCR 判断当前显示的账号是否就是目标账号
+        texts = self.ocr()
+        visible_keys = [account_key_from_ocr(b.name) for b in texts
+                        if '*' in b.name or '@' in b.name]
+        if account_key in visible_keys:
+            return
+        switch = self.find_one(Labels.switch_account, vertical_variance=0.1, threshold=0.7)
+        if switch:
+            self.log_info(self.tr('Account list hidden; clicking switch-account'))
+            self.click(switch, after_sleep=3)
+            self.wait_until(lambda: self._account_list_contains(account_key),
+                            time_out=30, settle_time=2, raise_if_not_found=False)
+
+    def _account_list_contains(self, account_key):
+        """当前界面是否已能看到目标账号（ComboBox 或 OCR 账号文字）。"""
+        from src.task.MultiAccountDailyTask import combo_items
+        combo = self._login_combo()
+        if combo and any(account_key_from_ocr(t) == account_key for t in combo_items(combo)):
+            return True
+        try:
+            texts = self.ocr()
+        except Exception:
+            return False
+        return any(account_key_from_ocr(b.name) == account_key for b in texts
+                   if '*' in b.name or '@' in b.name)
+
     # -------------------------------------------------------- server / client
     def _apply_server(self, server):
         """Make ``configured_client_path`` resolve to the requested server."""
@@ -494,6 +546,9 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
                 self.logged_in = False
                 self.ensure_main(time_out=180)
                 self._switch_to_login()
+        # 客户端可能停在"上次登录账号"的直达界面（没有账号选择列表），
+        # 先点「切换账号」把列表调出来，再选目标账号。
+        self._ensure_account_list_visible(account_key)
         # state == 'login': select the account directly.
         self._login_target_account(account_key)
 

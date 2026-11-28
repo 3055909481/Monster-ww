@@ -283,6 +283,19 @@ class TestFlowSteps(unittest.TestCase):
         self.assertIn("if state == 'world':", self.source)
         self.assertIn('self._switch_to_login()', self.source)
 
+    def test_login_shows_account_list_before_selecting(self):
+        """登录前必须先确保账号列表可见，否则会卡在"上次登录账号"直达页。"""
+        self.assertIn('def _ensure_account_list_visible(self, account_key):', self.source)
+        self.assertIn('Labels.switch_account', self.source)
+        # 登录步骤在选账号前调用该方法
+        login_pos = self.source.index('def _login_step(')
+        ensure_pos = self.source.index('self._ensure_account_list_visible(account_key)')
+        target_pos = self.source.index('self._login_target_account(account_key)', login_pos)
+        self.assertLess(login_pos, ensure_pos)
+        self.assertLess(ensure_pos, target_pos)
+        # 目标账号已在列表里就直接返回，避免每次都点切换账号
+        self.assertIn('if any(account_key_from_ocr(text) == account_key for text in items):\n                return', self.source)
+
     def test_step_status_tracked_for_ui(self):
         """每步状态必须实时写进 info，供任务监控页展示进度。"""
         self.assertIn("self.step_status = [", self.source)
