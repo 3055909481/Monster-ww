@@ -470,7 +470,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Publishing the slim release commit failed.' }
             & git tag -a $tag $commit -m "Monster-ww portable release $tag"
             if ($LASTEXITCODE -ne 0) { throw 'git tag failed.' }
-            & git push origin ("refs/tags/{0}" -f $tag)
+            # Force is required: this tag already exists on the remote (it was
+            # just pushed as a full commit) and must be replaced by the slim
+            # release commit. Note: `("refs/tags/{0}" -f $tag)` is PowerShell
+            # string formatting, NOT a git --force flag.
+            & git push origin --force ("refs/tags/{0}" -f $tag)
             if ($LASTEXITCODE -ne 0) { throw 'git push tag failed.' }
             Write-Host "Created and pushed slim tag $tag -> $commit."
           }
