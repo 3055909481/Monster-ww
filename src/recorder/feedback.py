@@ -1,4 +1,4 @@
-"""一键反馈包: 一局的记录、整局画面、这局按 F8 导出的原图、版本信息、这局前后的 coco-ww 日志(可选带上录屏)打成一个 zip。
+"""一键反馈包: 一局的记录、整局画面、这局按 F8 导出的原图、版本信息、这局前后的 Monster-ww 日志(可选带上录屏)打成一个 zip。
 不依赖 Qt。
 
 收到的人在复盘页点「打开反馈包」: 解压到 <记录目录>/imported/<包名>/, 和本地的记录分开放(不会被开新局时删掉)。"""
@@ -161,7 +161,7 @@ def summary_text(info, run, lap_slot):
         *detail_lines(run),
         '',
         '【环境】',
-        f"coco-ww {info['coco_ww'] or '?'} · 录这局的插件 v{info['plugin_recorded'] or '?'} · {info['os']}",
+        f"Monster-ww {info['coco_ww'] or '?'} · 录这局的插件 v{info['plugin_recorded'] or '?'} · {info['os']}",
         '',
         '【包里有】',
         f"axis_runs/{info['run']}  这局的按键、读屏、在场、日志记录",
@@ -174,8 +174,8 @@ def summary_text(info, run, lap_slot):
     else:
         lines.append('F8 导出的原图: ' + ('这局没导出' if not info['exports_skipped'] else
                                           f"这局导出过 {info['exports_skipped']} 次, 打包时没带"))
-    lines.append(f"{LOG_NAME}  coco-ww 日志 {log['from'][11:19]} ~ {log['to'][11:19]} 共 {log['lines']} 行"
-                 if log['lines'] else '日志: 没找到这局的日志(日志文件不在, 或者 coco-ww 关了写日志)')
+    lines.append(f"{LOG_NAME}  Monster-ww 日志 {log['from'][11:19]} ~ {log['to'][11:19]} 共 {log['lines']} 行"
+                 if log['lines'] else '日志: 没找到这局的日志(日志文件不在, 或者 Monster-ww 关了写日志)')
     video = info.get('video')
     if video:
         lines.append(f"{VIDEO_DIR}/{video['name']}  录屏 {video['bytes'] / 1e6:.0f}MB")

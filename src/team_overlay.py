@@ -4,7 +4,7 @@
 main.py 启动早期 monkeypatch ``RunBar.__init__``：原始构造完成后，在连接
 状态胶囊右侧插入一条紧凑的队伍条（3 个圆头像 + 中文名），随刷新定时器更新。
 
-识别数据与 coco-ww 一致：来自 executor 任务实例上的 ``task.chars``（战斗中
+识别数据与 Monster-ww 一致：来自 executor 任务实例上的 ``task.chars``（战斗中
 由 CharFactory 模板匹配认出的 3 个角色），不依赖 OCR、不额外截图，零性能开销。
 未识别到队伍时保留队伍条：头像显示空圈、名字显示「未识别」。
 

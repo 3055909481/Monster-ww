@@ -107,6 +107,37 @@ def _patch_logging():
             target.addFilter(_SanitizingFilter())
 
 
+def _patch_thread_names():
+    """Rename live threads whose names carry upstream branding.
+
+    The log filter only scrubs ``record.threadName`` at render time; the real
+    ``threading.Thread`` object created by the framework (e.g. ``ok-mcp`` in
+    Mon.core.mcp_server) still exposes the upstream name to debuggers, process
+    inspectors and any code that reads ``thread.name`` directly. Renaming at
+    ``start()`` covers threads created during Mon import as well as later ones.
+    """
+    import threading
+
+    if getattr(threading.Thread, "_monster_ww_name_patched", False):
+        return False
+    original_start = threading.Thread.start
+
+    def start(self, _original=original_start):
+        name = getattr(self, "name", None)
+        if isinstance(name, str):
+            sanitized = sanitize_text(name)
+            if sanitized != name:
+                try:
+                    self.name = sanitized
+                except Exception:
+                    pass
+        return _original(self)
+
+    start._monster_ww_name_patched = True
+    threading.Thread.start = start
+    return True
+
+
 def _patch_logger_file():
     """Rename the framework log: config_logger(config, name='Mon-script')."""
     from Mon.util import logger as logger_module
@@ -387,6 +418,14 @@ def apply():
     _migrate_user_config_to_appdata()
     _migrate_script_folders()
     _patch_logging()
+    # 真实线程名要在 Mon 导入/建线程之前改写；日志过滤只管渲染，管不到
+    # threading.Thread.name 本身（框架会创建名为 ok-mcp 的 MCP 线程）。
+    try:
+        _patch_thread_names()
+    except Exception as exc:
+        logging.getLogger("Mon").warning(
+            "identity thread-name patch skipped: %s", exc
+        )
 
     import Mon as mon_package
 

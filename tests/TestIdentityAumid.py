@@ -245,6 +245,21 @@ class TestThreadNameSanitizing(unittest.TestCase):
         ident._SanitizingFilter().filter(record)
         self.assertEqual(record.threadName, 'MainThread')
 
+    def test_live_thread_is_renamed_at_start(self):
+        """框架真实线程名（Mon.core.mcp_server 的 ok-mcp）也必须改写。"""
+        import threading
+        ident._patch_thread_names()
+        observed = []
+
+        def target():
+            observed.append(threading.current_thread().name)
+
+        thread = threading.Thread(target=target, name='ok-mcp', daemon=True)
+        thread.start()
+        thread.join(timeout=5)
+        self.assertEqual(thread.name, 'monster-ww-mcp')
+        self.assertEqual(observed, ['monster-ww-mcp'])
+
 
 if __name__ == '__main__':
     unittest.main()
