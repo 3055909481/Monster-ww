@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-  Replaces PyAppify's embedded launcher manifest. The original only declares
-  Common-Controls (v1.2.7 build.rs has "const UAC: bool = false"), which keeps
-  the launcher and its pythonw.exe children at MEDIUM integrity. Wuthering Waves
-  runs elevated, so PostMessage is blocked by UIPI with Win32 error 5.
-  Everything from the original manifest is preserved; only trustInfo is added.
+  Kept as a reference manifest for the PyAppify launcher. It declares
+  asInvoker on purpose: no forced UAC prompt. Users who need to control an
+  elevated game window must run the app as administrator themselves, since
+  UIPI otherwise blocks PostMessage with Win32 error 5.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <dependency>
@@ -15,7 +14,7 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

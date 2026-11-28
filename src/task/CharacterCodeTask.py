@@ -20,7 +20,6 @@ from src.char.CustomCharLoader import (
 
 
 BASE_CHAR_URL = "https://raw.githubusercontent.com/3055909481/Monster-ww/refs/heads/master/src/char/BaseChar.py"
-CONTRIBUTE_CHAR_URL = "https://github.com/3055909481/Monster-ww/edit/master/src/char/{class_name}.py"
 CHARACTER_DISPLAY_NAMES = {
     "Douling": "Buling",
     "Xigelika": "Sigrika",
@@ -88,7 +87,6 @@ class CharacterCodeTask(WebCustomTab):
             "code": read_custom_or_builtin_char_code(char_cls) if use_custom else builtin_code,
             "image_data_url": self._character_image_data_url(char_cls),
             "base_char_url": BASE_CHAR_URL,
-            "contribute_url": CONTRIBUTE_CHAR_URL.format(class_name=char_cls.__name__),
         }
 
     def _load_char_feature_index(self):

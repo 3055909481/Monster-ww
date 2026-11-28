@@ -1,0 +1,214 @@
+# Offline (no-launcher) release, built on every version tag push.
+#
+# The existing portable-release.yml ships the PyAppify-launcher build on the
+# same tag. This workflow adds a second Release asset: a plain PyInstaller
+# portable folder with no launcher, no updater and no network on startup.
+# Runtime identity (app/thread/window names, log name, AUMID, mutex marker)
+# is rebranded by src/identity.py at process start, exactly like the online
+# build, so both packages expose the same Monster-ww identity.
+#
+# No forced elevation: the exe is asInvoker. Users who need to drive an
+# elevated game window must right-click -> Run as administrator themselves
+# (UIPI otherwise blocks PostMessage with Access is denied).
+
+name: Monster-ww Offline Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual dry-run: build the offline package without attaching it to a Release.
+  # Use this to validate the PyInstaller pipeline before publishing a tag.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for the test build (e.g. v1.0.82-test). Ignored for tag pushes.'
+        required: false
+        default: 'dev'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: offline-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-offline:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:EVENT_NAME -eq 'push') {
+            $tag = "$env:REF_NAME".Trim()
+            if ($tag -notmatch '^v?\d+\.\d+\.\d+(?:[-.](?:alpha|beta|rc)(?:\.\d+)?)?$') {
+              throw "Unsupported release tag: $tag"
+            }
+          } else {
+            $tag = "$env:INPUT_VERSION".Trim()
+            if (-not $tag) { $tag = 'dev' }
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "number=$($tag -replace '^v', '')" >> $env:GITHUB_OUTPUT
+          "is_tag=$($env:EVENT_NAME -eq 'push')" >> $env:GITHUB_OUTPUT
+          Write-Host "Offline release version: $tag (event: $env:EVENT_NAME)"
+
+      - name: Set up Python 3.12 for native compilation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build toolchain
+        run: |
+          python -m pip install --disable-pip-version-check --upgrade pip
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check "cython>=3" "setuptools>=77" pyinstaller
+
+      - name: Generate character source snapshots
+        run: python .github/scripts/build_char_sources.py
+
+      - name: Compile runtime sources to native extensions
+        # Mirrors portable-release.yml: one .pyd per module, parallel C++ builds.
+        run: python setup.py build_ext --inplace --force --parallel 4
+
+      - name: Verify compiled modules
+        shell: pwsh
+        run: |
+          $count = @(Get-ChildItem -Recurse -Filter '*.cp312-win_amd64.pyd' -ErrorAction SilentlyContinue).Count
+          Write-Host "Compiled $count native modules."
+          if ($count -lt 100) { throw "Expected 100+ compiled modules, got $count." }
+          foreach ($required in @('src/task/BaseWWTask.cp312-win_amd64.pyd', 'config.cp312-win_amd64.pyd', 'build/char_sources/BaseChar.py')) {
+            if (-not (Test-Path $required)) { throw "$required missing." }
+          }
+
+      - name: Run tests against compiled modules
+        # .pyd wins over .py on sys.path; run_tests.ps1 is the project's
+        # proven entry point (handles encoding, offscreen Qt and flaky cases).
+        timeout-minutes: 20
+        run: ./run_tests.ps1
+        env:
+          PYTHONIOENCODING: 'utf-8'
+          PYTHONLEGACYWINDOWSSTDIO: 'utf-8'
+          QT_QPA_PLATFORM: offscreen
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+          ACTIONS_RUNTIME_TOKEN: ''
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
+
+      - name: Strip Python sources from the build tree
+        shell: pwsh
+        run: |
+          $stripped = 0
+          # Keep modules listed in setup.py EXCLUDE_FILES as source: they patch
+          # framework classes with nested functions that need real descriptors.
+          $keep = @('__init__.py', 'identity.py', 'schedule_patch.py', 'adaptive_interval.py',
+                    'team_overlay.py', 'click_jitter.py', 'recorder.py')
+          Get-ChildItem -Recurse -Filter '*.py' src | Where-Object {
+            $_.Name -notin $keep -and (Test-Path ($_.FullName -replace '\.py$', '.cp312-win_amd64.pyd'))
+          } | ForEach-Object {
+            Remove-Item $_.FullName
+            $stripped++
+          }
+          if (Test-Path config.py) { Remove-Item config.py; $stripped++ }
+          if ($stripped -lt 100) { throw "Expected to strip 100+ sources, stripped $stripped" }
+          "Stripped $stripped source files; the offline package ships compiled modules only."
+
+      - name: Verify identity isolation sources kept
+        shell: pwsh
+        run: |
+          foreach ($required in @('src/identity.py', 'src/schedule_patch.py',
+                                  'src/adaptive_interval.py', 'src/team_overlay.py',
+                                  'src/click_jitter.py', 'src/recorder/recorder.py')) {
+            if (-not (Test-Path $required)) { throw "Identity patch source missing: $required" }
+          }
+          Write-Host 'All runtime identity patches kept as source.'
+
+      - name: Build offline portable app
+        env:
+          APP_VERSION: ${{ steps.version.outputs.tag }}
+        run: python -m PyInstaller --noconfirm Monster-ww.spec
+
+      - name: Verify offline exe identity
+        shell: pwsh
+        run: |
+          $exe = 'dist/Monster-ww/Monster-ww.exe'
+          if (-not (Test-Path $exe)) { throw "Offline exe missing: $exe" }
+          $info = (Get-Item $exe).VersionInfo
+          if ($info.ProductName -ne 'Monster-ww') { throw "Unexpected ProductName: $($info.ProductName)" }
+          if ($info.OriginalFilename -ne 'Monster-ww.exe') { throw "Unexpected OriginalFilename: $($info.OriginalFilename)" }
+          Write-Host "Offline exe identity OK: $($info.ProductName) / $($info.OriginalFilename) / $($info.ProductVersion)"
+
+      - name: Package offline archive
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          $metadata = [ordered]@{
+            version = $env:APP_VERSION
+            commit = $env:GITHUB_SHA
+            run_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            python = (python --version)
+            launcher = 'none'
+            updater = 'none'
+            elevation = 'asInvoker (run as administrator manually if needed)'
+          }
+          $metadata | ConvertTo-Json | Set-Content 'dist/Monster-ww/build-info.json' -Encoding utf8
+          $archive = "Monster-ww-win32-Offline-$env:APP_VERSION.zip"
+          python -m zipfile -c $archive dist/Monster-ww
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content "$archive.sha256" -Encoding ascii
+          @(
+            "Offline package: $archive",
+            "SHA-256: $hash",
+            "Version: $env:APP_VERSION"
+          ) -join "`n" | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload offline archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Monster-ww-offline-${{ steps.version.outputs.number }}
+          path: |
+            Monster-ww-win32-Offline-*.zip
+            Monster-ww-win32-Offline-*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach offline asset to the tag release
+        # Appends to the Release created by portable-release.yml on the same tag.
+        # If that job has not finished yet, wait briefly and retry before failing.
+        # Manual dry-runs skip this step entirely.
+        if: ${{ github.event_name == 'push' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $asset = (Get-ChildItem -Filter 'Monster-ww-win32-Offline-*.zip' -File | Select-Object -First 1).FullName
+          if (-not $asset) { throw 'Offline archive missing.' }
+          gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Release not created yet; waiting up to 5 minutes for portable-release.yml...'
+            $deadline = (Get-Date).AddMinutes(5)
+            while ((Get-Date) -lt $deadline) {
+              Start-Sleep -Seconds 15
+              gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
+              if ($LASTEXITCODE -eq 0) { break }
+            }
+          }
+          gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Release $TAG does not exist; cannot attach offline asset." }
+          gh release upload $TAG $asset --repo "$env:GITHUB_REPOSITORY" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to attach offline asset to the Release.' }
+          Write-Host "Attached offline asset to Release $TAG"

@@ -44,13 +44,10 @@
 #   In "cmd-only" mode a tiny icon-only exe wrapper is shipped instead, with no
 #   network/update logic at all, for users who prefer a fully offline package.
 #
-#   BOTH entry points must run elevated. PyAppify v1.2.7 builds the Tauri
-#   launcher with UAC disabled (src-tauri/build.rs: "const UAC: bool = false"),
-#   so an unpatched Monster-ww.exe runs pythonw at MEDIUM integrity while Wuthering
-#   Waves runs at HIGH. UIPI then blocks PostMessage with Win32 error 5
-#   ("Access is denied") and the script cannot click or press keys. Monster-ww.cmd
-#   already self-elevates via fltmc + RunAs; the "Require administrator for the
-#   updater launcher" step patches the extracted exe's RT_MANIFEST the same way.
+#   No entry point forces elevation. Both ship asInvoker, so no UAC prompt
+#   appears on double-click. Users who drive an elevated game window must
+#   right-click -> Run as administrator themselves: UIPI otherwise blocks
+#   PostMessage with Win32 error 5 ("Access is denied") and clicks/keys fail.
 
 name: Monster-ww Portable Release
 run-name: Monster-ww portable · ${{ github.ref_type == 'tag' && github.ref_name || inputs.version || format('auto run {0}', github.run_number) }}
@@ -632,32 +629,15 @@ jobs:
           Copy-Item -LiteralPath $exe -Destination (Join-Path $outDir 'Monster-ww.exe') -Force
           Write-Host ("Using PyAppify updater launcher ({0} bytes)" -f $size)
 
-      # PyAppify's embedded manifest has no trustInfo, i.e. asInvoker. Launching
-      # Monster-ww.exe directly then leaves pythonw at MEDIUM integrity and every
-      # PostMessage to the elevated game window fails with Win32 error 5 (UIPI).
-      # Patch RT_MANIFEST/1 so double-clicking the launcher requests elevation
-      # once, and the whole process tree (launcher -> pythonw) is HIGH.
-      - name: Require administrator for the updater launcher
+      # No forced elevation. The launcher ships asInvoker; users who need to
+      # drive an elevated game window must right-click -> Run as administrator
+      # themselves. Keep only a presence check here.
+      - name: Verify updater launcher present
         if: ${{ env.LAUNCHER == 'updater' }}
         run: |
-          $script = Join-Path (Get-Location) '.github/scripts/patch_launcher_manifest.py'
-          $manifest = Join-Path (Get-Location) '.github/scripts/MonsterUpdater.manifest.xml'
-          foreach ($asset in @($script, $manifest)) {
-            if (-not (Test-Path $asset)) { throw "Launcher asset missing: $asset" }
-          }
           $exe = Join-Path (Get-Location) 'launcher/Monster-ww.exe'
           if (-not (Test-Path $exe)) { throw 'Extracted updater launcher is missing.' }
-          # ctypes calls the Win32 resource-update APIs directly; no compiler
-          # is needed. The runner has python on PATH, and the Python that
-          # pyappify-action just bundled is a guaranteed fallback.
-          $py = (Get-Command python -ErrorAction SilentlyContinue).Source
-          if (-not $py) {
-            $py = Join-Path (Get-Location) 'pyappify_dist/Monster-ww/data/apps/Monster-ww/python/python.exe'
-          }
-          if (-not $py -or -not (Test-Path $py)) { throw 'No Python interpreter is available to patch the launcher manifest.' }
-          & $py $script $exe $manifest
-          if ($LASTEXITCODE -ne 0) { throw "Patching the launcher manifest failed (exit $LASTEXITCODE)." }
-          Write-Host ("Patched launcher requires administrator ({0} bytes)" -f (Get-Item -LiteralPath $exe).Length)
+          Write-Host ("Updater launcher present ({0} bytes, asInvoker)" -f (Get-Item -LiteralPath $exe).Length)
 
       # Whichever mode was selected, launcher/Monster-ww.exe now holds the binary
       # to place next to Monster-ww.cmd inside Monster-ww/.
@@ -899,7 +879,7 @@ jobs:
             'The team workshop is fully offline: 49 teams / 69 configurations ship in workshop_bundle/, so no CDN access is needed.'
             'Custom scripts use the canonical ok_tasks/ and ok_import/ folders; legacy Monster-ww_scripts/ and Monster-ww_drop/ are migrated on first start (a conflicting file aborts startup instead of being overwritten). Runtime logs use Monster-ww-runtime.log.'
             'The bundled framework is Mon-script 3.0.5b8-mon1 (upstream v3.8.1: CLI -t/-e tasks and smoother dropdowns / task filtering).'
-            'Both entry points request administrator rights. The game runs elevated, so a non-elevated script gets Win32 error 5 (Access is denied) on every PostMessage and cannot click or press keys.'
+            'No entry point forces elevation (both are asInvoker, no UAC prompt). If the game runs elevated, a non-elevated script gets Win32 error 5 (Access is denied) on every PostMessage; right-click -> Run as administrator in that case.'
             'Slim release tag: templates_src/, tests/, docs/ and build tooling are excluded, so the archive is ~205 MB (measured 205.6 MB) instead of 2.2 GiB while still supporting incremental updates.'
           ) + $launcherSummary
           if ($releaseReady -eq 'false') {
@@ -1031,7 +1011,7 @@ jobs:
 
             - **本版自动战斗修复**：战斗结束识别的 OCR/帧切片异常不再被误判为脱战；Lily 梦状态 50 秒内不会被饿死保护强切进来；副本「重新挑战」改用 OCR 找按钮（找不到才用旧坐标）；脚本自按的 F 不再误触发「按 F 开战」；登录卡在登录页会退出任务而非无限重试；内置框架同步到 Mon-script 3.0.15-mon1（对应 ok-script 3.0.15b1）。
 
-            - **必须以管理员权限运行**：`Monster-ww.exe` 已内置 `requireAdministrator` 清单，双击会弹出一次 UAC 提权；`Monster-ww.cmd` 通过 `fltmc` 自提权。鸣潮客户端本身是管理员权限，脚本若以普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应
+            - **需要控制游戏窗口时请右键「以管理员身份运行」**：程序不再内置强制提权清单，双击直接启动、无 UAC 弹窗。鸣潮客户端以管理员权限运行，若脚本用普通权限启动，`PostMessage` 会被 UIPI 拦截并报 `(5, 'PostMessage', '拒绝访问。')`，表现为点击、按键完全无反应；遇到这种情况请右键 exe/cmd 选择以管理员身份运行
             - 本次启动器模式：`${{ env.LAUNCHER }}`
             - 更新源（`pyappify.yml` 的 `git_url`）：`${{ env.UPDATE_REPO || format('{0}/{1}.git', github.server_url, github.repository) }}`
             - `updater` 模式：`Monster-ww.exe` 是 PyAppify 官方启动器，也就是原项目那个「启动 + 更新」程序。它只从上面的更新源 fetch 新版本 tag 的差异对象，再 checkout 到 `data/apps/Monster-ww/working`；Python 环境、pip 依赖和 `configs/` 都不在这个仓库里，因此不会被重新下载或覆盖。首次仍需完整包，之后每次更新只传变化的源码文件，用户配置与队伍配置全部保留
