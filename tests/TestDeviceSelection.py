@@ -99,25 +99,58 @@ class TestDefaultSelection(unittest.TestCase):
 class TestInstall(unittest.TestCase):
 
     def test_patches_both_methods(self):
-        fake_dm = MagicMock()
-        original_get = lambda self: []
-        original_set = lambda self, imei=None, index=-1: None
-        fake_dm.get_devices = original_get
-        fake_dm.set_preferred_device = original_set
+        # 用真实类（不是 MagicMock）验证描述符绑定：MagicMock 的属性访问不走
+        # __get__，会掩盖 v1.0.77 的 "self 丢失" 崩溃。
+        class DM:
+            def get_devices(self):
+                return []
+
+            def set_preferred_device(self, imei=None, index=-1):
+                return None
+
         dsp._INSTALLED = False
+        dsp._PATCHED = None
         with patch.dict('sys.modules', {'Mon': MagicMock(),
                                         'Mon.device': MagicMock(),
-                                        'Mon.device.DeviceManager': MagicMock(DeviceManager=fake_dm)}):
+                                        'Mon.device.DeviceManager': MagicMock(DeviceManager=DM)}):
             dsp.install()
-        # 方法必须被替换成我们的实现；不再依赖函数自定义属性（Cython 编译后
-        # builtin 方法无法挂属性，CI 编译环境曾因此 install 抛异常、patch 失效）。
-        self.assertIsNot(fake_dm.get_devices, original_get)
-        self.assertIsNot(fake_dm.set_preferred_device, original_set)
         self.assertTrue(dsp._INSTALLED)
-        # 替换后的方法确实按 PC→云鸣潮→安卓 排序
+        self.assertIsInstance(DM.__dict__['get_devices'], dsp._BoundMethod)
+
+        # 关键：实例调用（不显式传 self）必须正常工作且 self 正确绑定
         mgr = FakeDeviceManager([adb(), browser(), pc()])
+        dm = DM()
+        dm.device_dict = mgr.device_dict
+        dm.config = mgr.config
         self.assertEqual(['pc', 'browser', 'adb'],
-                         [d['imei'] for d in fake_dm.get_devices(mgr)])
+                         [d['imei'] for d in dm.get_devices()])
+
+    def test_bound_method_binds_self_like_cython_builtin(self):
+        """守卫：Cython 把函数编译成无 __get__ 的 builtin 时，实例调用不能丢 self。
+
+        v1.0.77 崩溃根因就是裸函数被编译后 ``instance.get_devices()`` 不传
+        self，报 "takes exactly 1 positional argument (0 given)"。
+        """
+        def bare_get(self):
+            return list(self.device_dict)
+
+        class FakeBuiltin:
+            """模拟 Cython 编译产物：函数没有 __get__，不自动绑定。"""
+            def __init__(self, fn):
+                self.fn = fn
+
+            def __call__(self, *args, **kwargs):
+                return self.fn(*args, **kwargs)
+
+        bound = dsp._BoundMethod(FakeBuiltin(bare_get))
+
+        class Host:
+            get_devices = bound
+
+        host = Host()
+        host.device_dict = {'a': 1, 'b': 2}
+        # 实例调用，self 必须由描述符闭包注入
+        self.assertEqual(['a', 'b'], host.get_devices())
 
     def test_browser_enabled_in_config(self):
         src = Path('config.py').read_text(encoding='utf-8')
