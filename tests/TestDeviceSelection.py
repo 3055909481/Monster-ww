@@ -46,8 +46,15 @@ class TestSortOrder(unittest.TestCase):
         self.assertEqual(['pc', 'browser', 'adb', 'x'], [d['imei'] for d in result])
 
     def test_framework_default_order_is_reversed(self):
-        """守卫：框架原序确实是 adb 优先（不然 patch 就多余）。"""
-        src = Path('.mon-tmp/Mon/device/DeviceManager.py').read_text(encoding='utf-8')
+        """守卫：框架原序确实是 adb 优先（不然 patch 就多余）。
+
+        编译后的 CI 环境没有 .mon-tmp 源码，只有开发 checkout 才有；
+        这种环境下跳过即可，patch 行为由其它测试覆盖。
+        """
+        source = Path('.mon-tmp/Mon/device/DeviceManager.py')
+        if not source.exists():
+            self.skipTest('framework source not present in compiled build')
+        src = source.read_text(encoding='utf-8')
         body = src[src.index('    def get_devices(self):'):src.index('    def _replace_pc_devices')]
         self.assertLess(body.index("'adb'"), body.index("'windows'"))
         self.assertLess(body.index("'windows'"), body.index("'browser'"))
@@ -93,15 +100,24 @@ class TestInstall(unittest.TestCase):
 
     def test_patches_both_methods(self):
         fake_dm = MagicMock()
-        fake_dm.get_devices = lambda self: []
-        fake_dm.set_preferred_device = lambda self, imei=None, index=-1: None
+        original_get = lambda self: []
+        original_set = lambda self, imei=None, index=-1: None
+        fake_dm.get_devices = original_get
+        fake_dm.set_preferred_device = original_set
         dsp._INSTALLED = False
         with patch.dict('sys.modules', {'Mon': MagicMock(),
                                         'Mon.device': MagicMock(),
                                         'Mon.device.DeviceManager': MagicMock(DeviceManager=fake_dm)}):
             dsp.install()
-        self.assertTrue(getattr(fake_dm.get_devices, '_device_patch_wrapped', False))
-        self.assertTrue(getattr(fake_dm.set_preferred_device, '_device_patch_wrapped', False))
+        # 方法必须被替换成我们的实现；不再依赖函数自定义属性（Cython 编译后
+        # builtin 方法无法挂属性，CI 编译环境曾因此 install 抛异常、patch 失效）。
+        self.assertIsNot(fake_dm.get_devices, original_get)
+        self.assertIsNot(fake_dm.set_preferred_device, original_set)
+        self.assertTrue(dsp._INSTALLED)
+        # 替换后的方法确实按 PC→云鸣潮→安卓 排序
+        mgr = FakeDeviceManager([adb(), browser(), pc()])
+        self.assertEqual(['pc', 'browser', 'adb'],
+                         [d['imei'] for d in fake_dm.get_devices(mgr)])
 
     def test_browser_enabled_in_config(self):
         src = Path('config.py').read_text(encoding='utf-8')

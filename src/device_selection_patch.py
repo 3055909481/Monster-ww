@@ -64,22 +64,17 @@ def install():
         return
     try:
         from Mon.device.DeviceManager import DeviceManager
-        if getattr(DeviceManager.get_devices, '_device_patch_wrapped', False):
-            _INSTALLED = True
-            return
-
+        # 幂等只靠模块级 _INSTALLED，不用函数属性做标记：Cython 编译后
+        # DeviceManager 的方法是 builtin_function_or_method，无法 setattr，
+        # 给 patched 函数挂自定义属性会让 install 直接抛异常、patch 失效。
         original_get = DeviceManager.get_devices
         _original_set_preferred = DeviceManager.set_preferred_device
 
         def patched_get(self):
             return _sorted_devices(self)
 
-        patched_get._device_patch_wrapped = True
-
         def patched_set(self, imei=None, index=-1):
             return _set_preferred_device(self, imei, index)
-
-        patched_set._device_patch_wrapped = True
 
         DeviceManager.get_devices = patched_get
         DeviceManager.set_preferred_device = patched_set
