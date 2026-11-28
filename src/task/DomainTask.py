@@ -2,6 +2,7 @@ import re
 
 
 from Mon import Logger
+from Mon.task.exceptions import CannotFindException
 from src.task.BaseCombatTask import (
     BaseCombatTask, NotInCombatException, CharDeadException, ClaimRewardException,
 )
@@ -123,7 +124,16 @@ class DomainTask(WWOneTimeTask, BaseCombatTask):
         self.info_incr('used stamina', 0)
         runs = 0
         while True:
-            self.walk_until_f(time_out=4, backward_time=0, raise_if_not_found=True)
+            # 进本后找不到 F（重新挑战没真正进本 / 被弹窗挡住）属于可恢复错误：
+            # 退回大世界并从 F2 重进，而不是让整个流水线步骤直接失败。
+            try:
+                self.walk_until_f(time_out=4, backward_time=0, raise_if_not_found=True)
+            except CannotFindException as f_error:
+                self._last_recovery_reason = 'no_f'
+                self.log_warning(self.tr('farm_in_domain: cannot find F ({error}), exit and re-enter domain').format(
+                    error=f_error))
+                self.make_sure_in_world()
+                return False, must_use
             self.pick_f()
             try:
                 self.combat_once()

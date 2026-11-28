@@ -92,6 +92,28 @@ class TestDomainRecoveryLoop(unittest.TestCase):
         # 领奖失败退出副本后不在信标点，需重新传送；死亡恢复才跳过传送。
         self.assertIn("realm_entry_at_heal_point = getattr(self, '_last_recovery_reason', 'death') == 'death'", source)
 
+    def test_cannot_find_f_is_recoverable(self):
+        """找不到 F 不能让整个副本步骤失败，要走「退本重进」恢复循环。"""
+        source = Path("src/task/DomainTask.py").read_text(encoding="utf-8")
+        module = ast.parse(source)
+        class_node = next(n for n in module.body
+                          if isinstance(n, ast.ClassDef) and n.name == "DomainTask")
+        method = next(n for n in class_node.body
+                      if isinstance(n, ast.FunctionDef) and n.name == "farm_in_domain")
+
+        # walk_until_f 抛 CannotFindException 必须被捕获
+        catches_no_f = any(
+            isinstance(node, ast.ExceptHandler)
+            and isinstance(node.type, ast.Name)
+            and node.type.id == "CannotFindException"
+            for node in ast.walk(method)
+        )
+        self.assertTrue(catches_no_f, "farm_in_domain must catch CannotFindException")
+        # 恢复标记为 no_f，且退回大世界后交回恢复循环
+        self.assertIn("_last_recovery_reason = 'no_f'", source)
+        self.assertIn("cannot find F", source)
+        self.assertIn("from Mon.task.exceptions import CannotFindException", source)
+
     def test_loop_unpacks_must_use_from_farm_in_domain(self):
         has_unpack = any(
             isinstance(node, ast.Assign)
