@@ -1274,14 +1274,12 @@ class BaseWWTask(BaseTask):
             time_out=timeout)
 
     def click_skip_dialog_confirm(self):
-        skip_dialog_confirm = self.find_one(
-            ['confirm_btn_hcenter_vcenter', 'confirm_btn_highlight_hcenter_vcenter'],
-            horizontal_variance=0.1,
-            vertical_variance=0.1,
-        )
-        if not skip_dialog_confirm:
-            return False
-
+        # Check the "skip dialog" checkbox FIRST. Other confirm dialogs (e.g.
+        # the "提前到达目标位置…是否确认前往" story prompt) share the same
+        # confirm-button template and would otherwise make find_one(confirm_btn)
+        # match twice ("too many 2") every 0.5s from AutoDialogTask's trigger,
+        # flooding the log while never being dismissed. Bail out before looking
+        # for the confirm button unless this really is a skip-dialog prompt.
         skip_dialog_check = self.find_one(
             'skip_dialog_check',
             horizontal_variance=0.1,
@@ -1302,6 +1300,14 @@ class BaseWWTask(BaseTask):
                 template=wide_check_template,
             )
         if not skip_dialog_check:
+            return False
+
+        skip_dialog_confirm = self.find_one(
+            ['confirm_btn_hcenter_vcenter', 'confirm_btn_highlight_hcenter_vcenter'],
+            horizontal_variance=0.1,
+            vertical_variance=0.1,
+        )
+        if not skip_dialog_confirm:
             return False
 
         logger.info('confirm dialog exists, click confirm')
@@ -1591,10 +1597,43 @@ class BaseWWTask(BaseTask):
         raise Exception(self.tr('boss book: {wanted} not found, list has: {names}').format(
             wanted=wanted, names=names))
 
+    # 剧情「提前到达目标位置可能影响剧情体验，是否确认前往？」二次确认弹窗。
+    # 从图鉴点「直接挑战/前往」后，若剧情尚未解锁到该位置，游戏会弹这个框；
+    # 不点「确认」就进不了队伍/传送界面，wait_after_book_click 会白白超时。
+    _EARLY_ARRIVAL_TEXT = re.compile(r'提前到达|确认前往|確認前往|影响剧情|影響劇情')
+    _EARLY_ARRIVAL_CONFIRM = re.compile(r'^\s*(?:确认|確認|确定|確定|Confirm)\s*$', re.IGNORECASE)
+
+    def handle_early_arrival_confirm(self):
+        """处理剧情「提前到达目标位置…是否确认前往」弹窗。
+
+        返回 True 表示本次确实检测到并处理了弹窗。只扫描屏幕中部区域，
+        命中文案后在弹窗右半区找「确认」按钮点击；OCR 漏识按钮文字时
+        用弹窗内右侧按钮的相对坐标兜底。供 wait_after_book_click 的
+        pre_action 每次轮询调用，避免这类弹窗卡住传送流程。
+        """
+        # 弹窗居中，标题/正文大致落在中部；限定区域降低误判与 OCR 开销。
+        dialog_box = self.box_of_screen(0.22, 0.28, 0.78, 0.72)
+        hit = self.ocr(box=dialog_box, match=self._EARLY_ARRIVAL_TEXT)
+        if not hit:
+            return False
+
+        self.log_info(self.tr('early-arrival confirm dialog detected, clicking confirm'))
+        # 「确认」按钮在弹窗右半区（截图中取消在左、确认在右）。
+        confirm_box = self.box_of_screen(0.50, 0.58, 0.78, 0.72)
+        confirm = self.ocr(box=confirm_box, match=self._EARLY_ARRIVAL_CONFIRM)
+        if confirm:
+            self.click_box(confirm[-1])
+        else:
+            # OCR 偶发漏识：用右侧按钮中心兜底（相对整屏坐标）。
+            self.click(0.66, 0.65)
+        self.sleep(1)
+        return True
+
     def wait_after_book_click(self):
         """点了「直接挑战/前往」之后：队伍界面返回 True，地图传送界面返回 False。"""
         feature = self.wait_feature(['fast_travel_custom', 'gray_teleport', 'remove_custom', *TEAM_SCREEN_FEATURES],
-                                    time_out=10, settle_time=0.5, raise_if_not_found=True)
+                                    time_out=10, settle_time=0.5, raise_if_not_found=True,
+                                    pre_action=self.handle_early_arrival_confirm)
         return feature.name in TEAM_SCREEN_FEATURES
 
     def change_time_to_night(self):
