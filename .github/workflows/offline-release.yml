@@ -199,8 +199,10 @@ jobs:
           if (-not $asset) { throw 'Offline archive missing.' }
           gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host 'Release not created yet; waiting up to 5 minutes for portable-release.yml...'
-            $deadline = (Get-Date).AddMinutes(5)
+            # The online slim build's PyAppify packaging alone takes ~20 min,
+            # so a 5-minute wait always times out. Wait up to 45 minutes.
+            Write-Host 'Release not created yet; waiting up to 45 minutes for portable-release.yml...'
+            $deadline = (Get-Date).AddMinutes(45)
             while ((Get-Date) -lt $deadline) {
               Start-Sleep -Seconds 15
               gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
