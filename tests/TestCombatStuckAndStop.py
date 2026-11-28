@@ -213,6 +213,18 @@ class PyAppifyLauncherTest(unittest.TestCase):
         self.assertIn('if: ${{ env.PUBLISH_RELEASE', workflow)
         self.assertNotIn('inputs.package_format }}', workflow.split('jobs:')[1])
 
+    def test_full_installer_is_manual_only(self):
+        """完整安装包仅手动触发：避免与便携版在同一 tag 上双流并跑。"""
+        build = Path('.github/workflows/build.yml').read_text(encoding='utf-8')
+        self.assertIn('  workflow_dispatch:', build)
+        self.assertIn("      version:", build)
+        # 不能有 push tag 触发器
+        self.assertNotIn("    tags:\n      - 'v*'", build)
+        # 手动触发时 github.ref_name 是分支名，版本必须来自 inputs.version
+        self.assertIn("RELEASE_TAG: ${{ inputs.version }}", build)
+        self.assertNotIn('RELEASE_TAG: ${{ github.ref_name }}', build)
+        self.assertNotIn('${GITHUB_REF_NAME#v}', build)
+
 
 class ReviewRound3Test(unittest.TestCase):
     """三轮审查修复守卫。"""

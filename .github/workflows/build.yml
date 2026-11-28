@@ -1,10 +1,16 @@
 name: Windows Release
-run-name: Windows release · ${{ github.ref_name }}
+run-name: Windows release · ${{ inputs.version }}
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Tag pushes now release the portable archive only (portable-release.yml).
+  # The full Windows installer flow is manual to avoid two release pipelines
+  # racing on the same tag. Supply the exact version when dispatching.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to release, e.g. v1.0.75'
+        required: true
+        type: string
 
 concurrency:
   group: windows-release-${{ github.ref }}
@@ -19,6 +25,8 @@ env:
   PYTHONIOENCODING: 'UTF-8'
   PYTHONLEGACYWINDOWSSTDIO: 'UTF-8'
   BUILD_EXE: 'true'
+  # 手动触发时 github.ref_name 是分支名(master)，不能当版本号；用 inputs.version。
+  RELEASE_TAG: ${{ inputs.version }}
 #  USE_RELEASE: 'https://api.github.com/repos/3055909481/Monster-ww/releases/tags/v18.0.17'
 
 jobs:
@@ -57,7 +65,7 @@ jobs:
 
       - name: Prepare release requirements
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: python -m Mon.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
 
       - name: Run tests
@@ -139,7 +147,7 @@ jobs:
 
       - name: Prepare release requirements
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: python -m Mon.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
 
       - name: Check release version
@@ -147,7 +155,7 @@ jobs:
         if: env.BUILD_EXE == 'true'
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: |
           $isRelease = $env:RELEASE_TAG -match '^v?\d+\.\d+\.\d+$'
           "is_release=$($isRelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
@@ -162,7 +170,7 @@ jobs:
             https://cnb:${{ secrets.CNB_TOKEN }}@cnb.cool/3055909481/Monster-ww-update2.git
             https://3055909481:${{ secrets.OK_GH }}@github.com/3055909481/Monster-ww-update
           sync_list: 'deploy.txt'
-          tag: ${{ github.ref_name }}
+          tag: ${{ inputs.version }}
           gitignore_file: '.update_repo_gitignore'
           show_author: true
 
@@ -204,7 +212,7 @@ jobs:
 
       - name: Prepare release requirements
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: python -m Mon.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
 
       - name: Reuse base executable
@@ -413,7 +421,7 @@ jobs:
       - name: Get app version
         id: app_version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
