@@ -187,7 +187,8 @@ jobs:
 
       - name: Attach offline asset to the tag release
         # Appends to the Release created by portable-release.yml on the same tag.
-        # If that job has not finished yet, wait briefly and retry before failing.
+        # The offline job finishes first, so wait for the online job to create
+        # the Release (its PyAppify packaging alone takes ~20 min).
         # Manual dry-runs skip this step entirely.
         if: ${{ github.event_name == 'push' }}
         shell: pwsh
@@ -195,22 +196,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          $asset = (Get-ChildItem -Filter 'Monster-ww-win32-Offline-*.zip' -File | Select-Object -First 1).FullName
-          if (-not $asset) { throw 'Offline archive missing.' }
-          gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            # The online slim build's PyAppify packaging alone takes ~20 min,
-            # so a 5-minute wait always times out. Wait up to 45 minutes.
-            Write-Host 'Release not created yet; waiting up to 45 minutes for portable-release.yml...'
-            $deadline = (Get-Date).AddMinutes(45)
-            while ((Get-Date) -lt $deadline) {
-              Start-Sleep -Seconds 15
-              gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
-              if ($LASTEXITCODE -eq 0) { break }
-            }
+          # NOTE: TAG is injected via `env:`, so it MUST be read as $env:TAG.
+          # Using bare $TAG here is an undefined PowerShell variable ($null),
+          # which silently breaks `gh release view/upload` (missing arguments).
+          $tag = $env:TAG
+          $asset = Join-Path (Get-Location) "Monster-ww-win32-Offline-$tag.zip"
+          if (-not (Test-Path -LiteralPath $asset)) { throw "Offline archive missing: $asset" }
+          Write-Host "Attaching $asset to release $tag"
+
+          $deadline = (Get-Date).AddMinutes(45)
+          while ((Get-Date) -lt $deadline) {
+            gh release view $tag --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 15
           }
-          gh release view $TAG --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "Release $TAG does not exist; cannot attach offline asset." }
-          gh release upload $TAG $asset --repo "$env:GITHUB_REPOSITORY" --clobber
+          gh release view $tag --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Release $tag does not exist; cannot attach offline asset." }
+          gh release upload $tag $asset --repo "$env:GITHUB_REPOSITORY" --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Failed to attach offline asset to the Release.' }
-          Write-Host "Attached offline asset to Release $TAG"
+          Write-Host "Attached offline asset to Release $tag"
