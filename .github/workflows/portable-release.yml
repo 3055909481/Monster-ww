@@ -317,9 +317,9 @@ jobs:
           & git fetch origin --tags --force
           if ($LASTEXITCODE -ne 0) { throw 'git fetch --tags failed.' }
 
-          # Rerunning a build may find the tag already published. Reuse it only
-          # when it is one of OUR slim tags; a tag pointing at a full master
-          # commit would put the 1.1 GB screenshot tree back into the package.
+          # A pushed v* tag always points at a full master commit; that is
+          # expected and must be replaced by our slim release commit. Only an
+          # existing slim tag is reused (it already has the trimmed tree).
           $reuse = $false
           $existing = (& git tag -l $tag | Out-String).Trim()
           if ($existing -eq $tag) {
@@ -329,11 +329,15 @@ jobs:
               $present = (& git ls-tree --name-only $tagged -- $dir | Out-String).Trim()
               if ($present) { $isSlim = $false }
             }
-            if (-not $isSlim) {
-              throw "Tag $tag already exists on a full commit $tagged. Use a newer version or leave version empty."
+            if ($isSlim) {
+              Write-Host "Reusing existing slim tag $tag -> $tagged."
+              $reuse = $true
+            } else {
+              # Full commit (e.g. just-pushed release tag): drop the local tag
+              # so the slim commit below recreates and force-pushes it.
+              Write-Host "Tag $tag points at full commit $tagged; replacing it with a slim release commit."
+              & git tag -d $tag
             }
-            Write-Host "Reusing existing slim tag $tag -> $tagged."
-            $reuse = $true
           }
 
           if (-not $reuse) {
