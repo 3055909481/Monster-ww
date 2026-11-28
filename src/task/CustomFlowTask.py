@@ -305,21 +305,37 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
         self.info_set('任务流', self.flow_name)
         self.results = []
         total = len(selected)
+        # 结构化步骤状态，供任务监控页实时展示每步 成功/失败/执行中/待执行。
+        # 每个字典都放进同一个列表对象：UI 拿到的是引用，原地改 status 即可
+        # 立刻反映，不必每步重新 info_set 整个列表。
+        self.step_status = [
+            {'index': i, 'label': self._step_label(step['id'], step['params']),
+             'status': 'pending', 'error': ''}
+            for i, step in enumerate(selected, 1)
+        ]
+        self.info_set('步骤状态', self.step_status)
         for index, step in enumerate(selected, 1):
             step_id = step['id']
             params = step['params']
             label = self._step_label(step_id, params)
             self.info_set('当前步骤', f'{index}/{total} · {label}')
+            entry = self.step_status[index - 1]
+            entry['status'] = 'running'  # 原地更新，UI 下一秒即可看到执行中
+            entry['error'] = ''
             try:
                 self._run_step(step_id, params)
             except TaskDisabledException:
+                entry['status'] = 'pending'  # 用户主动停止，不算失败
                 raise
             except Exception as error:
+                entry['status'] = 'failed'
+                entry['error'] = str(error)
                 self.results.append((label, 'failed', str(error)))
                 self.log_error(self.tr('任务流步骤失败：{step}').format(step=label), error)
                 self.screenshot(f'custom_flow_fail_{step_id}')
                 self.log_warning(self.tr('Continuing with the next step after a failure.'))
             else:
+                entry['status'] = 'success'
                 self.results.append((label, 'success', ''))
 
         self.info_set('任务流结果', self.results)

@@ -9,6 +9,7 @@ Registered as a custom tab so the framework itself is untouched.
 import time
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
@@ -25,6 +26,39 @@ def _value_text(value):
     if isinstance(value, dict):
         return ', '.join(f'{key}={item}' for key, item in value.items())
     return '' if value is None else str(value)
+
+
+STATUS_LABELS = {
+    'pending': '待执行',
+    'running': '执行中',
+    'success': '成功',
+    'failed': '失败',
+}
+
+
+def _flow_progress(task):
+    """提取工作流任务的步骤进度，返回 (flow_name, current, steps)。
+
+    无步骤状态时返回 (None, '', [])；UI 据此隐藏进度面板。纯函数，便于测试。
+    """
+    if task is None:
+        return None, '', []
+    info = getattr(task, 'info', None) or {}
+    steps = info.get('步骤状态')
+    if not isinstance(steps, (list, tuple)) or not steps:
+        return None, '', []
+    flow_name = info.get('任务流') or ''
+    current = info.get('当前步骤') or ''
+    rows = []
+    for step in steps:
+        if isinstance(step, dict):
+            rows.append((
+                step.get('index', ''),
+                step.get('label', ''),
+                step.get('status', 'pending'),
+                step.get('error', '') or '',
+            ))
+    return flow_name, current, rows
 
 
 def _display_name(task):
@@ -51,6 +85,8 @@ class TaskMonitorTab(CustomTab):
         self._button_tasks = {}  # id(button) -> task, avoids Qt QVariant proxy issues
         self.manual_table = None
         self.trigger_table = None
+        self.flow_table = None
+        self.flow_header = None
         self.manual_stop_all = None
         self.trigger_stop_all = None
         self.stop_button = None
@@ -127,6 +163,23 @@ class TaskMonitorTab(CustomTab):
         layout.addLayout(manual_header)
         self.manual_table = self._make_table(body)
         layout.addWidget(self.manual_table, 1)
+
+        # 工作流步骤进度面板：只在工作流任务运行时显示。
+        self.flow_header = QLabel('', body)
+        layout.addWidget(self.flow_header)
+        self.flow_table = QTableWidget(body)
+        self.flow_table.setColumnCount(4)
+        self.flow_table.setHorizontalHeaderLabels([
+            self.tr('步骤'), self.tr('名称'), self.tr('状态'), self.tr('详情'),
+        ])
+        self.flow_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.flow_table.verticalHeader().setVisible(False)
+        flow_h = self.flow_table.horizontalHeader()
+        for column, width in ((0, 56), (1, 300), (2, 72)):
+            self.flow_table.setColumnWidth(column, width)
+            flow_h.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+        flow_h.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.flow_table, 2)
 
         self.add_widget(body)
         self._refresh()
@@ -217,10 +270,58 @@ class TaskMonitorTab(CustomTab):
         now = time.time()
         self._fill(self.trigger_table, trigger, current, now)
         self._fill(self.manual_table, manual, current, now)
+        self._fill_flow(manual, current)
         has_tasks = bool(tasks)
         self.stop_button.setEnabled(has_tasks)
         self.trigger_stop_all.setEnabled(bool(trigger))
         self.manual_stop_all.setEnabled(bool(manual))
+
+    def _fill_flow(self, manual_tasks, current):
+        """填充工作流步骤进度；没有工作流任务时隐藏面板。"""
+        if self.flow_table is None:
+            return
+        # 优先显示当前正在执行的工作流，否则显示最近一个带步骤状态的任务。
+        flow_task = None
+        for task in manual_tasks:
+            if task is current and getattr(task, 'info', None) and task.info.get('步骤状态'):
+                flow_task = task
+                break
+        if flow_task is None:
+            for task in manual_tasks:
+                if getattr(task, 'info', None) and task.info.get('步骤状态'):
+                    flow_task = task
+                    break
+
+        flow_name, current_label, rows = _flow_progress(flow_task)
+        visible = bool(rows)
+        self.flow_header.setVisible(visible)
+        self.flow_table.setVisible(visible)
+        if not visible:
+            return
+
+        self.flow_header.setText(self.tr('工作流进度：{name} · {cur}').format(
+            name=flow_name, cur=current_label))
+        self.flow_table.setRowCount(len(rows))
+        for row, (index, label, status, error) in enumerate(rows):
+            status_text = STATUS_LABELS.get(status, status)
+            detail = error if status == 'failed' else ''
+            for column, value in enumerate((index, label, status_text, detail)):
+                item = self.flow_table.item(row, column)
+                if item is None:
+                    item = QTableWidgetItem()
+                    self.flow_table.setItem(row, column, item)
+                if item.text() != str(value):
+                    item.setText(str(value))
+            # 状态着色：成功绿、失败红、执行中蓝、待执行灰（深色主题可读）
+            status_item = self.flow_table.item(row, 2)
+            if status_item is not None:
+                # 深色主题下用中亮色阶，保证文字可读
+                color = {
+                    'success': '#97C459', 'failed': '#F09595',
+                    'running': '#85B7EB', 'pending': '#B4B2A9',
+                }.get(status)
+                if color:
+                    status_item.setForeground(QColor(color))
 
     def _on_row_stop(self):
         """Row button slot: read the task bound to the clicked button."""

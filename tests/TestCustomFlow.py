@@ -282,6 +282,20 @@ class TestFlowSteps(unittest.TestCase):
         self.assertIn("state = self._game_state()", self.source)
         self.assertIn("if state == 'world':", self.source)
         self.assertIn('self._switch_to_login()', self.source)
+
+    def test_step_status_tracked_for_ui(self):
+        """每步状态必须实时写进 info，供任务监控页展示进度。"""
+        self.assertIn("self.step_status = [", self.source)
+        self.assertIn("'status': 'pending'", self.source)
+        self.assertIn("self.info_set('步骤状态', self.step_status)", self.source)
+        self.assertIn("entry['status'] = 'running'", self.source)  # 执行中
+        self.assertIn("entry['status'] = 'failed'", self.source)
+        self.assertIn("entry['status'] = 'success'", self.source)
+        self.assertIn("entry['error'] = str(error)", self.source)  # 失败原因
+        # running 必须在 _run_step 之前置位；失败/成功在之后
+        run_pos = self.source.index('self._run_step(step_id, params)')
+        self.assertLess(self.source.index("entry['status'] = 'running'"), run_pos)
+        self.assertLess(run_pos, self.source.index("entry['status'] = 'success'"))
         self.assertIn('self._login_target_account(account_key)', self.source)
 
     def test_start_client_reuses_running_client(self):

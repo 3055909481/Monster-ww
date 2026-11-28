@@ -14,6 +14,14 @@ if __name__ == '__main__':
     except Exception:
         pass
 
+    # 自定义工作流自带 start_game 时跳过框架预启动，避免游戏被启动两次、
+    # 且工作流任务要等框架启动完才进入执行器（状态栏迟迟不显示运行中）。
+    try:
+        from src.flow_start_patch import install as install_flow_start_patch
+        install_flow_start_patch()
+    except Exception:
+        pass
+
     # 触发任务开关必须立即落盘：框架用异步线程 enable 且异常被吞，会导致
     # 界面显示已开启但配置文件不变、重启又关闭。必须在 OK() 加载任务前包装。
     try:
