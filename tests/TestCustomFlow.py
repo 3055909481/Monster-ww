@@ -305,10 +305,16 @@ class TestFlowSteps(unittest.TestCase):
         self.assertTrue(top_classes)
         self.assertFalse([v for v in top_classes if 'Cef' in v or 'Chrome' in v])
 
+        # 云鸣潮(browser)作为可选设备保留（与上游一致），但默认设备与切换由
+        # device_selection_patch 控制：默认 PC、不自动切换到云鸣潮/安卓。
         browser_keys = [key.value for node in ast.walk(config) if isinstance(node, ast.Dict)
                         for key in node.keys if isinstance(key, ast.Constant)
                         and isinstance(key.value, str) and key.value == 'browser']
-        self.assertFalse(browser_keys, 'browser device must be opt-in, not auto-registered')
+        self.assertTrue(browser_keys, 'cloud game (browser) device must stay registered')
+        patch_src = Path('src/device_selection_patch.py').read_text(encoding='utf-8')
+        self.assertIn("'windows': 0", patch_src)
+        self.assertIn("'browser': 1", patch_src)
+        self.assertIn("'adb': 2", patch_src)
 
 
 if __name__ == '__main__':

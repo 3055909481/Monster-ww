@@ -408,16 +408,16 @@ config = {
     # connection dialog for a much faster capture path.
     'adb': adb_config(),
     # 云游戏（需要 Win11 并安装 Chrome 或 Edge）。
-    # 默认不注册 browser 设备：框架只要看到这个键就会把云游戏加入设备列表，
-    # 首次启动/设备重刷时可能自动选中它，表现为"突然跳到云鸣潮登录"。
-    # 只有明确要用云游戏时才手动取消下面的注释；PC 鸣潮无需任何改动。
-    # 'browser': {
-    #     'url': 'https://mc.kurogames.com/cloud/#/',
-    #     'resolution': (1920, 1080),
-    #     'channels': ['msedge', 'chrome', 'chromium'],
-    #     'args': ['--webrtc-ip-handling-policy=default', '--force-color-profile=srgb'],
-    #     'nick': '云游戏(需要Win11并安装Chrome或Edge)',
-    # },
+    # 注册为可选设备，默认不会自动选中：device_selection_patch 把默认设备锁定
+    # 为 PC，只有用户在连接面板手动选择才会切到云鸣潮。设备顺序由该 patch
+    # 固定为 PC → 云鸣潮 → 安卓。
+    'browser': {
+        'url': 'https://mc.kurogames.com/cloud/#/',
+        'resolution': (1920, 1080),
+        'channels': ['msedge', 'chrome', 'chromium'],
+        'args': ['--webrtc-ip-handling-policy=default', '--force-color-profile=srgb'],
+        'nick': '云游戏(需要Win11并安装Chrome或Edge)',
+    },
     'window_size': {
         'width': 1200,
         'height': 800,
