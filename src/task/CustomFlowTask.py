@@ -178,6 +178,67 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
         self.log_info(self.tr('Logging in: {account}').format(
             account=display_account(account_key)))
         RoutineTask._login_target_account(self, account_key)
+        # 登录成功后自动学习"特征码 -> 账号"，以后在游戏内即可直接反查当前账号。
+        self._learn_feature_code(account_key)
+
+    def _read_feature_code(self):
+        """读取客户端右下角"特征码: NNN"；失败返回 None（静默降级）。"""
+        from src.task.account.FeatureCodeStore import extract_feature_code
+        try:
+            # 特征码固定在右下角一小块，缩小 OCR 区域降低误识别。
+            texts = self.ocr(x=0.55, y=0.88, to_x=1.0, to_y=1.0)
+            for box in reversed(texts):  # 特征码通常在最下面一行
+                code = extract_feature_code(box.name)
+                if code:
+                    return code
+        except Exception as error:
+            logger.debug('read feature code failed: %s', error)
+        return None
+
+    def _learn_feature_code(self, account_key):
+        """把当前客户端特征码关联到刚登录的账号。"""
+        from src.task.account.FeatureCodeStore import FeatureCodeStore
+        try:
+            code = self._read_feature_code()
+            if not code:
+                return None
+            store = FeatureCodeStore(self.executor.config_folder)
+            if store.learn(account_key, code):
+                self.log_info(self.tr('Feature code {code} linked to {account}').format(
+                    code=code, account=display_account(account_key)))
+            return code
+        except Exception as error:
+            logger.debug('learn feature code failed: %s', error)
+            return None
+
+    def _already_logged_in_as(self, account_key, server=None):
+        """当前大世界账号是否已经是目标账号（且服务器一致）。
+
+        特征码是账号唯一标识，游戏内右下角常驻显示，读它即可判断当前账号，
+        无需切回登录界面。返回 True 才跳过登录，判定条件保守：
+          * 必须能通过特征码反查到账号，且恰好等于目标账号；
+          * 账号 key 本身绑定服务器（国服数字 / 国际服邮箱），特征码反查
+            到目标账号即说明账号与服务器都对了，无需再比对 current_server
+            （工作流刚启动时它为 None，比对会导致该优化永远不生效）。
+        """
+        try:
+            current = self.current_account_by_feature()
+            return bool(current) and current == account_key
+        except Exception as error:
+            logger.debug('already-logged-in check failed: %s', error)
+            return False
+
+    def current_account_by_feature(self):
+        """在游戏内通过特征码反查当前账号 key；未关联或读取失败返回 None。"""
+        from src.task.account.FeatureCodeStore import FeatureCodeStore
+        try:
+            code = self._read_feature_code()
+            if not code:
+                return None
+            return FeatureCodeStore(self.executor.config_folder).account_for(code)
+        except Exception as error:
+            logger.debug('resolve account by feature code failed: %s', error)
+            return None
 
     def _ensure_account_list_visible(self, account_key):
         """确保登录页显示完整账号列表，而不是上次登录账号的直达界面。
@@ -403,6 +464,12 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
         return f'{entry_name}（{detail}）' if detail else entry_name
 
     def _run_step(self, step_id, params):
+        # 每步开始时用特征码反查当前账号（若已关联），写进 info 供监控页显示。
+        # 不每次都 OCR：只有登录/切号类步骤后账号才会变，且 OCR 有开销。
+        if step_id in ('login', 'switch_account', 'run_task'):
+            account = self.current_account_by_feature()
+            if account:
+                self.info_set('当前账号', display_account(account))
         self.log_info(self.tr('执行步骤：{params}').format(params=params))
         if step_id == 'start_game':
             self._start_client(params.get('服务器', SERVER_CN))
@@ -524,15 +591,26 @@ class CustomFlowTask(WWOneTimeTask, BaseCombatTask):
 
     def _login_step(self, params, from_game=False):
         server = params.get('服务器', SERVER_FOLLOW)
-        if server in (SERVER_CN, SERVER_GLOBAL):
-            self._apply_server(server)
-
         account_key = resolve_flow_account(params)
         if not account_key:
             raise ValueError(self.tr('登录步骤未指定账号；请选择已有账号或手动填写账号 key。'))
 
         state = self._game_state()
         self.log_info(self.tr('Login step detected game state: {state}').format(state=state))
+
+        # 优化：游戏已经在大世界、且特征码识别出的当前账号就是目标账号时，
+        # 无需切回登录界面重登——直接跳过本步执行后续任务。
+        # 典型场景：用户已手动登录好第一个账号，再启动多账号工作流。
+        if state == 'world' and self._already_logged_in_as(account_key, server):
+            self.log_info(self.tr('Already logged in as target account {account}; skipping login.').format(
+                account=display_account(account_key)))
+            self.info_set('当前账号', display_account(account_key))
+            return
+
+        # 确认需要登录：此时才应用目标服务器设置
+        if server in (SERVER_CN, SERVER_GLOBAL):
+            self._apply_server(server)
+
         if state == 'world':
             # Already inside the game with the previous account: go back to the
             # login screen, then pick the requested account explicitly.

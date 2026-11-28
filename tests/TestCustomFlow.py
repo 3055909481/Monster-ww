@@ -283,6 +283,33 @@ class TestFlowSteps(unittest.TestCase):
         self.assertIn("if state == 'world':", self.source)
         self.assertIn('self._switch_to_login()', self.source)
 
+    def test_skip_login_when_already_target_account(self):
+        """游戏已在大世界且特征码=目标账号时，跳过登录直接执行任务。"""
+        self.assertIn('def _already_logged_in_as(self, account_key, server=None):', self.source)
+        self.assertIn('if state == \'world\' and self._already_logged_in_as(account_key, server):',
+                      self.source)
+        self.assertIn('skipping login', self.source)
+        # 跳过判断必须发生在 _switch_to_login 之前，否则还是会切回登录界面
+        skip_pos = self.source.index('if state == \'world\' and self._already_logged_in_as')
+        switch_pos = self.source.index('self._switch_to_login()', self.source.index('def _login_step('))
+        self.assertLess(skip_pos, switch_pos)
+        # 判定基于特征码反查
+        self.assertIn('current = self.current_account_by_feature()', self.source)
+        self.assertIn('current == account_key', self.source)
+
+    def test_feature_code_learned_and_resolved(self):
+        """登录成功后学习特征码；游戏内可反查当前账号。"""
+        self.assertIn('from src.task.account.FeatureCodeStore import', self.source)
+        self.assertIn('def _read_feature_code(self):', self.source)
+        self.assertIn('def _learn_feature_code(self, account_key):', self.source)
+        self.assertIn('def current_account_by_feature(self):', self.source)
+        # 登录成功后学习
+        login = self.source.index('def _login_target_account(self, account_key):')
+        self.assertIn('self._learn_feature_code(account_key)',
+                      self.source[login:login + 400])
+        # 每步开始时反查并写入 info 供 UI 显示
+        self.assertIn("self.info_set('当前账号', display_account(account))", self.source)
+
     def test_login_shows_account_list_before_selecting(self):
         """登录前必须先确保账号列表可见，否则会卡在"上次登录账号"直达页。"""
         self.assertIn('def _ensure_account_list_visible(self, account_key):', self.source)

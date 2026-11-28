@@ -33,11 +33,11 @@ class TestFlowProgress(unittest.TestCase):
         self.labels, self.progress = _load_flow_progress()
 
     def test_no_task_returns_empty(self):
-        self.assertEqual((None, '', []), self.progress(None))
+        self.assertEqual((None, '', '', []), self.progress(None))
 
     def test_task_without_step_status_returns_empty(self):
         task = SimpleNamespace(info={'任务流': '默认流程'})
-        self.assertEqual((None, '', []), self.progress(task))
+        self.assertEqual((None, '', '', []), self.progress(task))
 
     def test_parses_step_status_rows(self):
         steps = [
@@ -48,9 +48,10 @@ class TestFlowProgress(unittest.TestCase):
         task = SimpleNamespace(info={
             '任务流': '默认流程', '当前步骤': '2/3 · 登录账号', '步骤状态': steps,
         })
-        name, current, rows = self.progress(task)
+        name, current, account, rows = self.progress(task)
         self.assertEqual('默认流程', name)
         self.assertEqual('2/3 · 登录账号', current)
+        self.assertEqual('', account)
         self.assertEqual(3, len(rows))
         self.assertEqual((1, '启动游戏（国服）', 'success', ''), rows[0])
         self.assertEqual(('pending', 'running', 'success'),
@@ -61,7 +62,7 @@ class TestFlowProgress(unittest.TestCase):
             'index': 5, 'label': '切号', 'status': 'failed', 'error': '账号未找到',
         }]
         task = SimpleNamespace(info={'步骤状态': steps})
-        _, _, rows = self.progress(task)
+        _, _, _, rows = self.progress(task)
         self.assertEqual('账号未找到', rows[0][3])
 
     def test_all_status_labels_present(self):

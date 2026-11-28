@@ -42,13 +42,14 @@ def _flow_progress(task):
     无步骤状态时返回 (None, '', [])；UI 据此隐藏进度面板。纯函数，便于测试。
     """
     if task is None:
-        return None, '', []
+        return None, '', '', []
     info = getattr(task, 'info', None) or {}
     steps = info.get('步骤状态')
     if not isinstance(steps, (list, tuple)) or not steps:
-        return None, '', []
+        return None, '', '', []
     flow_name = info.get('任务流') or ''
     current = info.get('当前步骤') or ''
+    account = info.get('当前账号') or ''
     rows = []
     for step in steps:
         if isinstance(step, dict):
@@ -58,7 +59,7 @@ def _flow_progress(task):
                 step.get('status', 'pending'),
                 step.get('error', '') or '',
             ))
-    return flow_name, current, rows
+    return flow_name, current, account, rows
 
 
 def _display_name(task):
@@ -292,15 +293,18 @@ class TaskMonitorTab(CustomTab):
                     flow_task = task
                     break
 
-        flow_name, current_label, rows = _flow_progress(flow_task)
+        flow_name, current_label, account, rows = _flow_progress(flow_task)
         visible = bool(rows)
         self.flow_header.setVisible(visible)
         self.flow_table.setVisible(visible)
         if not visible:
             return
 
-        self.flow_header.setText(self.tr('工作流进度：{name} · {cur}').format(
-            name=flow_name, cur=current_label))
+        title = self.tr('工作流进度：{name} · {cur}').format(
+            name=flow_name, cur=current_label)
+        if account:
+            title += self.tr(' · 账号 {account}').format(account=account)
+        self.flow_header.setText(title)
         self.flow_table.setRowCount(len(rows))
         for row, (index, label, status, error) in enumerate(rows):
             status_text = STATUS_LABELS.get(status, status)
